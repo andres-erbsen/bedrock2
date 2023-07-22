@@ -11,9 +11,38 @@ Require Export bedrock2.Memory.
 Require Import Coq.Lists.List.
 
 (* BW is not needed on the rhs, but helps infer width *)
-Definition trace{width: Z}{BW: Bitwidth width}{word: word.word width}{mem: map.map word byte} :=
+Definition oldtrace{width: Z}{BW: Bitwidth width}{word: word.word width}{mem: map.map word byte} :=
   list ((mem * String.string * list word) * (mem * list word)).
 
+(*match t : oldtrace with
+  | nil => output_to_explain = None
+  | (_, MMInput, [addr], (_, [value]))::trace =>
+    if (word.unsigned addr =? uart0_base + 0x004) && (word.unsigned (word.and value (word.of_Z (2 ^ 31))) =? 0)
+    then output_to_explain = Some value /\ spec trace None
+    else spec trace output_to_explain
+  | (_, MMOutput, [addr; value], (_, []))::trace => ( *) Compute (map.map (word.word 1) byte).
+Print map.map.
+
+Inductive event{width: Z}{BW: Bitwidth width}{word: word.word width}{mem: map.map word byte} :=
+| IOevent : mem (* memory state prior to ioevent occurring *) *
+              String.string (* type of event, e.g. input or output *) *
+              list word (* information about the ioevent that is known before it occurs
+                           - for an input event, the address from which the input will be read
+                           - for an output event, the address at which the output will be written,
+                             as well as the value to be written
+                         *) *
+              (mem (* memory state after ioevent occurs *) *
+                 list word (* information about the ioevent that isn't known until after it occurs
+                              - for an input event, the value which was read
+                              - for an output event, nothing
+                            *)
+              ) -> event
+| branch : bool -> event
+| read : word -> event
+| write : word -> event.
+
+Definition trace{width: Z}{BW: Bitwidth width}{word: word.word width}{mem: map.map word byte} := list event.
+                            
 Definition ExtSpec{width: Z}{BW: Bitwidth width}{word: word.word width}{mem: map.map word byte} :=
   (* Given a trace of what happened so far,
      the given-away memory, an action label and a list of function call arguments, *)
