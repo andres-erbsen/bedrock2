@@ -42,6 +42,7 @@ Inductive event{width: Z}{BW: Bitwidth width}{word: word.word width}{mem: map.ma
 | write : word -> event.
 
 Definition trace{width: Z}{BW: Bitwidth width}{word: word.word width}{mem: map.map word byte} := list event.
+Print access_size.access_size.
                             
 Definition ExtSpec{width: Z}{BW: Bitwidth width}{word: word.word width}{mem: map.map word byte} :=
   (* Given a trace of what happened so far,
@@ -120,39 +121,56 @@ Section semantics.
     Context (m : mem) (l : locals).
 
     Local Notation "' x <- a | y ; f" := (match a with x => f | _ => y end)
-      (right associativity, at level 70, x pattern).
-
-    Fixpoint eval_expr (e : expr) (mc : metrics) : option (word * metrics) :=
+                                           (right associativity, at level 70, x pattern). Print trace. Check expr.inlinetable.
+    Print access_size.access_size. Check expr.load.
+    Compute (expr.load access_size.one (expr.literal 5)).
+    Check expr.inlinetable. Print map.of_list_word.
+    Print load.
+    (* why does this need mc passed as an argument? can't we union two metrics? so we could just return the change in 
+       mc, rather than the total? this style does seem easier to work with. not a big deal anyway. *)
+    (* I guess I'll also pass the trace as an argument?  for consistency? *)
+    Fixpoint eval_expr (e : expr) (mc : metrics) (tr : trace) : option (word * metrics * trace) :=
       match e with
-      | expr.literal v => Some (word.of_Z v, addMetricInstructions 8
-                                             (addMetricLoads 8 mc))
+      | expr.literal v => Some (
+                              word.of_Z v,
+                              addMetricInstructions 8 (addMetricLoads 8 mc),
+                              tr)
       | expr.var x => match map.get l x with
-                      | Some v => Some (v, addMetricInstructions 1
-                                           (addMetricLoads 2 mc))
+                      | Some v => Some (
+                                      v,
+                                      addMetricInstructions 1 (addMetricLoads 2 mc),
+                                      tr)
                       | None => None
                       end
+      (* if i understand correctly, this thing does not access memory at all.
+         so no change to leakage trace. *)
       | expr.inlinetable aSize t index =>
-          'Some (index', mc') <- eval_expr index mc | None;
+          'Some (index', mc', tr') <- eval_expr index mc tr | None;
           'Some v <- load aSize (map.of_list_word t) index' | None;
-          Some (v, (addMetricInstructions 3
-                   (addMetricLoads 4
-                   (addMetricJumps 1 mc'))))
+          Some (
+              v,
+              (addMetricInstructions 3 (addMetricLoads 4 (addMetricJumps 1 mc'))),
+              tr')
       | expr.load aSize a =>
-          'Some (a', mc') <- eval_expr a mc | None;
+          'Some (a', mc', tr') <- eval_expr a mc tr | None;
           'Some v <- load aSize m a' | None;
-          Some (v, addMetricInstructions 1
-                   (addMetricLoads 2 mc'))
+          Some (
+              v,
+              addMetricInstructions 1 (addMetricLoads 2 mc'),
+              read a' :: tr')
       | expr.op op e1 e2 =>
-          'Some (v1, mc') <- eval_expr e1 mc | None;
-          'Some (v2, mc'') <- eval_expr e2 mc' | None;
-          Some (interp_binop op v1 v2, addMetricInstructions 2
-                                       (addMetricLoads 2 mc''))
+          'Some (v1, mc', tr') <- eval_expr e1 mc tr | None;
+          'Some (v2, mc'', tr'') <- eval_expr e2 mc' tr' | None;
+          Some (
+              interp_binop op v1 v2,
+              addMetricInstructions 2 (addMetricLoads 2 mc''),
+              tr'')
       | expr.ite c e1 e2 =>
-          'Some (vc, mc') <- eval_expr c mc | None;
-          eval_expr (if word.eqb vc (word.of_Z 0) then e2 else e1)
-                    (addMetricInstructions 2
-                       (addMetricLoads 2
-                       (addMetricJumps 1 mc')))
+          'Some (vc, mc', tr') <- eval_expr c mc tr | None;
+          eval_expr
+            (if word.eqb vc (word.of_Z 0) then e2 else e1)
+            (addMetricInstructions 2 (addMetricLoads 2 (addMetricJumps 1 mc')))
+            tr'
       end.
 
     Fixpoint eval_expr_old (e : expr) : option word :=
@@ -172,15 +190,15 @@ Section semantics.
       | expr.ite c e1 e2 =>
           'Some vc <- eval_expr_old c | None;
           eval_expr_old (if word.eqb vc (word.of_Z 0) then e2 else e1)
-      end.
+    end.
 
-    Fixpoint evaluate_call_args_log (arges : list expr) (mc : metrics) :=
+    Fixpoint evaluate_call_args_log (arges : list expr) (mc : metrics) (tr : trace) :=
       match arges with
       | e :: tl =>
-        'Some (v, mc') <- eval_expr e mc | None;
-        'Some (args, mc'') <- evaluate_call_args_log tl mc' | None;
-        Some (v :: args, mc'')
-      | _ => Some (nil, mc)
+        'Some (v, mc', tr') <- eval_expr e mc tr | None;
+        'Some (args, mc'', tr'') <- evaluate_call_args_log tl mc' tr' | None;
+        Some (v :: args, mc'', tr'')
+      | _ => Some (nil, mc, tr)
       end.
 
   End WithMemAndLocals.
@@ -196,6 +214,9 @@ Module exec. Section WithEnv.
   Local Notation metrics := MetricLog.
 
   Implicit Types post : trace -> mem -> locals -> metrics -> Prop. (* COQBUG(unification finds Type instead of Prop and fails to downgrade *)
+  Print cmd.cmd. Print trace. Print event. Check cmd.store.
+  Compute (cmd.store access_size.one (expr.literal 5) (expr.literal 5)). Print anybytes. Print ftprint.
+  Print List.unfoldn. Print map.split. Print ext_spec.
   Inductive exec :
     cmd -> trace -> mem -> locals -> metrics ->
     (trace -> mem -> locals -> metrics -> Prop) -> Prop :=
@@ -205,8 +226,8 @@ Module exec. Section WithEnv.
     : exec cmd.skip t m l mc post
   | set x e
     t m l mc post
-    v mc' (_ : eval_expr m l e mc = Some (v, mc'))
-    (_ : post t m (map.put l x v) (addMetricInstructions 1
+    v mc' t' (_ : eval_expr m l e mc t = Some (v, mc', t'))
+    (_ : post t' m (map.put l x v) (addMetricInstructions 1
                                   (addMetricLoads 1 mc')))
     : exec (cmd.set x e) t m l mc post
   | unset x
@@ -215,12 +236,12 @@ Module exec. Section WithEnv.
     : exec (cmd.unset x) t m l mc post
   | store sz ea ev
     t m l mc post
-    a mc' (_ : eval_expr m l ea mc = Some (a, mc'))
-    v mc'' (_ : eval_expr m l ev mc' = Some (v, mc''))
+    a mc' t' (_ : eval_expr m l ea mc t = Some (a, mc', t'))
+    v mc'' t'' (_ : eval_expr m l ev mc' t' = Some (v, mc'', t''))
     m' (_ : store sz m a v = Some m')
-    (_ : post t m' l (addMetricInstructions 1
-                     (addMetricLoads 1
-                     (addMetricStores 1 mc''))))
+    (_ : post (write a :: t'') m' l (addMetricInstructions 1
+                                       (addMetricLoads 1
+                                          (addMetricStores 1 mc''))))
     : exec (cmd.store sz ea ev) t m l mc post
   | stackalloc x n body
     t mSmall l mc post
@@ -236,19 +257,19 @@ Module exec. Section WithEnv.
               post t' mSmall' l' mc'))
      : exec (cmd.stackalloc x n body) t mSmall l mc post
   | if_true t m l mc e c1 c2 post
-    v mc' (_ : eval_expr m l e mc = Some (v, mc'))
+    v mc' t' (_ : eval_expr m l e mc t = Some (v, mc', t'))
     (_ : word.unsigned v <> 0)
-    (_ : exec c1 t m l (addMetricInstructions 2
-                       (addMetricLoads 2
-                       (addMetricJumps 1 mc'))) post)
+    (_ : exec c1 t' m l (addMetricInstructions 2
+                           (addMetricLoads 2
+                              (addMetricJumps 1 mc'))) post)
     : exec (cmd.cond e c1 c2) t m l mc post
   | if_false e c1 c2
     t m l mc post
-    v mc' (_ : eval_expr m l e mc = Some (v, mc'))
+    v mc' t' (_ : eval_expr m l e mc t = Some (v, mc', t'))
     (_ : word.unsigned v = 0)
-    (_ : exec c2 t m l (addMetricInstructions 2
-                       (addMetricLoads 2
-                       (addMetricJumps 1 mc'))) post)
+    (_ : exec c2 t' m l (addMetricInstructions 2
+                           (addMetricLoads 2
+                              (addMetricJumps 1 mc'))) post)
     : exec (cmd.cond e c1 c2) t m l mc post
   | seq c1 c2
     t m l mc post
@@ -257,42 +278,43 @@ Module exec. Section WithEnv.
     : exec (cmd.seq c1 c2) t m l mc post
   | while_false e c
     t m l mc post
-    v mc' (_ : eval_expr m l e mc = Some (v, mc'))
+    v mc' t' (_ : eval_expr m l e mc t = Some (v, mc', t'))
     (_ : word.unsigned v = 0)
-    (_ : post t m l (addMetricInstructions 1
-                    (addMetricLoads 1
-                    (addMetricJumps 1 mc'))))
+    (_ : post t' m l (addMetricInstructions 1
+                        (addMetricLoads 1
+                           (addMetricJumps 1 mc'))))
     : exec (cmd.while e c) t m l mc post
   | while_true e c
       t m l mc post
-      v mc' (_ : eval_expr m l e mc = Some (v, mc'))
+      v mc' t' (_ : eval_expr m l e mc t = Some (v, mc', t'))
       (_ : word.unsigned v <> 0)
-      mid (_ : exec c t m l mc' mid)
-      (_ : forall t' m' l' mc'', mid t' m' l' mc'' ->
-                                 exec (cmd.while e c) t' m' l' (addMetricInstructions 2
-                                                               (addMetricLoads 2
-                                                               (addMetricJumps 1 mc''))) post)
+      mid (_ : exec c t' m l mc' mid)
+      (_ : forall t'' m' l' mc'', mid t'' m' l' mc'' ->
+                                 exec (cmd.while e c) t'' m' l' (addMetricInstructions 2
+                                                                   (addMetricLoads 2
+                                                                      (addMetricJumps 1 mc''))) post)
     : exec (cmd.while e c) t m l mc post
   | call binds fname arges
       t m l mc post
       params rets fbody (_ : map.get e fname = Some (params, rets, fbody))
-      args mc' (_ : evaluate_call_args_log m l arges mc = Some (args, mc'))
+      args mc' t' (_ : evaluate_call_args_log m l arges mc t = Some (args, mc', t'))
       lf (_ : map.of_list_zip params args = Some lf)
-      mid (_ : exec fbody t m lf (addMetricInstructions 100 (addMetricJumps 100 (addMetricLoads 100 (addMetricStores 100 mc')))) mid)
-      (_ : forall t' m' st1 mc'', mid t' m' st1 mc'' ->
+      mid (_ : exec fbody t' m lf (addMetricInstructions 100 (addMetricJumps 100 (addMetricLoads 100 (addMetricStores 100 mc')))) mid)
+      (_ : forall t'' m' st1 mc'', mid t' m' st1 mc'' ->
           exists retvs, map.getmany_of_list st1 rets = Some retvs /\
           exists l', map.putmany_of_list_zip binds retvs l = Some l' /\
-          post t' m' l'  (addMetricInstructions 100 (addMetricJumps 100 (addMetricLoads 100 (addMetricStores 100 mc'')))))
+          post t'' m' l'  (addMetricInstructions 100 (addMetricJumps 100 (addMetricLoads 100 (addMetricStores 100 mc'')))))
     : exec (cmd.call binds fname arges) t m l mc post
   | interact binds action arges
       t m l mc post
       mKeep mGive (_: map.split m mKeep mGive)
-      args mc' (_ :  evaluate_call_args_log m l arges mc = Some (args, mc'))
-      mid (_ : ext_spec t mGive action args mid)
+      args mc' t' (_ :  evaluate_call_args_log m l arges mc t = Some (args, mc', t'))
+      (* continue here - I haven't edited anything under here - i guess this is some io stuff. *)
+      mid (_ : ext_spec t' mGive action args mid)
       (_ : forall mReceive resvals, mid mReceive resvals ->
           exists l', map.putmany_of_list_zip binds resvals l = Some l' /\
           forall m', map.split m' mKeep mReceive ->
-          post (cons ((mGive, action, args), (mReceive, resvals)) t) m' l'
+          post (IOevent ((mGive, action, args), (mReceive, resvals)) :: t') m' l'
             (addMetricInstructions 1
             (addMetricStores 1
             (addMetricLoads 2 mc'))))
@@ -335,17 +357,18 @@ Module exec. Section WithEnv.
       match goal with
       | H: exec _ _ _ _ _ _ |- _ => inversion H; subst; clear H
       end;
-      try match goal with
+      (*try match goal with
       | H1: ?e = Some (?x1, ?y1, ?z1), H2: ?e = Some (?x2, ?y2, ?z2) |- _ =>
         replace x2 with x1 in * by congruence;
           replace y2 with y1 in * by congruence;
           replace z2 with z1 in * by congruence;
           clear x2 y2 z2 H2
-      end;
+      end;*)
       repeat match goal with
-             | H1: ?e = Some (?v1, ?mc1), H2: ?e = Some (?v2, ?mc2) |- _ =>
+             | H1: ?e = Some (?v1, ?mc1, ?t1), H2: ?e = Some (?v2, ?mc2, ?t2) |- _ =>
                replace v2 with v1 in * by congruence;
-               replace mc2 with mc1 in * by congruence; clear H2
+               replace mc2 with mc1 in * by congruence;
+               replace t2 with t1 in * by congruence; clear v2 mc2 t2 H2
              end;
       repeat match goal with
              | H1: ?e = Some ?v1, H2: ?e = Some ?v2 |- _ =>
