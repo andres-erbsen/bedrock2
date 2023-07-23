@@ -38,8 +38,8 @@ Inductive event{width: Z}{BW: Bitwidth width}{word: word.word width}{mem: map.ma
                             *)
               ) -> event
 | branch : bool -> event
-| read : word -> event
-| write : word -> event.
+| read : access_size -> word -> event
+| write : access_size -> word -> event.
 
 Definition trace{width: Z}{BW: Bitwidth width}{word: word.word width}{mem: map.map word byte} := list event.
 Print access_size.access_size.
@@ -157,7 +157,7 @@ Section semantics.
           Some (
               v,
               addMetricInstructions 1 (addMetricLoads 2 mc'),
-              read a' :: tr')
+              read aSize a' :: tr')
       | expr.op op e1 e2 =>
           'Some (v1, mc', tr') <- eval_expr e1 mc tr | None;
           'Some (v2, mc'', tr'') <- eval_expr e2 mc' tr' | None;
@@ -239,7 +239,7 @@ Module exec. Section WithEnv.
     a mc' t' (_ : eval_expr m l ea mc t = Some (a, mc', t'))
     v mc'' t'' (_ : eval_expr m l ev mc' t' = Some (v, mc'', t''))
     m' (_ : store sz m a v = Some m')
-    (_ : post (write a :: t'') m' l (addMetricInstructions 1
+    (_ : post (write sz a :: t'') m' l (addMetricInstructions 1
                                        (addMetricLoads 1
                                           (addMetricStores 1 mc''))))
     : exec (cmd.store sz ea ev) t m l mc post
@@ -259,17 +259,17 @@ Module exec. Section WithEnv.
   | if_true t m l mc e c1 c2 post
     v mc' t' (_ : eval_expr m l e mc t = Some (v, mc', t'))
     (_ : word.unsigned v <> 0)
-    (_ : exec c1 t' m l (addMetricInstructions 2
-                           (addMetricLoads 2
-                              (addMetricJumps 1 mc'))) post)
+    (_ : exec c1 (branch true :: t') m l (addMetricInstructions 2
+                                            (addMetricLoads 2
+                                               (addMetricJumps 1 mc'))) post)
     : exec (cmd.cond e c1 c2) t m l mc post
   | if_false e c1 c2
     t m l mc post
     v mc' t' (_ : eval_expr m l e mc t = Some (v, mc', t'))
     (_ : word.unsigned v = 0)
-    (_ : exec c2 t' m l (addMetricInstructions 2
-                           (addMetricLoads 2
-                              (addMetricJumps 1 mc'))) post)
+    (_ : exec c2 (branch false :: t') m l (addMetricInstructions 2
+                                             (addMetricLoads 2
+                                                (addMetricJumps 1 mc'))) post)
     : exec (cmd.cond e c1 c2) t m l mc post
   | seq c1 c2
     t m l mc post
@@ -280,19 +280,21 @@ Module exec. Section WithEnv.
     t m l mc post
     v mc' t' (_ : eval_expr m l e mc t = Some (v, mc', t'))
     (_ : word.unsigned v = 0)
-    (_ : post t' m l (addMetricInstructions 1
-                        (addMetricLoads 1
-                           (addMetricJumps 1 mc'))))
+    (_ : post (branch false :: t') m l (addMetricInstructions 1
+                                          (addMetricLoads 1
+                                             (addMetricJumps 1 mc'))))
     : exec (cmd.while e c) t m l mc post
   | while_true e c
       t m l mc post
       v mc' t' (_ : eval_expr m l e mc t = Some (v, mc', t'))
       (_ : word.unsigned v <> 0)
-      mid (_ : exec c t' m l mc' mid)
+      mid (_ : exec c (branch true :: t') m l (addMetricInstructions 2
+                                                 (addMetricLoads 2
+                                                    (addMetricJumps 1 mc'))) mid)
       (_ : forall t'' m' l' mc'', mid t'' m' l' mc'' ->
-                                 exec (cmd.while e c) t'' m' l' (addMetricInstructions 2
+                                 exec (cmd.while e c) t'' m' l' (*(addMetricInstructions 2
                                                                    (addMetricLoads 2
-                                                                      (addMetricJumps 1 mc''))) post)
+                                                                      (addMetricJumps 1*) mc''(* )))*) post)
     : exec (cmd.while e c) t m l mc post
   | call binds fname arges
       t m l mc post
@@ -309,7 +311,6 @@ Module exec. Section WithEnv.
       t m l mc post
       mKeep mGive (_: map.split m mKeep mGive)
       args mc' t' (_ :  evaluate_call_args_log m l arges mc t = Some (args, mc', t'))
-      (* continue here - I haven't edited anything under here - i guess this is some io stuff. *)
       mid (_ : ext_spec t' mGive action args mid)
       (_ : forall mReceive resvals, mid mReceive resvals ->
           exists l', map.putmany_of_list_zip binds resvals l = Some l' /\
@@ -357,13 +358,6 @@ Module exec. Section WithEnv.
       match goal with
       | H: exec _ _ _ _ _ _ |- _ => inversion H; subst; clear H
       end;
-      (*try match goal with
-      | H1: ?e = Some (?x1, ?y1, ?z1), H2: ?e = Some (?x2, ?y2, ?z2) |- _ =>
-        replace x2 with x1 in * by congruence;
-          replace y2 with y1 in * by congruence;
-          replace z2 with z1 in * by congruence;
-          clear x2 y2 z2 H2
-      end;*)
       repeat match goal with
              | H1: ?e = Some (?v1, ?mc1, ?t1), H2: ?e = Some (?v2, ?mc2, ?t2) |- _ =>
                replace v2 with v1 in * by congruence;
