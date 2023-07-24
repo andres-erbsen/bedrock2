@@ -9,40 +9,42 @@ Section WeakestPrecondition.
   Context {ext_spec: ExtSpec}.
   Implicit Types (t : trace) (m : mem) (l : locals).
 
+  (* is there a better way to include trace in postcondition? easier to work with? *)
   Definition literal v (post : word -> Prop) : Prop :=
     dlet! v := word.of_Z v in post v.
   Definition get (l : locals) (x : String.string) (post : word -> Prop) : Prop :=
     exists v, map.get l x = Some v /\ post v.
-  Definition load s m a (post : _ -> Prop) : Prop :=
+  Definition load s m a (post : word -> Prop) : Prop :=
     exists v, load s m a = Some v /\ post v.
-  Definition store sz m a v post :=
+  Definition store sz m a v (post : mem -> Prop) : Prop :=
     exists m', store sz m a v = Some m' /\ post m'.
 
   Section WithMemAndLocals.
     Context (m : mem) (l : locals).
-    Definition expr_body rec (e : Syntax.expr) (post : word -> Prop) : Prop :=
+    Definition expr_body rec (e : Syntax.expr) (post : trace -> word -> Prop) : Prop :=
       match e with
       | expr.literal v =>
-        literal v post
+        literal v (post nil)
       | expr.var x =>
-        get l x post
+        get l x (post nil)
       | expr.op op e1 e2 =>
-        rec e1 (fun v1 =>
-        rec e2 (fun v2 =>
-        post (interp_binop op v1 v2)))
+        rec e1 (fun t1 v1 =>
+        rec e2 (fun t2 v2 =>
+        post (app t2 t1) (interp_binop op v1 v2)))
       | expr.load s e =>
-        rec e (fun a =>
-        load s m a post)
-      | expr.inlinetable s t e =>
-        rec e (fun a =>
-        load s (map.of_list_word t) a post)
+        rec e (fun t a =>
+        load s m a (post (cons (read s a) t)))
+      | expr.inlinetable s tbl e =>
+        rec e (fun t a =>
+        load s (map.of_list_word tbl) a (post t))
       | expr.ite c e1 e2 =>
-        rec c (fun b => rec (if word.eqb b (word.of_Z 0) then e2 else e1) post)
+        rec c (fun t1 b => rec (if word.eqb b (word.of_Z 0) then e2 else e1) (fun t2 v =>
+        post (app t2 t1) v))
     end.
     Fixpoint expr e := expr_body expr e.
   End WithMemAndLocals.
 
-  Section WithF.
+   Section WithF.
     Context {A B} (f: A -> (B -> Prop) -> Prop).
     Definition list_map_body rec (xs : list A) (post : list B -> Prop) : Prop :=
       match xs with
@@ -53,29 +55,42 @@ Section WeakestPrecondition.
         post (cons y ys')))
       end.
     Fixpoint list_map xs := list_map_body list_map xs.
-  End WithF.
+   End WithF.
 
+  Section WithF2.
+    Context {A B C} (f: A -> (B -> C -> Prop) -> Prop).
+    Definition list_map2_body rec (xs : list A) (post : list B -> list C -> Prop) : Prop :=
+      match xs with
+      | nil => post nil nil
+      | cons x xs' =>
+        f x (fun y z =>
+        rec xs' (fun ys' zs' =>
+        post (cons y ys') (cons z zs')))
+      end.
+    Fixpoint list_map2 xs := list_map2_body list_map2 xs.
+  End WithF2.
+  
   Section WithFunctions.
     Context (call : String.string -> trace -> mem -> list word -> (trace -> mem -> list word -> Prop) -> Prop).
-    Definition dexpr m l e v := expr m l e (eq v).
-    Definition dexprs m l es vs := list_map (expr m l) es (eq vs).
+    Definition dexpr m l e v t := expr m l e (fun t' v' => eq t t' /\ eq v v'). Check dexpr.
+    Definition dexprs m l es vs ts := list_map2 (expr m l) es (fun ts' vs' => eq ts ts' /\ eq vs vs'). Check dexprs. Check expr.
     Definition cmd_body (rec:_->_->_->_->_->Prop) (c : cmd) (t : trace) (m : mem) (l : locals)
              (post : trace -> mem -> locals -> Prop) : Prop :=
       (* give value of each pure expression when stating its subproof *)
       match c with
       | cmd.skip => post t m l
       | cmd.set x ev =>
-        exists v, dexpr m l ev v /\
+        exists v tv, dexpr m l ev v tv /\
         dlet! l := map.put l x v in
-        post t m l
+        post (app tv t) m l
       | cmd.unset x =>
         dlet! l := map.remove l x in
         post t m l
       | cmd.store sz ea ev =>
-        exists a, dexpr m l ea a /\
-        exists v, dexpr m l ev v /\
+        exists a ta, dexpr m l ea a ta /\
+        exists v tv, dexpr m l ev v tv /\
         store sz m a v (fun m =>
-        post t m l)
+        post (cons (write sz a) (app tv (app ta t))) m l)
       | cmd.stackalloc x n c =>
         Z.modulo n (bytes_per_word width) = 0 /\
         forall a mStack mCombined,
@@ -86,9 +101,9 @@ Section WeakestPrecondition.
           anybytes a n mStack' /\ map.split mCombined' m' mStack' /\
           post t' m' l')
       | cmd.cond br ct cf =>
-        exists v, dexpr m l br v /\
-        (word.unsigned v <> 0%Z -> rec ct t m l post) /\
-        (word.unsigned v = 0%Z -> rec cf t m l post)
+        exists v tv, dexpr m l br v tv /\
+        (word.unsigned v <> 0%Z -> rec ct (cons (branch true) (app tv t)) m l post) /\
+        (word.unsigned v = 0%Z -> rec cf (cons (branch false) (app tv t)) m l post)
       | cmd.seq c1 c2 =>
         rec c1 t m l (fun t m l => rec c2 t m l post)
       | cmd.while e c =>
@@ -96,22 +111,22 @@ Section WeakestPrecondition.
         Coq.Init.Wf.well_founded lt /\
         (exists v, inv v t m l) /\
         (forall v t m l, inv v t m l ->
-          exists b, dexpr m l e b /\
-          (word.unsigned b <> 0%Z -> rec c t m l (fun t' m l =>
+          exists b tb, dexpr m l e b tb /\
+          (word.unsigned b <> 0%Z -> rec c (cons (branch true) (app tb t)) m l (fun t' m l =>
             exists v', inv v' t' m l /\ lt v' v)) /\
-          (word.unsigned b = 0%Z -> post t m l))
+          (word.unsigned b = 0%Z -> post (cons (branch false) (app tb t)) m l))
       | cmd.call binds fname arges =>
-        exists args, dexprs m l arges args /\
-        call fname t m args (fun t m rets =>
+        exists args targs, dexprs m l arges args targs /\ (* (call : String.string -> trace -> mem -> list word -> (trace -> mem -> list word -> Prop) -> Prop) *)
+        call fname (app (List.concat (List.rev targs)) t) m args (fun t m rets =>
           exists l', map.putmany_of_list_zip binds rets l = Some l' /\
           post t m l')
       | cmd.interact binds action arges =>
-        exists args, dexprs m l arges args /\
+        exists args targs, dexprs m l arges args targs /\
         exists mKeep mGive, map.split m mKeep mGive /\
-        ext_spec t mGive action args (fun mReceive rets =>
+        ext_spec (app (List.concat (List.rev targs)) t) mGive action args (fun mReceive rets =>
           exists l', map.putmany_of_list_zip binds rets l = Some l' /\
           forall m', map.split m' mKeep mReceive ->
-          post (cons ((mGive, action, args), (mReceive, rets)) t) m' l')
+          post (cons (IOevent ((mGive, action, args), (mReceive, rets))) (app (List.concat (List.rev targs)) t)) m' l')
       end.
     Fixpoint cmd c := cmd_body cmd c.
   End WithFunctions.
@@ -132,11 +147,11 @@ Section WeakestPrecondition.
       then func (rec functions) decl t m args post
       else rec functions fname t m args post
     end.
-  Fixpoint call functions := call_body call functions.
+  Fixpoint call functions := call_body call functions. Check func.
 
   Definition program funcs main t m l post : Prop := cmd (call funcs) main t m l post.
 End WeakestPrecondition.
-
+Check cmd.
 Ltac unfold1_cmd e :=
   lazymatch e with
     @cmd ?width ?BW ?word ?mem ?locals ?ext_spec ?CA ?c ?t ?m ?l ?post =>
