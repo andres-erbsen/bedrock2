@@ -34,6 +34,7 @@ Section WeakestPrecondition.
 
   (* we prove weakening lemmas for all WP definitions in a syntax-directed fashion,
    * moving from postcondition towards precondition one logical connective at a time. *)
+  Print pointwise_relation. Locate "==>". Print respectful. Print pointwise_relation. Compute (pointwise_relation _ Basics.impl). Compute ((pointwise_relation _ Basics.impl) ==> Basics.impl)%signature. Print Proper. Compute (pointwise_relation _ ((pointwise_relation _ Basics.impl) ==> Basics.impl)).
   Global Instance Proper_literal : Proper (pointwise_relation _ ((pointwise_relation _ Basics.impl) ==> Basics.impl)) WeakestPrecondition.literal.
   Proof using. clear. cbv [WeakestPrecondition.literal]; cbv [Proper respectful pointwise_relation Basics.impl dlet.dlet]. eauto. Qed.
 
@@ -45,22 +46,37 @@ Section WeakestPrecondition.
 
   Global Instance Proper_store : Proper (pointwise_relation _ (pointwise_relation _ (pointwise_relation _ (pointwise_relation _ ((pointwise_relation _ Basics.impl) ==> Basics.impl))))) WeakestPrecondition.store.
   Proof using. clear. cbv [WeakestPrecondition.store]; cbv [Proper respectful pointwise_relation Basics.impl]; intros * ? (?&?&?); eauto. Qed.
+  Print Proper.
+  (* Proper = let U := Type in fun (A : U) (R : Relation_Definitions.relation A) (m : A) => R m m *) 
+  Check Proper. Print Proper. Check WeakestPrecondition.expr. Print pointwise_relation.
+  Compute (pointwise_relation _ Basics.impl).
+  Compute (Proper (pointwise_relation _ (pointwise_relation _ Basics.impl))).  
 
-  Global Instance Proper_expr : Proper (pointwise_relation _ (pointwise_relation _ (pointwise_relation _ ((pointwise_relation _ Basics.impl) ==> Basics.impl)))) WeakestPrecondition.expr.
+  Global Instance Proper_expr : Proper (pointwise_relation _ (pointwise_relation _ (pointwise_relation _ ((pointwise_relation _ (pointwise_relation _ Basics.impl) ==> Basics.impl))))) WeakestPrecondition.expr.
   Proof using.
     clear.
     cbv [Proper respectful pointwise_relation Basics.impl]; ind_on Syntax.expr.expr;
       cbn in *; intuition (try typeclasses eauto with core).
-    { eapply Proper_literal; eauto. }
-    { eapply Proper_get; eauto. }
-    { eapply IHa1; eauto; intuition idtac. eapply Proper_load; eauto using Proper_load. }
-    { eapply IHa1; eauto; intuition idtac. eapply Proper_load; eauto using Proper_load. }
-    { eapply IHa1_1; eauto; intuition idtac.
-      Tactics.destruct_one_match; eauto using Proper_load. }
+    { eapply Proper_literal; eauto. cbv [pointwise_relation Basics.impl]. auto. }
+    { eapply Proper_get; eauto. cbv [pointwise_relation Basics.impl]. auto. }
+    { eapply IHa1; eauto; intuition idtac. eapply Proper_load; eauto using Proper_load. cbv [pointwise_relation Basics.impl]. auto. }
+    { eapply IHa1; eauto; intuition idtac. eapply Proper_load; eauto using Proper_load. cbv [pointwise_relation Basics.impl]. auto. }
+    { eapply IHa1_1; eauto; intuition idtac. eapply IHa1_2; eauto. auto. }
+    { eapply IHa1_1; eauto; intuition idtac. Tactics.destruct_one_match; eauto using Proper_load.
+      - eapply IHa1_3; eauto. auto.
+      - eapply IHa1_2; eauto. auto. }
   Qed.
 
   Global Instance Proper_list_map {A B} :
     Proper ((pointwise_relation _ (pointwise_relation _ Basics.impl ==> Basics.impl)) ==> pointwise_relation _ (pointwise_relation _ Basics.impl ==> Basics.impl)) (WeakestPrecondition.list_map (A:=A) (B:=B)).
+  Proof using.
+    clear.
+    cbv [Proper respectful pointwise_relation Basics.impl]; ind_on (list A);
+      cbn in *; intuition (try typeclasses eauto with core).
+  Qed.
+
+  Global Instance Proper_list_map2 {A B C} :
+    Proper ((pointwise_relation _ (pointwise_relation _ (pointwise_relation _ Basics.impl) ==> Basics.impl)) ==> pointwise_relation _ (pointwise_relation _ (pointwise_relation _ Basics.impl) ==> Basics.impl)) (WeakestPrecondition.list_map2 (A:=A) (B:=B) (C:=C)).
   Proof using.
     clear.
     cbv [Proper respectful pointwise_relation Basics.impl]; ind_on (list A);
@@ -84,25 +100,21 @@ Section WeakestPrecondition.
   Proof using env_ok ext_spec_ok locals_ok mem_ok word_ok.
     cbv [Proper respectful pointwise_relation Basics.flip Basics.impl]; ind_on Syntax.cmd.cmd;
       cbn in *; cbv [dlet.dlet] in *; intuition (try typeclasses eauto with core).
-    { destruct H1 as (?&?&?). eexists. split.
-      1: eapply Proper_expr.
+    { destruct H1 as (?&?&?&?). eexists. eexists. split. Print WeakestPrecondition.cmd_body.
+      1: eapply Proper_expr; eauto.
       1: cbv [pointwise_relation Basics.impl]; intuition eauto 2.
-      all: eauto. }
-    { destruct H1 as (?&?&?). eexists. split.
-      { eapply Proper_expr.
-        { cbv [pointwise_relation Basics.impl]; intuition eauto 2. }
-        { eauto. } }
-      { destruct H2 as (?&?&?). eexists. split.
-        { eapply Proper_expr.
-          { cbv [pointwise_relation Basics.impl]; intuition eauto 2. }
-          { eauto. } }
+      auto. }
+    { destruct H1 as (?&?&?&?). eexists. eexists. split.
+      { eapply Proper_expr; eauto; cbv [pointwise_relation Basics.impl]; eauto. }
+      { destruct H2 as (?&?&?&?). eexists. eexists. split.
+        { eapply Proper_expr; eauto; cbv [pointwise_relation Basics.impl]; eauto. }
         { eapply Proper_store; eauto; cbv [pointwise_relation Basics.impl]; eauto. } } }
     { eapply H1; [ | | eapply H3; eassumption ].
       2 : intros ? ? ? (?&?&?&?&?). all : eauto 7. }
-    { destruct H1 as (?&?&?). eexists. split.
-      { eapply Proper_expr.
-        { cbv [pointwise_relation Basics.impl]; intuition eauto 2. }
-        { eauto. } }
+    { destruct H1 as (?&?&?&?). eexists. eexists. split.
+      (* some of these eautos could be replaced by 'intuition eauto 2', or something. 
+         does it matter? i think eauto is weaker, so probably better to use it. *)
+      { eapply Proper_expr; eauto; cbv [pointwise_relation Basics.impl]; eauto. }
       { intuition eauto 6. } }
     { destruct H1 as (?&?&?&?&?&HH).
       eassumption || eexists.
@@ -112,23 +124,23 @@ Section WeakestPrecondition.
       eassumption || eexists. { eassumption || eexists. }
       intros X Y Z T W.
       specialize (HH X Y Z T W).
-      destruct HH as (?&?&?). eexists. split.
-      1: eapply Proper_expr.
+      destruct HH as (?&?&?&?). eexists. eexists. split.
+      1: eapply Proper_expr; eauto.
       1: cbv [pointwise_relation Basics.impl].
       all:intuition eauto 2.
       - eapply H2; eauto; cbn; intros.
         match goal with H:_ |- _ => destruct H as (?&?&?); solve[eauto] end.
       - intuition eauto. }
-    { destruct H1 as (?&?&?). eexists. split.
-      { eapply Proper_list_map; eauto; try exact H4; cbv [respectful pointwise_relation Basics.impl]; intuition eauto 2.
+    { destruct H1 as (?&?&?&?). eexists. eexists. split.
+      { eapply Proper_list_map2; eauto; try exact H4; cbv [respectful pointwise_relation Basics.impl]; intuition eauto 2.
         eapply Proper_expr; eauto. }
       { eapply H. 2: eauto.
         (* COQBUG (performance), measured in Coq 8.9:
            "firstorder eauto" works, but takes ~100s and increases memory usage by 1.8GB.
            On the other hand, the line below takes just 5ms *)
         cbv beta; intros ? ? ? (?&?&?); eauto. } }
-    { destruct H1 as (?&?&?). eexists. split.
-      { eapply Proper_list_map; eauto; try exact H4; cbv [respectful pointwise_relation Basics.impl].
+    { destruct H1 as (?&?&?&?). eexists. eexists. split.
+      { eapply Proper_list_map2; eauto; try exact H4; cbv [respectful pointwise_relation Basics.impl].
         { eapply Proper_expr; eauto. }
         { eauto. } }
       { destruct H2 as (mKeep & mGive & ? & ?).
