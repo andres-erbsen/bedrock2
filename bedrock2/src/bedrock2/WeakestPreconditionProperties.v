@@ -10,6 +10,27 @@ Section WeakestPrecondition.
   Context {env: map.map String.string (list String.string * list String.string * Syntax.cmd)}.
   Context {ext_spec: Semantics.ExtSpec}.
 
+  Ltac ind_on_with_trace X t :=
+    intros;
+    (* Note: Comment below dates from when we were using a parameter record p *)
+    (* Note: "before p" means actually "after p" when reading from top to bottom, because,
+       as the manual points out, "before" and "after" are with respect to the direction of
+       the move, and we're moving hypotheses upwards here.
+       We need to make sure not to revert/clear p, because the other lemmas depend on it.
+       If we still reverted/cleared p, we'd get errors like
+       "Error: Proper_load depends on the variable p which is not declared in the context."
+       when trying to use Proper_load, or, due to COQBUG https://github.com/coq/coq/issues/11487,
+       we'd get a typechecking failure at Qed time. *)
+    repeat match goal with x : ?T |- _ => first
+       [ constr_eq T X; move x before ext_spec
+       | constr_eq T X; move x before env
+       | constr_eq T X; move x before locals
+       | constr_eq T X; move x at top
+       | revert x ];
+       try move t before x end;
+    match goal with x : X |- _ => induction x end;
+    intros.
+
   Ltac ind_on X :=
     intros;
     (* Note: Comment below dates from when we were using a parameter record p *)
@@ -216,16 +237,18 @@ Section WeakestPrecondition.
     solve [typeclasses eauto with core].
   Qed.
 
-  Ltac t :=
-      repeat match goal with
-             | |- forall _, _ => progress intros
-             | H: exists _, _ |- _ => destruct H
-             | H: and _ _ |- _ => destruct H
-             | H: eq _ ?y |- _ => subst y
-             | H: False |- _ => destruct H
-             | _ => progress cbn in *
-             | _ => progress cbv [dlet.dlet WeakestPrecondition.dexpr WeakestPrecondition.dexprs WeakestPrecondition.store] in *
-             end; eauto. 
+  Ltac step_t :=
+    match goal with
+    | |- forall _, _ => progress intros
+    | H: exists _, _ |- _ => destruct H
+    | H: and _ _ |- _ => destruct H
+    | H: eq _ ?y |- _ => subst y
+    | H: False |- _ => destruct H
+    | _ => progress cbn in *
+    | _ => progress cbv [dlet.dlet WeakestPrecondition.dexpr WeakestPrecondition.dexprs WeakestPrecondition.store] in *
+    end.
+
+  Ltac t := repeat step_t; eauto. 
 
   Lemma expr_sound: forall m l e mc t post (H : WeakestPrecondition.expr m l t e post),
     exists v mc' t', Semantics.eval_expr m l e mc t = Some (v, mc', t') /\ post t' v.
@@ -315,21 +338,20 @@ Section WeakestPrecondition.
         (H:WeakestPrecondition.cmd (semantics_call e) c t m l post)
     : Semantics.exec e c t m l mc (fun t' m' l' mc' => post t' m' l').
   Proof.
-    ind_on Syntax.cmd; repeat (t; try match reverse goal with H : WeakestPrecondition.expr _ _ _ _ |- _ => eapply expr_sound in H end).
+    ind_on_with_trace Syntax.cmd t; repeat (t; try match reverse goal with H : WeakestPrecondition.expr _ _ _ _ _ |- _ => eapply expr_sound in H end).
     { destruct (BinInt.Z.eq_dec (Interface.word.unsigned x) (BinNums.Z0)) as [Hb|Hb]; cycle 1.
       { econstructor; t. }
       { eapply Semantics.exec.if_false; t. } }
     { revert dependent l; revert dependent m; revert dependent t; revert dependent mc; pattern x2.
       eapply (well_founded_ind H); t.
       pose proof (H1 _ _ _ _ ltac:(eassumption));
-        repeat (t; try match goal with H : WeakestPrecondition.expr _ _ _ _ |- _ => eapply expr_sound in H end).
+        repeat (t; try match goal with H : WeakestPrecondition.expr _ _ _ _ _ |- _ => eapply expr_sound in H end).
       { destruct (BinInt.Z.eq_dec (Interface.word.unsigned x4) (BinNums.Z0)) as [Hb|Hb].
         { eapply Semantics.exec.while_false; t. }
         { eapply Semantics.exec.while_true; t. t. } } }
     { eapply sound_args in H; t. }
     { eapply sound_args in H; t. }
   Qed.
-
 
   Section WithE.
     Context fs (E: env) (HE: List.Forall (fun '(k, v) => map.get E k = Some v) fs).
