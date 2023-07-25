@@ -106,11 +106,12 @@ Section semantics.
     unfold sep in H0p0. fwd. eapply map.split_alt. assumption.
   Qed.
 
-  Lemma frame_eval_expr: forall l e mSmall mBig mAdd mc (v: word) mc',
+  Lemma frame_eval_expr: forall l t e mSmall mBig mAdd mc (v: word) mc' t',
       mmap.split mBig mSmall mAdd ->
-      eval_expr mSmall l e mc = Some (v, mc') ->
-      eval_expr mBig l e mc = Some (v, mc').
+      eval_expr mSmall l e mc t = Some (v, mc', t') ->
+      eval_expr mBig l e mc t = Some (v, mc', t').
   Proof.
+    intros l t e. generalize dependent t.
     induction e; cbn; intros; fwd; try reflexivity;
       erewrite ?IHe by eassumption;
       erewrite ?IHe1 by eassumption;
@@ -124,12 +125,13 @@ Section semantics.
       try reflexivity.
   Qed.
 
-  Lemma frame_evaluate_call_args_log: forall l mSmall mBig mAdd arges
-                                             mc (args: list word) mc',
+  Lemma frame_evaluate_call_args_log: forall l t mSmall mBig mAdd arges
+                                             mc (args: list word) mc' t',
       mmap.split mBig mSmall mAdd ->
-      evaluate_call_args_log mSmall l arges mc = Some (args, mc') ->
-      evaluate_call_args_log mBig   l arges mc = Some (args, mc').
+      evaluate_call_args_log mSmall l arges mc t = Some (args, mc', t') ->
+      evaluate_call_args_log mBig   l arges mc t = Some (args, mc', t').
   Proof.
+    intros l t mSmall mBig mAdd arges. generalize dependent t.
     induction arges; cbn; intros.
     - assumption.
     - fwd. erewrite frame_eval_expr by eassumption. erewrite IHarges.
