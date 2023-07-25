@@ -20,7 +20,8 @@ Section Loops.
 
   Context {functions : list (String.string * (list String.string * list String.string * Syntax.cmd))}.
   Let call := WeakestPrecondition.call functions.
-
+  Check cmd.
+  (* why are there ghosts??? *) Check cmd. Check expr. Print dexpr.
   Lemma tailrec_localsmap_1ghost
     {e c t} {m: mem} {l} {post : trace -> mem -> locals -> Prop}
     {measure: Type} {Ghost: Type}
@@ -31,13 +32,13 @@ Section Loops.
     (Hpre: P v0 g0 t m l)
     (Hbody: forall v g t m l,
       P v g t m l ->
-      exists br, expr m l e (eq br) /\
-      (word.unsigned br <> 0%Z -> cmd call c t m l
-        (fun t' m' l' => exists v' g',
-          P v' g' t' m' l' /\
+      exists br t', dexpr m l t e br t' (* why was dexpr not written here originally? *) /\
+      (word.unsigned br <> 0%Z -> cmd call c (cons (branch true) t') m l
+        (fun t'' m' l' => exists v' g',
+          P v' g' t'' m' l' /\
           lt v' v /\
-          (forall t'' m'' l'', Q v' g' t'' m'' l'' -> Q v g t'' m'' l''))) /\
-      (word.unsigned br = 0%Z -> Q v g t m l))
+          (forall t''' m'' l'', Q v' g' t''' m'' l'' -> Q v g t''' m'' l''))) /\
+      (word.unsigned br = 0%Z -> Q v g (cons (branch false) t') (* i put this t' here - mostly sure that we want it. *) m l))
     (Hpost: forall t m l, Q v0 g0 t m l -> post t m l)
     : cmd call (cmd.while e c) t m l post.
   Proof.
@@ -47,7 +48,7 @@ Section Loops.
     split; [solve[eauto]|].
     intros vi ti mi li (gi & HPi & HQimpl).
     specialize (Hbody vi gi ti mi li HPi).
-    destruct Hbody as (br & ? & Hbody). exists br; split; [assumption|].
+    destruct Hbody as (br & t' & ? & Hbody). exists br, t'. split; [assumption|].
     destruct Hbody as (Htrue & Hfalse). split; intros Hbr;
       [pose proof(Htrue Hbr)as Hpc|pose proof(Hfalse Hbr)as Hpc]; clear Hbr Htrue Hfalse.
     { eapply Proper_cmd; [reflexivity..| | |eapply Hpc].
@@ -66,23 +67,24 @@ Section Loops.
     (Hpre: P v0 g0 t m l)
     (Hbody: forall v g t m l,
       P v g t m l ->
-      exists br, expr m l e (eq br) /\
-      (word.unsigned br <> 0%Z -> cmd call c t m l
-        (fun t' m' l' => exists v' g',
-          P v' g' t' m' l' /\
+      exists br t', dexpr m l t e br t' /\
+      (word.unsigned br <> 0%Z -> cmd call c (cons (branch true) t') m l
+        (fun t'' m' l' => exists v' g',
+          P v' g' t'' m' l' /\
           lt v' v /\
-          (forall t'' m'' l'', Q v' g' t'' m'' l'' -> Q v g t'' m'' l''))) /\
-      (word.unsigned br = 0%Z -> cmd call rest t m l (Q v g)))
+          (forall t''' m'' l'', Q v' g' t''' m'' l'' -> Q v g t''' m'' l''))) /\
+      (word.unsigned br = 0%Z -> cmd call rest (cons (branch false) t') m l (Q v g)))
     : cmd call (cmd.seq (cmd.while e c) rest) t m l (Q v0 g0).
   Proof.
-    cbn. eapply tailrec_localsmap_1ghost with
-      (Q := fun v g t m l => cmd call rest t m l (Q v g)).
+    cbn. eapply @tailrec_localsmap_1ghost with
+      (Q := fun v g t m l => cmd call rest t m l (Q v g))
+      (post := fun t m l => cmd call rest t m l (Q v0 g0)).
     1: eassumption.
     1: exact Hpre.
     2: intros *; exact id.
     intros vi gi ti mi li HPi.
     specialize (Hbody vi gi ti mi li HPi).
-    destruct Hbody as (br & ? & Hbody). exists br; split; [assumption|].
+    destruct Hbody as (br & t' & ? & Hbody). exists br, t'; split; [assumption|].
     destruct Hbody as (Htrue & Hfalse). split; intros Hbr;
       [pose proof(Htrue Hbr)as Hpc|pose proof(Hfalse Hbr)as Hpc]; clear Hbr Htrue Hfalse.
     { eapply Proper_cmd; [reflexivity..| | |eapply Hpc].
