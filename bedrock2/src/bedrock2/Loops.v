@@ -428,44 +428,46 @@ Section Loops.
       @dlet _ (fun _ => Prop) (reconstruct variables l) (fun localsmap : locals =>
       match tuple.apply (hlist.apply (spec v) g t m) l with S_ =>
       S_.(1) ->
-      Markers.unique (Markers.left (exists br, expr m localsmap e (eq br) /\ Markers.right (
-      (word.unsigned br <> 0%Z -> cmd call c t m localsmap
-        (fun t' m' localsmap' =>
+      Markers.unique (Markers.left (exists br t', dexpr m localsmap t e br t' /\ Markers.right (
+      (word.unsigned br <> 0%Z -> cmd call c (cons (branch true) t') m localsmap
+        (fun t'' m' localsmap' =>
           Markers.unique (Markers.left (hlist.existss (fun l' => enforce variables l' localsmap' /\ Markers.right (
-          Markers.unique (Markers.left (exists br, expr m' localsmap' e (eq br) /\ Markers.right ( word.unsigned br = 0 /\ tuple.apply (S_.(2) t' m') l') ) ) \/
+          Markers.unique (Markers.left (exists br' t''', dexpr m' localsmap' t'' e br' t''' /\ Markers.right ( word.unsigned br'= 0 /\ tuple.apply (S_.(2) (cons (branch false) t''') m') l') ) ) \/
           Markers.unique (Markers.left (hlist.existss (fun g' => exists v',
-          match tuple.apply (hlist.apply (spec v') g' t' m') l' with S' =>
+          match tuple.apply (hlist.apply (spec v') g' t'' m') l' with S' =>
           S'.(1) /\ Markers.right (
             lt v' v /\
             forall T M, hlist.foralls (fun L => tuple.apply (S'.(2) T M) L -> tuple.apply (S_.(2) T M) L)) end))))))))) /\
-      (word.unsigned br = 0%Z -> tuple.apply (S_.(2) t m) l))))end))))
+      (word.unsigned br = 0%Z -> tuple.apply (S_.(2) (cons (branch false) t') m) l))))end))))
     (Hpost : match (tuple.apply (hlist.apply (spec v0) g0 t m) l0).(2) with Q0 => forall t m, hlist.foralls (fun l =>  tuple.apply (Q0 t m) l -> post t m (reconstruct variables l))end)
     , cmd call (cmd.while e c) t m localsmap post ).
   Proof.
     eapply hlist_forall_foralls; intros g0 **.
     eexists (option measure), (with_bottom lt), (fun vi ti mi localsmapi =>
       exists li, localsmapi = reconstruct variables li /\
-      match vi with None => exists br, expr mi localsmapi e (eq br) /\ word.unsigned br = 0 /\ tuple.apply ((tuple.apply (hlist.apply (spec v0) g0 t m) l0).(2) ti mi) li | Some vi =>
-      exists gi, match tuple.apply (hlist.apply (spec vi) gi ti mi) li with S_ =>
-      S_.(1) /\ forall T M L, tuple.apply (S_.(2) T M) L ->
-        tuple.apply ((tuple.apply (hlist.apply (spec v0) g0 t m) l0).(2) T M) L end end).
+                   match vi with
+                   | None => exists br ti', dexpr mi localsmapi ti e br ti' /\ word.unsigned br = 0 /\ tuple.apply ((tuple.apply (hlist.apply (spec v0) g0 t(*????*) m) l0).(2) (cons (branch false) ti') mi) li
+                   | Some vi => exists gi,
+                       match tuple.apply (hlist.apply (spec vi) gi ti mi) li with
+                       | S_ => S_.(1) /\ forall T M L, tuple.apply (S_.(2) T M) L -> tuple.apply ((tuple.apply (hlist.apply (spec v0) g0 t(*????*) m) l0).(2) T M) L end
+                   end).
     cbv [Markers.unique Markers.split Markers.left Markers.right] in *.
     split; eauto using well_founded_with_bottom.
     split. { exists (Some v0), l0. split. 1: eapply reconstruct_enforce; eassumption. exists g0; split; eauto. }
     intros [vi|] ti mi lmapi.
-    2: { intros (ld&Hd&br&Hbr&Hz&Hdone).
-      eexists; split; eauto.
+    2: { intros (ld&Hd&br&ti'&Hbr&Hz&Hdone).
+      eexists. eexists. split; eauto.
       split; intros; try contradiction.
-      subst; eapply (hlist.foralls_forall (Hpost ti mi) _ Hdone). }
+      subst. eapply (hlist.foralls_forall (Hpost (cons (branch false) ti') mi) _ Hdone). }
     intros (?&?&gi&?&Qi); subst.
-    destruct (hlist.foralls_forall (hlist.foralls_forall (Hbody vi) gi ti mi) _ ltac:(eassumption)) as (br&?&X).
-    exists br; split; [assumption|]. destruct X as (Htrue&Hfalse). split; intros Hbr;
+    destruct (hlist.foralls_forall (hlist.foralls_forall (Hbody vi) gi ti mi) _ ltac:(eassumption)) as (br&t'&?&X).
+    exists br. exists t'. split; [assumption|]. destruct X as (Htrue&Hfalse). split; intros Hbr;
       [pose proof(Htrue Hbr)as Hpc|pose proof(Hfalse Hbr)as Hpc]; clear Hbr Htrue Hfalse.
     { eapply Proper_cmd; [reflexivity..| | |eapply Hpc].
       { eapply Proper_call; firstorder idtac. }
       intros tj mj lmapj Hlj; eapply hlist.existss_exists in Hlj.
       destruct Hlj as (lj&Elj&HE); eapply reconstruct_enforce in Elj; subst lmapj.
-      destruct HE as [(br'&Hevalr'&Hz'&Hdone)|HE].
+      destruct HE as [(br'&t'''&Hevalr'&Hz'&Hdone)|HE].
       { exists None; cbn. eauto 9. }
       { eapply hlist.existss_exists in HE. destruct HE as (l&?&?&?&HR).
         pose proof fun T M => hlist.foralls_forall (HR T M); clear HR.
