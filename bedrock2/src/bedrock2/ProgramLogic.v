@@ -8,6 +8,9 @@ Require Import bedrock2.Map.SeparationLogic bedrock2.Scalars.
 Definition spec_of (procname:String.string) := list (String.string * (list String.string * list String.string * Syntax.cmd.cmd)) -> Prop.
 Existing Class spec_of.
 
+Definition ct_proof_of (procname:String.string) := list (String.string * (list String.string * list String.string * Syntax.cmd.cmd)) -> Prop.
+Existing Class ct_proof_of.
+
 Module Import Coercions.
   Import Map.Interface Word.Interface BinInt.
   Coercion Z.of_nat : nat >-> Z.
@@ -65,6 +68,20 @@ Notation "program_logic_goal_for_function! proc" := (program_logic_goal_for proc
    program_logic_goal_for_function proc))
   (at level 10, only parsing).
 
+Ltac program_logic_ct_goal_for_function proc :=
+  let __ := constr:(proc : Syntax.func) in
+  constr_string_basename_of_constr_reference_cps ltac:(Tactics.head proc) ltac:(fun fname =>
+  let spec := lazymatch constr:(_:ct_proof_of fname) with ?s => s end in
+  exact (forall functions : list (string * Syntax.func), ltac:(
+    let callees := eval cbv in (callees (snd proc)) in
+    let s := assuming_correctness_of_in callees functions (spec (cons (fname, proc) functions)) in
+    exact s))).
+Definition program_logic_ct_goal_for (_ : Syntax.func) (P : Prop) := P.
+
+Notation "program_logic_ct_goal_for_function! proc" := (program_logic_ct_goal_for proc ltac:(
+   program_logic_ct_goal_for_function proc))
+  (at level 10, only parsing).
+
 (* Users might want to override this with
      Ltac normalize_body_of_function f ::= Tactics.rdelta.rdelta f.
    in case cbv does more simplification than desired. *)
@@ -84,7 +101,7 @@ Ltac bind_body_of_function f_ :=
 
 (* note: f might have some implicit parameters (eg a record of constants) *)
 Ltac enter f :=
-  cbv beta delta [program_logic_goal_for]; intros;
+  cbv beta delta [program_logic_goal_for program_logic_ct_goal_for]; intros;
   bind_body_of_function f;
   lazymatch goal with |- ?s ?p => let s := rdelta s in change (s p); cbv beta end.
 
@@ -223,13 +240,18 @@ Ltac fwd_uniq_step :=
   | _ => solve [ eq_uniq ]
   end.
 Ltac fwd_uniq := repeat fwd_uniq_step.
-Check @list_map'. Check get.
 
 Ltac straightline :=
   match goal with
   | _ => idtac "1"; straightline_cleanup
   | |- program_logic_goal_for ?f _ => idtac "2";
     enter f; intros;
+    unfold1_call_goal; cbv match beta delta [call_body];
+    lazymatch goal with |- if ?test then ?T else _ =>
+      replace test with true by reflexivity; change T end;
+                        cbv match beta delta [WeakestPrecondition.func]
+  | |- program_logic_ct_goal_for ?f _ => idtac "2A";
+    enter f; intros; eexists; intros;
     unfold1_call_goal; cbv match beta delta [call_body];
     lazymatch goal with |- if ?test then ?T else _ =>
       replace test with true by reflexivity; change T end;
