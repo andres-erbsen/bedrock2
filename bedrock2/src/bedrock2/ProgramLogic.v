@@ -223,6 +223,7 @@ Ltac fwd_uniq_step :=
   | _ => solve [ eq_uniq ]
   end.
 Ltac fwd_uniq := repeat fwd_uniq_step.
+Check @list_map'. Check get.
 
 Ltac straightline :=
   match goal with
@@ -250,7 +251,9 @@ Ltac straightline :=
     end
   | |- @list_map _ _ (get _) _ _ => idtac "5"; unfold1_list_map_goal; cbv beta match delta [list_map_body]
   | |- @list_map _ _ (expr _ _) _ _ => idtac "6"; unfold1_list_map_goal; cbv beta match delta [list_map_body]
+  | |- @list_map' _ _ _ (expr _ _) _ _ _ => idtac "6A"; unfold1_list_map'_goal; cbv beta match delta [list_map'_body]
   | |- @list_map _ _ _ nil _ => idtac "7"; cbv beta match fix delta [list_map list_map_body]
+  | |- @list_map' _ _ _ _ _ nil _ => idtac "7A"; cbv beta match fix delta [list_map' list_map'_body]
   | |- expr _ _ _ _ _ => idtac "8"; unfold1_expr_goal; cbv beta match delta [expr_body]
   | |- dexpr _ _ _ _ _ _ => idtac "9"; cbv beta delta [dexpr]
   | |- dexprs _ _ _ _ _ _ => idtac "10"; cbv beta delta [dexprs]

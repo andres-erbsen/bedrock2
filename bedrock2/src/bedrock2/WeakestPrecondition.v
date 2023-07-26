@@ -202,6 +202,18 @@ Ltac unfold1_list_map_goal :=
   let G := lazymatch goal with |- ?G => G end in
   let G := unfold1_list_map G in
   change G.
+Check @list_map'. Check @list_map'_body.
+
+Ltac unfold1_list_map' e :=
+  lazymatch e with
+    @list_map' ?A ?B ?T ?P ?t ?arg ?post =>
+    let arg := eval hnf in arg in
+    constr:(@list_map'_body A B T P (@list_map' A B T P) t arg post)
+  end.
+Ltac unfold1_list_map'_goal :=
+  let G := lazymatch goal with |- ?G => G end in
+  let G := unfold1_list_map' G in
+  change G.
 
 Ltac unfold1_call e :=
   lazymatch e with

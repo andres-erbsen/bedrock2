@@ -67,7 +67,7 @@ Section WithParameters.
       ensures T M :=  M =* scalar a_addr a * scalar b_addr b * R /\ (filterio T) = (filterio t)}.
 
   Lemma swap_swap_ok : program_logic_goal_for_function! swap_swap.
-  Proof. repeat (straightline || straightline_call); eauto. Qed.
+  Proof. repeat (straightline || straightline_call); eauto using eq_trans. Qed.
 
   Lemma link_swap_swap_swap_swap : spec_of_swap_swap &[,swap_swap; swap].
   Proof. eauto using swap_swap_ok, swap_ok. Qed.
