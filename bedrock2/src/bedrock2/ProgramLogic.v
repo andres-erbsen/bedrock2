@@ -251,9 +251,9 @@ Ltac straightline :=
   | |- @list_map _ _ (get _) _ _ => idtac "5"; unfold1_list_map_goal; cbv beta match delta [list_map_body]
   | |- @list_map _ _ (expr _ _) _ _ => idtac "6"; unfold1_list_map_goal; cbv beta match delta [list_map_body]
   | |- @list_map _ _ _ nil _ => idtac "7"; cbv beta match fix delta [list_map list_map_body]
-  | |- expr _ _ _ _ => idtac "8"; unfold1_expr_goal; cbv beta match delta [expr_body]
-  | |- dexpr _ _ _ _ => idtac "9"; cbv beta delta [dexpr]
-  | |- dexprs _ _ _ _ => idtac "10"; cbv beta delta [dexprs]
+  | |- expr _ _ _ _ _ => idtac "8"; unfold1_expr_goal; cbv beta match delta [expr_body]
+  | |- dexpr _ _ _ _ _ _ => idtac "9"; cbv beta delta [dexpr]
+  | |- dexprs _ _ _ _ _ _ => idtac "10"; cbv beta delta [dexprs]
   | |- literal _ _ => idtac "11"; cbv beta delta [literal]
   | |- @get ?w ?W ?L ?l ?x ?P => idtac "12";
       let get' := eval cbv [get] in @get in
@@ -302,15 +302,33 @@ Ltac straightline :=
   | |- exists l', Interface.map.putmany_of_list_zip ?ks ?vs ?l = Some l' /\ _ => idtac "31";
     letexists; split; [exact eq_refl|] (* TODO: less unification here? *)
   | _ => idtac "32"; fwd_uniq_step
-  | |- exists x, ?P /\ ?Q => idtac "33"; 
+  | |- exists x, ?P /\ ?Q => idtac "33";(* unsure whether we need this still, since we have 33' below *)
     let x := fresh x in refine (let x := _ in ex_intro (fun x => P /\ Q) x _);
                         split; [solve [repeat straightline]|]
-  | |- exists x, Markers.split (?P /\ ?Q) => idtac "34";
+  | |- exists x y, ?P /\ ?Q => idtac "33'";
+    let x := fresh x in let y := fresh y in
+             refine (let x := _ in let y := _ in
+             ex_intro (fun x => exists y, P /\ Q) x
+             (ex_intro (fun y => P /\ Q) y _));
+             split; [solve [repeat straightline] |  ]
+  | |- exists x, Markers.split (?P /\ ?Q) => idtac "34";(* unsure whether we need this still, since we have 34' below *)
     let x := fresh x in refine (let x := _ in ex_intro (fun x => P /\ Q) x _);
                         split; [solve [repeat straightline]|]
-  | |- Markers.unique (exists x, Markers.split (?P /\ ?Q)) => idtac "35";
+  | |- exists x y, Markers.split (?P /\ ?Q) => idtac "34'";
+    let x := fresh x in let y := fresh y in
+             refine (let x := _ in let y := _ in
+             ex_intro (fun x => exists y, P /\ Q) x
+             (ex_intro (fun y => P /\ Q) y _));
+             split; [solve [repeat straightline] |  ] 
+  | |- Markers.unique (exists x, Markers.split (?P /\ ?Q)) => idtac "35";(* unsure whether we need this still, since we have 35'*)
     let x := fresh x in refine (let x := _ in ex_intro (fun x => P /\ Q) x _);
                         split; [solve [repeat straightline]|]
+  | |- Markers.unique (exists x y, Markers.split (?P /\ ?Q)) => idtac "35'";
+    let x := fresh x in let y := fresh y in
+             refine (let x := _ in let y := _ in
+             ex_intro (fun x => exists y, P /\ Q) x
+             (ex_intro (fun y => P /\ Q) y _));
+             split; [solve [repeat straightline] |  ] 
   | |- Markers.unique (Markers.left ?G) => idtac "36";
     change G;
     unshelve (idtac; repeat match goal with
