@@ -11,7 +11,7 @@ Require Export bedrock2.Memory.
 Require Import Coq.Lists.List.
 
 (* BW is not needed on the rhs, but helps infer width *)
-Definition oldtrace{width: Z}{BW: Bitwidth width}{word: word.word width}{mem: map.map word byte} :=
+Definition iotrace{width: Z}{BW: Bitwidth width}{word: word.word width}{mem: map.map word byte} :=
   list ((mem * String.string * list word) * (mem * list word)).
 
 (*match t : oldtrace with
@@ -42,6 +42,14 @@ Inductive event{width: Z}{BW: Bitwidth width}{word: word.word width}{mem: map.ma
 | write : access_size -> word -> event.
 
 Definition trace{width: Z}{BW: Bitwidth width}{word: word.word width}{mem: map.map word byte} := list event.
+
+Definition filterio {width: Z}{BW: Bitwidth width}{word: word.word width}{mem: map.map word byte} (t : trace) : iotrace :=
+    flat_map (fun e =>
+                match e with
+                | IOevent e => cons e nil
+                | _ => nil
+                end) t.
+
 Print access_size.access_size.
                             
 Definition ExtSpec{width: Z}{BW: Bitwidth width}{word: word.word width}{mem: map.map word byte} :=
