@@ -226,21 +226,21 @@ Ltac fwd_uniq := repeat fwd_uniq_step.
 
 Ltac straightline :=
   match goal with
-  | _ => straightline_cleanup
-  | |- program_logic_goal_for ?f _ =>
+  | _ => idtac "1"; straightline_cleanup
+  | |- program_logic_goal_for ?f _ => idtac "2";
     enter f; intros;
     unfold1_call_goal; cbv match beta delta [call_body];
     lazymatch goal with |- if ?test then ?T else _ =>
       replace test with true by reflexivity; change T end;
     cbv match beta delta [WeakestPrecondition.func]
-  | |- WeakestPrecondition.cmd _ (cmd.set ?s ?e) _ _ _ ?post =>
+  | |- WeakestPrecondition.cmd _ (cmd.set ?s ?e) _ _ _ ?post => idtac "3";
     unfold1_cmd_goal; cbv beta match delta [cmd_body];
     let __ := match s with String.String _ _ => idtac | String.EmptyString => idtac end in
     ident_of_constr_string_cps s ltac:(fun x =>
       ensure_free x;
       (* NOTE: keep this consistent with the [exists _, _ /\ _] case far below *)
       letexists _ as x; split; [solve [repeat straightline]|])
-  | |- cmd _ ?c _ _ _ ?post =>
+  | |- cmd _ ?c _ _ _ ?post => idtac "4";
     let c := eval hnf in c in
     lazymatch c with
     | cmd.while _ _ => fail
@@ -248,88 +248,88 @@ Ltac straightline :=
     | cmd.interact _ _ _ => fail
     | _ => unfold1_cmd_goal; cbv beta match delta [cmd_body]
     end
-  | |- @list_map _ _ (get _) _ _ => unfold1_list_map_goal; cbv beta match delta [list_map_body]
-  | |- @list_map _ _ (expr _ _) _ _ => unfold1_list_map_goal; cbv beta match delta [list_map_body]
-  | |- @list_map _ _ _ nil _ => cbv beta match fix delta [list_map list_map_body]
-  | |- expr _ _ _ _ => unfold1_expr_goal; cbv beta match delta [expr_body]
-  | |- dexpr _ _ _ _ => cbv beta delta [dexpr]
-  | |- dexprs _ _ _ _ => cbv beta delta [dexprs]
-  | |- literal _ _ => cbv beta delta [literal]
-  | |- @get ?w ?W ?L ?l ?x ?P =>
+  | |- @list_map _ _ (get _) _ _ => idtac "5"; unfold1_list_map_goal; cbv beta match delta [list_map_body]
+  | |- @list_map _ _ (expr _ _) _ _ => idtac "6"; unfold1_list_map_goal; cbv beta match delta [list_map_body]
+  | |- @list_map _ _ _ nil _ => idtac "7"; cbv beta match fix delta [list_map list_map_body]
+  | |- expr _ _ _ _ => idtac "8"; unfold1_expr_goal; cbv beta match delta [expr_body]
+  | |- dexpr _ _ _ _ => idtac "9"; cbv beta delta [dexpr]
+  | |- dexprs _ _ _ _ => idtac "10"; cbv beta delta [dexprs]
+  | |- literal _ _ => idtac "11"; cbv beta delta [literal]
+  | |- @get ?w ?W ?L ?l ?x ?P => idtac "12";
       let get' := eval cbv [get] in @get in
       change (get' w W L l x P); cbv beta
-  | |- load _ _ _ _ => cbv beta delta [load]
-  | |- @Loops.enforce ?width ?word ?locals ?names ?values ?map =>
+  | |- load _ _ _ _ => idtac "13"; cbv beta delta [load]
+  | |- @Loops.enforce ?width ?word ?locals ?names ?values ?map => idtac "14";
     let values := eval cbv in values in
     change (@Loops.enforce width word locals names values map);
     exact (conj (eq_refl values) eq_refl)
-  | |- @eq (@coqutil.Map.Interface.map.rep String.string Interface.word.rep _) _ _ =>
+  | |- @eq (@coqutil.Map.Interface.map.rep String.string Interface.word.rep _) _ _ => idtac "15";
     eapply SortedList.eq_value; exact eq_refl
-  | |- @map.get String.string Interface.word.rep ?M ?m ?k = Some ?e' =>
+  | |- @map.get String.string Interface.word.rep ?M ?m ?k = Some ?e' => idtac "16";
     let e := rdelta e' in
     is_evar e;
     once (let v := multimatch goal with x := context[@map.put _ _ M _ k ?v] |- _ => v end in
           (* cbv is slower than this, cbv with whitelist would have an enormous whitelist, cbv delta for map is slower than this, generalize unrelated then cbv is slower than this, generalize then vm_compute is slower than this, lazy is as slow as this: *)
           unify e v; exact (eq_refl (Some v)))
-  | |- @coqutil.Map.Interface.map.get String.string Interface.word.rep _ _ _ = Some ?v =>
+  | |- @coqutil.Map.Interface.map.get String.string Interface.word.rep _ _ _ = Some ?v => idtac "17";
     let v' := rdelta v in is_evar v'; (change v with v'); exact eq_refl
-  | |- ?x = ?y =>
+  | |- ?x = ?y => idtac "18";
     let y := rdelta y in is_evar y; change (x=y); exact eq_refl
-  | |- ?x = ?y =>
+  | |- ?x = ?y => idtac "19";
     let x := rdelta x in is_evar x; change (x=y); exact eq_refl
-  | |- ?x = ?y =>
+  | |- ?x = ?y => idtac "20";
     let x := rdelta x in let y := rdelta y in constr_eq x y; exact eq_refl
-  | |- store Syntax.access_size.one _ _ _ _ =>
+  | |- store Syntax.access_size.one _ _ _ _ => idtac "21";
     eapply Scalars.store_one_of_sep; [solve[ecancel_assumption]|]
-  | |- store Syntax.access_size.two _ _ _ _ =>
+  | |- store Syntax.access_size.two _ _ _ _ => idtac "22";
     eapply Scalars.store_two_of_sep; [solve[ecancel_assumption]|]
-  | |- store Syntax.access_size.four _ _ _ _ =>
+  | |- store Syntax.access_size.four _ _ _ _ => idtac "23";
     eapply Scalars.store_four_of_sep; [solve[ecancel_assumption]|]
-  | |- store Syntax.access_size.word _ _ _ _ =>
+  | |- store Syntax.access_size.word _ _ _ _ => idtac "24";
     eapply Scalars.store_word_of_sep; [solve[ecancel_assumption]|]
-  | |- bedrock2.Memory.load Syntax.access_size.one ?m ?a = Some ?ev =>
+  | |- bedrock2.Memory.load Syntax.access_size.one ?m ?a = Some ?ev => idtac "25";
     try subst ev; refine (@Scalars.load_one_of_sep _ _ _ _ _ _ _ _ _ _); ecancel_assumption
-  | |- @bedrock2.Memory.load _ ?word ?mem Syntax.access_size.two ?m ?a = Some ?ev =>
+  | |- @bedrock2.Memory.load _ ?word ?mem Syntax.access_size.two ?m ?a = Some ?ev => idtac "26";
     try subst ev; refine (@Scalars.load_two_of_sep _ word _ mem _ a _ _ m _); ecancel_assumption
-  | |- @bedrock2.Memory.load _ ?word ?mem Syntax.access_size.four ?m ?a = Some ?ev =>
+  | |- @bedrock2.Memory.load _ ?word ?mem Syntax.access_size.four ?m ?a = Some ?ev => idtac "27";
     try subst ev; refine (@Scalars.load_four_of_sep_32bit _ word _ mem _ eq_refl a _ _ m _); ecancel_assumption
-  | |- @bedrock2.Memory.load _ ?word ?mem Syntax.access_size.four ?m ?a = Some ?ev =>
+  | |- @bedrock2.Memory.load _ ?word ?mem Syntax.access_size.four ?m ?a = Some ?ev => idtac "28";
     try subst ev; refine (@Scalars.load_four_of_sep _ word _ mem _ a _ _ m _); ecancel_assumption
-  | |- @bedrock2.Memory.load _ ?word ?mem Syntax.access_size.word ?m ?a = Some ?ev =>
+  | |- @bedrock2.Memory.load _ ?word ?mem Syntax.access_size.word ?m ?a = Some ?ev => idtac "29";
     try subst ev; refine (@Scalars.load_word_of_sep _ word _ mem _ a _ _ m _); ecancel_assumption
-  | |- exists l', Interface.map.of_list_zip ?ks ?vs = Some l' /\ _ =>
+  | |- exists l', Interface.map.of_list_zip ?ks ?vs = Some l' /\ _ => idtac "30";
     letexists; split; [exact eq_refl|] (* TODO: less unification here? *)
-  | |- exists l', Interface.map.putmany_of_list_zip ?ks ?vs ?l = Some l' /\ _ =>
+  | |- exists l', Interface.map.putmany_of_list_zip ?ks ?vs ?l = Some l' /\ _ => idtac "31";
     letexists; split; [exact eq_refl|] (* TODO: less unification here? *)
-  | _ => fwd_uniq_step
-  | |- exists x, ?P /\ ?Q =>
+  | _ => idtac "32"; fwd_uniq_step
+  | |- exists x, ?P /\ ?Q => idtac "33"; 
     let x := fresh x in refine (let x := _ in ex_intro (fun x => P /\ Q) x _);
                         split; [solve [repeat straightline]|]
-  | |- exists x, Markers.split (?P /\ ?Q) =>
+  | |- exists x, Markers.split (?P /\ ?Q) => idtac "34";
     let x := fresh x in refine (let x := _ in ex_intro (fun x => P /\ Q) x _);
                         split; [solve [repeat straightline]|]
-  | |- Markers.unique (exists x, Markers.split (?P /\ ?Q)) =>
+  | |- Markers.unique (exists x, Markers.split (?P /\ ?Q)) => idtac "35";
     let x := fresh x in refine (let x := _ in ex_intro (fun x => P /\ Q) x _);
                         split; [solve [repeat straightline]|]
-  | |- Markers.unique (Markers.left ?G) =>
+  | |- Markers.unique (Markers.left ?G) => idtac "36";
     change G;
     unshelve (idtac; repeat match goal with
                      | |- Markers.split (?P /\ Markers.right ?Q) =>
                        split; [eabstract (repeat straightline) | change Q]
                      | |- exists _, _ => letexists
                      end); []
-  | |- Markers.split ?G => change G; split
-  | |- True => exact I
-  | |- False \/ _ => right
-  | |- _ \/ False => left
-  | |- BinInt.Z.modulo ?z (Memory.bytes_per_word _) = BinInt.Z0 /\ _ =>
+  | |- Markers.split ?G => idtac "37"; change G; split
+  | |- True => idtac "38"; exact I
+  | |- False \/ _ => idtac "39"; right
+  | |- _ \/ False => idtac "40"; left
+  | |- BinInt.Z.modulo ?z (Memory.bytes_per_word _) = BinInt.Z0 /\ _ => idtac "41";
       lazymatch Coq.setoid_ring.InitialRing.isZcst z with
       | true => split; [exact eq_refl|]
       end
-  | |- _ => straightline_stackalloc
-  | |- _ => straightline_stackdealloc
-  | |- context[sep (sep _ _) _] => progress (flatten_seps_in_goal; cbn [seps])
-  | H : context[sep (sep _ _) _] |- _ => progress (flatten_seps_in H; cbn [seps] in H)
+  | |- _ => idtac "42"; straightline_stackalloc
+  | |- _ => idtac "43"; straightline_stackdealloc
+  | |- context[sep (sep _ _) _] => idtac "44"; progress (flatten_seps_in_goal; cbn [seps])
+  | H : context[sep (sep _ _) _] |- _ => idtac "45"; progress (flatten_seps_in H; cbn [seps] in H)
   end.
 
 (* TODO: once we can automatically prove some calls, include the success-only version of this in [straightline] *)
