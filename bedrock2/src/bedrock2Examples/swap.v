@@ -38,11 +38,11 @@ Section WithParameters.
     { requires t m := m =* scalar a_addr a * scalar b_addr b * R;
       ensures T M :=  M =* scalar a_addr b * scalar b_addr a * R /\ (filterio T) = (filterio t) }.
   
-  Instance ct_swap : ct_proof_of "swap" :=
+  Instance ct_swap : ct_spec_of "swap" :=
     fnct! "swap" a_addr b_addr | (dummy1 : nat) / (dummy2 : nat) | a b R,
     { requires t m := m =* scalar a_addr a * scalar b_addr b * R }.
   
-  Instance ct_bad_swap : ct_proof_of "bad_swap" :=
+  Instance ct_bad_swap : ct_spec_of "bad_swap" :=
     fnct! "bad_swap" a_addr | b_addr / (dummy : nat) | a b R,
     { requires t m := m =* scalar a_addr a * scalar b_addr b * R }.
   

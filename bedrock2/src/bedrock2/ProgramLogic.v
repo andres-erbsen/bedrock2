@@ -8,8 +8,8 @@ Require Import bedrock2.Map.SeparationLogic bedrock2.Scalars.
 Definition spec_of (procname:String.string) := list (String.string * (list String.string * list String.string * Syntax.cmd.cmd)) -> Prop.
 Existing Class spec_of.
 
-Definition ct_proof_of (procname:String.string) := list (String.string * (list String.string * list String.string * Syntax.cmd.cmd)) -> Prop.
-Existing Class ct_proof_of.
+Definition ct_spec_of (procname:String.string) := list (String.string * (list String.string * list String.string * Syntax.cmd.cmd)) -> Prop.
+Existing Class ct_spec_of.
 
 Module Import Coercions.
   Import Map.Interface Word.Interface BinInt.
@@ -71,7 +71,7 @@ Notation "program_logic_goal_for_function! proc" := (program_logic_goal_for proc
 Ltac program_logic_ct_goal_for_function proc :=
   let __ := constr:(proc : Syntax.func) in
   constr_string_basename_of_constr_reference_cps ltac:(Tactics.head proc) ltac:(fun fname =>
-  let spec := lazymatch constr:(_:ct_proof_of fname) with ?s => s end in
+  let spec := lazymatch constr:(_:ct_spec_of fname) with ?s => s end in
   exact (forall functions : list (string * Syntax.func), ltac:(
     let callees := eval cbv in (callees (snd proc)) in
     let s := assuming_correctness_of_in callees functions (spec (cons (fname, proc) functions)) in
