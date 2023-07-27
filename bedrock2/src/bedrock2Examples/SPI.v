@@ -388,7 +388,7 @@ Section WithParameters.
     straightline || straightline_call || split_if || refine (conj _ _) || eauto).
 
   { eexists. split.
-    { simpl. exact eq_refl. }
+    { simpl. match goal with | H : filterio a = _ |- _ => rewrite H end. exact eq_refl. }
     eexists. split.
     { eauto. }
     eexists. eexists. split.
@@ -407,9 +407,10 @@ Section WithParameters.
       eexists nil, x0; repeat split; cbv [any choice lightbulb_spec.spi_timeout]; eauto.
       rewrite app_nil_r; trivial. }
 
-      { destruct H10; intuition eauto.
+      { destruct H11; intuition eauto.
         { eexists. split.
-          { subst a0. subst a.
+          { simpl. match goal with | H : filterio a0 = _ |- _ => rewrite H end.
+            subst t'. simpl. match goal with | H : filterio a = _ |- _ => rewrite H end.
             rewrite List.app_assoc; trivial. }
             eexists. split.
             { eapply Forall2_app; eauto. }
@@ -418,8 +419,9 @@ Section WithParameters.
             left; split; eauto.
             eapply concat_app; cbv [any choice lightbulb_spec.spi_timeout]; eauto. }
             eexists.
-            subst a0.
-            subst a.
+            match goal with | H : filterio a0 = _ |- _ => rewrite H end.
+            subst t'. simpl.
+            match goal with | H : filterio a = _ |- _ => rewrite H end.
             split.
             { rewrite List.app_assoc; trivial. }
             eexists.
