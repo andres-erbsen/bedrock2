@@ -39,18 +39,24 @@ Section WithParameters.
       ensures T M :=  M =* scalar a_addr b * scalar b_addr a * R /\ (filterio T) = (filterio t) }.
   
   Instance ct_swap : ct_spec_of "swap" :=
-    fnct! "swap" a_addr b_addr | (dummy1 : nat) / (dummy2 : nat) | a b R,
+    ctfunc! "swap" a_addr b_addr | (dummy1 : nat) / (dummy2 : nat) | a b R,
     { requires t m := m =* scalar a_addr a * scalar b_addr b * R }.
   
   Instance ct_bad_swap : ct_spec_of "bad_swap" :=
-    fnct! "bad_swap" a_addr | b_addr / (dummy : nat) | a b R,
+    ctfunc! "bad_swap" a_addr | b_addr / (dummy : nat) | a b R,
     { requires t m := m =* scalar a_addr a * scalar b_addr b * R }.
   
   Lemma swap_ok : program_logic_goal_for_function! swap.
   Proof. repeat straightline; eauto. Qed.
 
   Lemma swap_ct : program_logic_ct_goal_for_function! swap.
-  Proof. repeat straightline. Qed.
+  Proof. repeat straightline. subst t''0. subst t''. subst t'0.
+         Search (_ :: _ = _ ++ _).
+         instantiate (1 := [write access_size.word a_addr;
+                            write access_size.word b_addr;
+                            Semantics.read access_size.word a_addr;
+                            Semantics.read access_size.word b_addr]).
+  reflexivity. Qed.
 
   Instance spec_of_bad_swap : spec_of "bad_swap" :=
     fnspec! "bad_swap" a_addr b_addr / a b R,

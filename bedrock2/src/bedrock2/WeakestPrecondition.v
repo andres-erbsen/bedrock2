@@ -254,23 +254,23 @@ Notation "'fnspec!' name a0 .. an '/' g0 .. gn '~>' r0 .. rn ',' '{' 'requires' 
       post at level 200).
 
 (* a's are public, b's are private. g's public, h's private. *)
-Notation "'fnct!' name a0 .. an '|' b0 .. bn '/' g0 .. gn '|' h0 .. hn ',' '{' 'requires' tr mem := pre '}'" :=
+Notation "'ctfunc!' name a0 .. an '|' b0 .. bn '/' g0 .. gn '|' h0 .. hn ',' '{' 'requires' tr mem := pre '}'" :=
   (fun functions =>
      (forall a0,
          .. (forall an,
                (forall g0,
                    .. (forall gn,
-                         (forall tr mem,
                              (exists tr'',
                                  (forall b0,
                                      .. (forall bn,
                                            (forall h0,
                                                .. (forall hn,
-                                                     pre ->
-                                                     WeakestPrecondition.call
-                                                       functions name tr mem (cons a0 .. (cons an nil) ..)
-                                                       (fun tr' mem' rets =>
-                                                          tr' = tr'')) ..)) ..)))) ..)) ..))
+                                                     (forall tr mem,
+                                                         pre ->
+                                                         WeakestPrecondition.call
+                                                           functions name tr mem (cons a0 .. (cons an nil) ..)
+                                                           (fun tr' mem' rets =>
+                                                              tr' = (tr'' ++ tr)%list))) ..)) ..))) ..)) ..))
            (at level 200,
              name at level 0,
              a0 closed binder, an closed binder,
