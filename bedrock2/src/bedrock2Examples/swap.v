@@ -33,18 +33,19 @@ Section WithParameters.
   Context {word: word.word 32} {mem: map.map word Byte.byte}.
   Context {word_ok: word.ok word} {mem_ok: map.ok mem}.
 
-  Locate "program_logic_goal_for_function!". Print program_logic_goal_for.
-  Locate "fnct!". Print spec_of.
-
   Instance spec_of_swap : spec_of "swap" :=
     fnspec! "swap" a_addr b_addr / a b R,
     { requires t m := m =* scalar a_addr a * scalar b_addr b * R;
       ensures T M :=  M =* scalar a_addr b * scalar b_addr a * R /\ (filterio T) = (filterio t) }.
   
   Instance ct_swap : ct_proof_of "swap" :=
-      fnct! "swap" a_addr b_addr | (dummy1 : nat) / (dummy2 : nat) | a b R,
-      { requires t m := m =* scalar a_addr a * scalar b_addr b * R }.
-
+    fnct! "swap" a_addr b_addr | (dummy1 : nat) / (dummy2 : nat) | a b R,
+    { requires t m := m =* scalar a_addr a * scalar b_addr b * R }.
+  
+  Instance ct_bad_swap : ct_proof_of "bad_swap" :=
+    fnct! "bad_swap" a_addr | b_addr / (dummy : nat) | a b R,
+    { requires t m := m =* scalar a_addr a * scalar b_addr b * R }.
+  
   Lemma swap_ok : program_logic_goal_for_function! swap.
   Proof. repeat straightline; eauto. Qed.
 
@@ -56,6 +57,9 @@ Section WithParameters.
     { requires t m := m =* scalar a_addr a * scalar b_addr b * R;
       ensures T M :=  M =* scalar a_addr b * scalar b_addr a * R /\ (filterio T) = (filterio t) }.
   Lemma bad_swap_ok : program_logic_goal_for_function! bad_swap.
+  Proof. repeat straightline; eauto. Abort.
+
+  Lemma bad_swap_ct : program_logic_ct_goal_for_function! bad_swap.
   Proof. repeat straightline; eauto. Abort.
 
   Definition spec_of_swap_same : spec_of "swap" :=
