@@ -223,7 +223,8 @@ Section WithParameters.
       | |- context G [app nil ?xs] =>
         let goal := context G [ xs ] in
         change goal
-    end.
+      end. Print filterio_cons.
+  Check lightbulb_spec.align_trace_cons.
 
   Ltac trace_alignment :=
     match goal with
@@ -232,8 +233,10 @@ Section WithParameters.
     | _ => fail
     end;
     repeat match goal with
-      | H1 : filterio _ = _ |- _  => idtac "12t"; simpl; rewrite H1
       | t := cons _ _ |- _ => subst t
+      end;
+    repeat match goal with
+      | H1 : filterio _ = _ |- context [ filterio _ ]  => (*idtac "12t";*) repeat rewrite filterio_cons; rewrite H1
       end;          
     repeat (eapply lightbulb_spec.align_trace_app
       || eapply lightbulb_spec.align_trace_cons
@@ -250,7 +253,9 @@ Section WithParameters.
 
 
   Local Ltac slv :=   
-      solve [ trivial | eauto 2 using TracePredicate.any_app_more | assumption | blia | trace_alignment | mmio_trace_abstraction ]. Check app_assoc. Search (_ :: _ = _ ++ _).
+    solve [ trivial | eauto 2 using TracePredicate.any_app_more | assumption | blia | (*trace_alignment |*) mmio_trace_abstraction ].
+  Local Ltac slv_wta :=
+    slv || solve [ trace_alignment ].
 
   Lemma cons_app_two {A : Type} (a : A) l : a :: l = [a] ++ l. Proof. reflexivity. Qed.
   Lemma cons_app {A : Type} (a b : A) l : a :: b :: l = [a] ++ b :: l. Proof. reflexivity. Qed.
@@ -266,29 +271,27 @@ Section WithParameters.
 
   Ltac t :=
     match goal with
-    | _ => idtac "1t"; (*try (rewrite <- app_assoc; progress cbn [app]);*) slv
-    | _ => idtac "2t"; progress evl
-
+    (*| H : filterio _ = _ |- context [filterio => repeat simple rewrite filterio_cons in H; try rewrite H in *; clear H*)
+    | _ => (*idtac "1t";*) slv
+    | _ => (*idtac "2t";*) progress evl
     | H :  _ /\ _ \/ ?Y /\ _, G : not ?X |- _ =>
         constr_eq X Y; let Z := fresh in destruct H as [|[Z ?]]; [|case (G Z)]
     | H :  not ?Y /\ _ \/ _ /\ _, G : ?X |- _ =>
         constr_eq X Y; let Z := fresh in destruct H as [[Z ?]|]; [case (Z G)|]
-    | |- exists x, _ /\ _ => idtac "5t"; eexists; split; [(*repeat cons_to_app; repeat rewrite (app_assoc _ _ (filterio _)); repeat f_equal;*) slv| repeat rewrite app_nil_r]
-    | |- exists x y, _ /\ _ => idtac "6t"; eexists; eexists; split; [(*try match goal with | |- _ ++ _ = _ ++ _ => repeat rewrite app_assoc end; repeat f_equal;*) slv| repeat rewrite app_nil_r]
-    | |- ?A /\ _ \/ ?B /\ _ => idtac "7t";
+    | |- exists x, _ /\ _ => (*idtac "5t";*) eexists; split; [slv_wta| repeat rewrite app_nil_r]
+    | |- exists x y, _ /\ _ => (*idtac "6t";*) eexists; eexists; split; [slv| repeat rewrite app_nil_r]
+    | |- ?A /\ _ \/ ?B /\ _ => (*idtac "7t";*)
         match goal with
         | H: A |- _ => left  | H: not B |- _ => left
         | H: B |- _ => right | H: not A |- _ => right
         end
 
-    | |- _ /\ _ => idtac "8t"; split; [repeat t|]
+    | |- _ /\ _ => (*idtac "8t";*) split; [repeat t|]
 
-    | _ => idtac "9t"; straightline
-    | _ => idtac "10t"; straightline_call; [  solve[repeat t].. | ]
-    | _ => idtac "11t"; split_if; [  solve[repeat t].. | ]
+    | _ => (*idtac "9t";*) straightline
+    | _ => (*idtac "10t";*) straightline_call; [  solve[repeat t].. | ]
+    | _ => (*idtac "11t";*) split_if; [  solve[repeat t].. | ]
     | |- WeakestPrecondition.cmd _ (cmd.interact _ _ _) _ _ _ _ => idtac "11t"; eapply WeakestPreconditionProperties.interact_nomem; [  solve[repeat t].. | ]
-   (*| H1 : filterio _ = _, H2 : filterio _ = _ |- _ => idtac "13t"; simpl; (rewrite H1 || rewrite H2)
-    | H1 : filterio _ = _, H2 : filterio _ = _, H3 : filterio _ = _ |- _ => idtac "14t"; simpl; (rewrite H1 || rewrite H2 || rewrite H3)*)
     end.
 
   Import Word.Properties.
@@ -301,6 +304,7 @@ Section WithParameters.
     straightline_call.
     { clear -word_ok; rewrite word.unsigned_of_Z; cbv; split; congruence. }
     repeat t.
+    split_if; repeat t.
     { intuition eauto using TracePredicate.any_app_more. }
     straightline_call.
     { clear -word_ok; rewrite word.unsigned_of_Z; cbv; split; congruence. }
@@ -378,7 +382,7 @@ Section WithParameters.
       match goal with |- word.unsigned ?x < _ => let H := unsigned.zify_expr x in rewrite H end.
       Z.div_mod_to_equations. blia.
     }
-    t. t. t. t. t. t. t. t. t. repeat t.
+    repeat t.
 
     straightline_call.
     1: {
@@ -395,6 +399,7 @@ Section WithParameters.
       Z.div_mod_to_equations. blia.
     }
 
+    t.
     t.
     t.
     t.
@@ -644,7 +649,7 @@ Section WithParameters.
 
   Lemma lan9250_readword_ok : program_logic_goal_for_function! lan9250_readword.
   Proof.
-    Time repeat straightline. repeat t.
+    Time repeat straightline.
 
     repeat match goal with
       | H :  _ /\ _ \/ ?Y /\ _, G : not ?X |- _ =>
@@ -685,7 +690,7 @@ Section WithParameters.
       rewrite !word.unsigned_of_Z; cbv [word.wrap];
     trivial; cbv -[Z.le Z.lt]; blia.
     Time all: repeat t.
-    (* Finished transaction in 4.201 secs (4.185u,0.015s) (successful) *)
+    (* Finished transaction in 9.118 secs (4.185u,0.015s) (successful) *)
     (* what was here before took only ~1.2 seconds, but it was like 20 lines longer and
        less robust (I broke it with my changes to the trace, and I couldn't easily fix it).
        I think it's worth keeping the one-line, slower script. not sure though. *)
@@ -784,13 +789,14 @@ Section WithParameters.
 
   Lemma lan9250_tx_ok : program_logic_goal_for_function! lan9250_tx.
   Proof.
-    Time repeat t. Print t.
+    Time repeat t. (*Print t.
     repeat (subst || straightline || straightline_call || ZnWords || intuition eauto || esplit).
-    Time repeat t.
+    Time repeat t.*)
     straightline_call; [ZnWords|].
     repeat (intuition idtac; repeat straightline); [repeat t|].
     eexists. eexists. split; repeat (straightline; intuition eauto).
     straightline_call; [ZnWords|].
+    repeat t.
     refine (Loops.tailrec_earlyout
       (HList.polymorphic_list.cons (list Byte.byte) (HList.polymorphic_list.cons (mem -> Prop) HList.polymorphic_list.nil))
       ["p";"l";"err"]
@@ -802,7 +808,7 @@ Section WithParameters.
         err = 0 :> Z
       )
       (fun T M P L ERR =>
-         M = m /\ exists iol, T = iol ++ t /\
+         M = m /\ exists iol, (filterio T) = iol ++ (filterio t) /\
         exists ioh, mmio_trace_abstraction_relation ioh iol /\ Logic.or
         (word.unsigned ERR <> 0 /\ (any +++ lightbulb_spec.spi_timeout _) ioh)
         (word.unsigned ERR = 0 /\ lightbulb_spec.lan9250_writepacket _ bs ioh)
@@ -820,53 +826,53 @@ Section WithParameters.
     { repeat straightline; eauto. }
     { repeat straightline.
       2: {
-        eapply word.if_zero in H16.
-        rewrite word.unsigned_ltu in H16.
-        autoforward with typeclass_instances in H16.
+        eapply word.if_zero in H18.
+        rewrite word.unsigned_ltu in H18.
+        autoforward with typeclass_instances in H18.
         destruct x5; cbn [List.length] in *; [|exfalso; ZnWords].
-        Tactics.ssplit; trivial. repeat t. }
+        Tactics.ssplit; trivial. repeat t. constructor. }
       subst br.
       rename l into l0.
       rename x8 into l.
-      rewrite word.unsigned_ltu in H16.
+      rewrite word.unsigned_ltu in H18.
       destr.destr Z.ltb.
-      2: { contradiction H16. rewrite word.unsigned_of_Z_0; trivial. }
-      pose proof word.unsigned_range l as Hl. rewrite H13 in Hl.
-      eapply (f_equal word.of_Z) in H13. rewrite word.of_Z_unsigned in H13.
+      2: { contradiction H18. rewrite word.unsigned_of_Z_0; trivial. }
+      pose proof word.unsigned_range l as Hl. rewrite H15 in Hl.
+      eapply (f_equal word.of_Z) in H15. rewrite word.of_Z_unsigned in H15.
       rewrite word.unsigned_of_Z in E; cbv [word.wrap] in E; rewrite Z.mod_small in E by blia.
       subst l.
       rename bs into bs0.
       rename x5 into bs.
-      rewrite <-(firstn_skipn 4 bs) in H15.
-      seprewrite_in @array_append H15.
-      seprewrite_in @scalar32_of_bytes H15.
+      rewrite <-(firstn_skipn 4 bs) in H17.
+      seprewrite_in @array_append H17.
+      seprewrite_in @scalar32_of_bytes H17.
       { autoforward with typeclass_instances in E.
         rewrite firstn_length. ZnWords. }
 
-      eexists; split; repeat straightline.
+      eexists; eexists; split; repeat straightline.
       straightline_call; repeat straightline.
       { ZnWords. }
 
-      seprewrite_in (symmetry! @scalar32_of_bytes) H15.
+      seprewrite_in (symmetry! @scalar32_of_bytes) H17.
       { autoforward with typeclass_instances in E.
         rewrite firstn_length. ZnWords. }
 
       rename x5 into err.
-      eexists; split; repeat straightline; intuition idtac.
-      { seprewrite_in (symmetry! @array_append) H15.
-        rewrite (firstn_skipn 4 bs) in H15.
+      eexists; eexists; split; repeat straightline; intuition idtac.
+      { seprewrite_in (symmetry! @array_append) H17.
+        rewrite (firstn_skipn 4 bs) in H17.
         repeat straightline.
         left; repeat t.
-        subst l br.
+        subst v0 br'.
         rewrite word.unsigned_ltu; rewrite ?word.unsigned_of_Z; cbn; ZnWords. }
 
       autoforward with typeclass_instances in E.
       repeat straightline.
-      right; repeat straightline.
-      subst l p.
+      right. repeat straightline.
+      subst v1 v0.
       Set Printing Coercions.
-      rewrite word.unsigned_of_Z_1, Z.mul_1_l, firstn_length, min_l in H15 by ZnWords.
-      progress change (Z.of_nat 4) with 4%Z in H15.
+      rewrite word.unsigned_of_Z_1, Z.mul_1_l, firstn_length, min_l in H17 by ZnWords.
+      progress change (Z.of_nat 4) with 4%Z in H17.
       eexists _, _, _; split; intuition eauto.
       3: ecancel_assumption.
       1: rewrite skipn_length; ZnWords.
@@ -874,11 +880,11 @@ Section WithParameters.
       split; repeat t; [ ZnWords .. |].
       intuition idtac; repeat t.
       do 4 (destruct bs as [|?b bs]; cbn [List.length] in *; try (exfalso; ZnWords));
-        cbn [List.skipn lan9250_writepacket] in *; rewrite app_nil_r.
+        cbn [List.skipn lan9250_writepacket] in *.
       eauto using concat_app. }
 
     repeat t; intuition eauto; repeat t.
-    rewrite app_nil_r. eapply concat_app; eauto. eapply concat_app; eauto.
+    eapply concat_app; eauto. eapply concat_app; eauto.
     Import Tactics.eplace.
     all : match goal with |- ?f ?x _ => eplace x with _ ; try eassumption end.
     all : f_equal; ZnWords.
