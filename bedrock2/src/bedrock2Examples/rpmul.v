@@ -21,7 +21,7 @@ From coqutil Require Import Word.Properties Word.Interface Tactics.letexists.
 
 #[export] Instance spec_of_rpmul : spec_of "rpmul" := fnspec! "rpmul" x e ~> v,
   { requires t m := True;
-    ensures t' m' := t=t' /\ m=m' /\
+    ensures t' m' := (filterio t)=(filterio t') /\ m=m' /\
       (* TODO could be expressed as just word.mul *)
       word.unsigned v = word.unsigned x * word.unsigned e mod 2^32 }.
 
@@ -50,7 +50,7 @@ Proof.
     (* types of ghost variables*) HList.polymorphic_list.nil
     (* program variables *) (["e";"ret";"x"] : list String.string))
     (fun v t m e ret x => PrimitivePair.pair.mk (v = word.unsigned e) (* precondition *)
-    (fun   T M E RET X => T = t /\ M = m /\ (* postcondition *)
+    (fun   T M E RET X => (filterio T) = (filterio t) /\ M = m /\ (* postcondition *)
         word.unsigned RET = (word.unsigned ret + word.unsigned x * word.unsigned e) mod 2^32))
     (fun n m => 0 <= n < m) (* well_founded relation *)
     _ _ _ _ _);
@@ -69,7 +69,7 @@ Proof.
   { (* loop test *)
     repeat straightline; try show_program.
     { (* loop body *)
-      letexists; split; [repeat straightline|]. (* if condition evaluation *)
+      letexists; letexists; split; [repeat straightline|]. (* if condition evaluation *)
       split. (* if cases, path-blasting *)
       {
         repeat (straightline || (split; trivial; [])). all:t.
@@ -113,5 +113,5 @@ Proof.
 
   repeat straightline.
 
-  repeat (split || letexists || t || trivial).
+  repeat (split || letexists || t || trace_alignment || trivial).
 Defined.

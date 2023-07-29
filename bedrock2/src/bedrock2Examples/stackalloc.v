@@ -58,7 +58,7 @@ Section WithParameters.
 
   Instance spec_of_stacknondet : spec_of "stacknondet" := fun functions => forall m t,
       WeakestPrecondition.call functions
-        "stacknondet" t m [] (fun t' m' rets => exists a b, rets = [a;b] /\ a = b /\ m'=m/\t'=t).
+        "stacknondet" t m [] (fun t' m' rets => exists a b, rets = [a;b] /\ a = b /\ m'=m/\(filterio t')=(filterio t)).
 
   Add Ring wring : (Properties.word.ring_theory (word := word))
       (preprocess [autorewrite with rew_word_morphism],

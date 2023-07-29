@@ -203,7 +203,7 @@ Section WithParameters.
   Instance spec_of_insertionsort : spec_of "insertionsort" :=
     fnspec! "insertionsort" addr n / xs R,
     { requires t m := n = word.of_Z (Z.of_nat (List.length xs)) /\ (array scalar32 (word.of_Z 4) addr xs * R) m;
-      ensures t' m' := t = t' /\ exists ys,
+      ensures t' m' := (filterio t) = (filterio t') /\ exists ys,
             Sorted ys /\ Permutation xs ys /\ (array scalar32 (word.of_Z 4) addr ys * R) m' }.
 
   Definition sorted_except(unsortedLen: nat)(addr: word)(xs: list word)(m: mem)(R: mem -> Prop): Prop :=
@@ -227,7 +227,7 @@ Section WithParameters.
            word.unsigned i + Z.of_nat unsortedLen = word.unsigned n /\
            a = addr /\
            sorted_except unsortedLen addr xs m R)
-          (fun T M A I N => T = t /\ sorted_except 0 addr xs M R))
+          (fun T M A I N => (filterio T) = (filterio t) /\ sorted_except 0 addr xs M R))
         lt _ (List.length xs) _ _ _);
     cbn [reconstruct map.putmany_of_list HList.tuple.to_list
          HList.hlist.foralls HList.tuple.foralls
@@ -245,15 +245,15 @@ Section WithParameters.
       unfold sorted_except. exists nil, xs. cbn [List.app]. eauto using perm_nil, Sorted_nil. }
     { repeat straightline. 2: {
         (* if break, post holds: *)
-        clear i n. (* TODO straightline_cleanup should clear these *)
+        clear v n. (* TODO straightline_cleanup should clear these *)
         rename x0 into i, x1 into n.
-        replace 0%nat with v. 1: auto. subst br.
+        replace 0%nat with v0. 1: auto. subst br.
         (* COQBUG https://github.com/coq/coq/issues/3051 *)
         let x := constr:(word.unsigned_ltu) in rewrite x in *.
         destruct_one_match_hyp; ZnWords.
       }
       (* if again, execute loop body: *)
-      clear i n.
+      clear v n.
       rename x0 into i, x1 into n.
       subst br.
       match goal with
@@ -266,7 +266,7 @@ Section WithParameters.
       | H: sorted_except _ _ _ _ _ |- _ => destruct H as (sorted & unsorted & ? & ? & ? & ?)
       end.
       destruct unsorted as [|e unsorted].
-      { assert (0 = v)%nat by assumption. exfalso. ZnWords. }
+      { assert (0 = v0)%nat by assumption. exfalso. ZnWords. }
       match goal with
       | H: (_ * _)%sep m0 |- _ => rename H into HM
       end.
@@ -281,7 +281,7 @@ Section WithParameters.
       match type of HM with
       | context[word.add _ (word.mul _ ?x)] => replace x with i in HM by ZnWords
       end.
-      eexists. split. {
+      eexists. eexists. split. {
         repeat straightline.
       }
       repeat straightline.
@@ -296,7 +296,7 @@ Section WithParameters.
              (forall k: nat, (k < List.length seenSorted)%nat -> word.unsigned (nth sorted k) <= word.unsigned e) /\
              (array scalar32 (word.of_Z 4) (word.add addr (word.mul (word.of_Z 4) j)) remSorted *
               scalar32 (word.add addr (word.mul (word.of_Z 4) i)) e * R) m)
-            (fun T M A I J N E => T = t /\ I = i /\ N = n /\ e = E /\ a = A /\
+            (fun T M A I J N E => (filterio T) = (filterio t) /\ I = i /\ N = n /\ e = E /\ a = A /\
               word.unsigned J <= word.unsigned i /\
               List.length remSorted = remSortedLen /\
               sorted = seenSorted ++ remSorted /\
@@ -322,19 +322,19 @@ Section WithParameters.
         repeat straightline. ssplit. all: reflexivity || ZnWords || idtac.
         { instantiate (1 := []). reflexivity. }
         { intros k C. inversion C. }
-        subst j.
+        subst v.
         match goal with
         | |- context[array _ _ ?a] => replace a with addr by ZnWords
         end.
         ecancel_assumption. }
       { repeat straightline.
-        clear j. subst sorted.
+        clear v. subst sorted.
         rename x4 into j, x into seenSorted, x0 into remSorted, v0 into remSortedLen, x1 into R'.
         destruct remSorted as [|e' remSorted].
         { (* exiting loop because element e itself has been reached *)
-          assert (0 = remSortedLen)%nat by assumption. subst remSortedLen.
+          assert (0 = v1)%nat by assumption. subst v1.
           assert (j = i) by ZnWords. subst j.
-          eexists. split. {
+          eexists. eexists. split. {
             repeat straightline.
           }
           split; intro C. {
@@ -370,7 +370,7 @@ Section WithParameters.
         | H: (_ * _) m1 |- _ => rename H into HM1
         end.
         seprewrite_in @array_cons HM1.
-        eexists. split. {
+        eexists. eexists. split. {
           repeat straightline.
         }
         split; intro C. 2: {
@@ -415,7 +415,7 @@ Section WithParameters.
             destruct D as [D | D].
             - auto.
             - subst k. rewrite List.nth_middle. Lia.lia. }
-          subst j.
+          subst v.
           use_sep_assumption. cancel.
           cancel_seps_at_indices 1%nat 0%nat. {
             f_equal. ZnWords.
@@ -441,7 +441,7 @@ Section WithParameters.
           ecancel_done.
         }
       }
-      repeat straightline. clear j.
+      repeat straightline. clear v.
       rename x into a, x1 into j, x3 into e.
       match goal with
       | H: (_ * _) m1 |- _ => rename H into HM1
@@ -480,7 +480,7 @@ Section WithParameters.
              | O => (* special precondition for just before exiting the loop: *)
                     word.unsigned j = word.unsigned i + 1 /\ toShift = [] /\ R m
              end)
-            (fun T M A I J N E => T = t /\ I = i /\ N = n /\ A = a /\
+            (fun T M A I J N E => (filterio T) = (filterio t) /\ I = i /\ N = n /\ A = a /\
                match StoShiftLen with
                | S toShiftLen =>
                  (array scalar32 (word.of_Z 4)
@@ -516,7 +516,7 @@ Section WithParameters.
         cbn [seps].
         cancel.
       }
-      { rename toShift into toShift_orig, R into R_orig, t into t0.
+      { rename toShift into toShift_orig, R into R_orig, t into t0'.
         intros StoShiftLen toShift R t m2 a i0 j n0 shelf.
         repeat straightline. 2: {
           (* if break, postcondition holds *)
@@ -559,7 +559,7 @@ Section WithParameters.
 
         subst toShiftLen.
         destruct toShift as [|e' toShift]; cycle 1; cbn [List.length] in *.
-        - subst j.
+        - subst v.
           rewrite <- List.app_comm_cons in Ey. injection Ey. clear Ey. intros. subst y ys.
           eexists _, _, (S (Datatypes.length toShift)). split.
           { (* precondition of next loop iteration holds *)
@@ -576,6 +576,7 @@ Section WithParameters.
           { (* postcondition of previous loop iteration implies postcondition of current loop iteration *)
             repeat straightline.
             ssplit. all: try reflexivity.
+            { trace_alignment. }
             SeparationLogic.seprewrite @array_cons.
             use_sep_assumption.
             cancel.
@@ -586,7 +587,7 @@ Section WithParameters.
               f_equal. ZnWords.
             }
             reflexivity. }
-        - subst j. cbn [List.app] in Ey.
+        - subst v. cbn [List.app] in Ey.
           injection Ey. clear Ey. intros. subst y ys.
           match goal with
           | H: (_ * _) m3 |- _ => rename H into HM3
@@ -600,6 +601,7 @@ Section WithParameters.
           { (* postcondition of previous loop iteration implies postcondition of current loop iteration *)
             repeat straightline.
             ssplit. all: try reflexivity.
+            { trace_alignment. }
             SeparationLogic.seprewrite @array_cons.
             SeparationLogic.seprewrite @array_nil.
             use_sep_assumption.
@@ -672,12 +674,12 @@ Section WithParameters.
         apply Permutation_app_comm.
       }
       split.
-      { (* measure decreases *) constructor. }
+      { (* measure decreases *) subst v0. constructor. }
       { (* postcondition of previous loop iteration implies postcondition of current loop iteration *)
-        repeat straightline. auto. }
+        repeat straightline. split; [trace_alignment|auto]. }
     }
     repeat straightline.
-    ssplit; try reflexivity.
+    ssplit; try trace_alignment.
     match goal with
     | H: sorted_except _ _ _ _ _ |- _ => destruct H as (sorted & unsorted & EL & HM0 & So & Pe)
     end.

@@ -65,7 +65,7 @@ Section WithParameters.
         m =*  array32 ps s * R /\ length s = 4;
       ensures T M := exists s,
         M =*  array32 ps s * R /\ length s = 4 /\
-        T = t /\ 2^128*c + eval s = eval a + eval b }.
+        (filterio T) = (filterio t) /\ 2^128*c + eval s = eval a + eval b }.
 
   Lemma ltu_as_carry (a b : word)
     (s : word := word.add a b)
@@ -86,8 +86,8 @@ Section WithParameters.
 
     repeat straightline.
     (* exfalso; clear dependent mem. *)
-    clear dependent pa; clear dependent pb. clear -H5 mem_ok word_ok.
-
+    clear -H5 mem_ok word_ok.
+    rename v1 into s0, v7 into s1, v14 into s2, v21 into s3.
     exists [s0; s1; s2; s3]; ssplit; try ecancel_assumption; trivial.
 
     (* repeat match goal with x := _ |- _ => subst x end. *)

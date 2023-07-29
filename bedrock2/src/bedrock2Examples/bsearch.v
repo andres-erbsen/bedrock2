@@ -38,7 +38,7 @@ Import HList List.
     \_ (right ^- left) = 8*Z.of_nat (Datatypes.length xs) ->
     WeakestPrecondition.call functions
       "bsearch"%string t m (left::right::target::nil)%list
-      (fun t' m' rets => t=t' /\ sep (array scalar (word.of_Z 8) left xs) R m' /\ exists i, rets = (i::nil)%list /\
+      (fun t' m' rets => (filterio t)=(filterio t') /\ sep (array scalar (word.of_Z 8) left xs) R m' /\ exists i, rets = (i::nil)%list /\
       ((*sorted*)False -> True)
       ).
 
@@ -57,7 +57,7 @@ Proof.
                                                (sep (array scalar (word.of_Z 8) left xs) R m /\
                                                 \_ (right ^- left) = 8*Z.of_nat (Datatypes.length xs) /\
                                                 List.length xs = l)
-        (fun        T M LEFT RIGHT TARGET => T = t /\ sep (array scalar (word.of_Z 8) left xs) R M))
+        (fun        T M LEFT RIGHT TARGET => (filterio T) = (filterio t) /\ sep (array scalar (word.of_Z 8) left xs) R M))
         lt _ _ _ _ _ _ _);
     cbn [reconstruct map.putmany_of_list HList.tuple.to_list
          HList.hlist.foralls HList.tuple.foralls
@@ -76,7 +76,7 @@ Proof.
     (* loop body *)
     rename H2 into length_rep. subst br.
     seprewrite @array_address_inbounds;
-       [ ..|(* if expression *) exact eq_refl|letexists; split; [repeat straightline|]]. (* determines element *)
+       [ ..|(* if expression *) exact eq_refl|letexists; letexists; split; [repeat straightline|]]. (* determines element *)
     { ZnWords. }
     { ZnWords. }
     (* split if cases *) split; repeat straightline. (* code is processed, loop-go-again goals left behind *)
@@ -92,7 +92,7 @@ Proof.
       { ZnWords. }
       { ZnWords. }
       { trivial. }
-      { SeparationLogic.ecancel_assumption. } }
+      { split; try trace_alignment. SeparationLogic.ecancel_assumption. } }
     (* second branch of the if, very similar goals... *)
     { repeat letexists. split.
       1:split.
@@ -107,7 +107,7 @@ Proof.
       { ZnWords. }
       { ZnWords. }
       { ZnWords. }
-      { SeparationLogic.ecancel_assumption. } } }
+      { split; try trace_alignment. SeparationLogic.ecancel_assumption. } } }
   repeat straightline.
   repeat apply conj; auto; []. (* postcondition *)
   letexists. split.

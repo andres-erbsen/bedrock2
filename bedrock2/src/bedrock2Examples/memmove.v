@@ -26,7 +26,7 @@ Section WithParameters.
     fnspec! "memmove" (dst src n : word) / (d s : list byte) (R Rs : mem -> Prop),
     { requires t m := m =* s$@src * Rs /\ m =* d$@dst * R /\
         length s = n :> Z /\ length d = n :> Z /\ n <= 2^(width-1);
-      ensures t' m := m =* s$@dst * R /\ t=t' }.
+      ensures t' m := m =* s$@dst * R /\ (filterio t)=(filterio t') }.
 
 
   Definition memmove := func! (dst, src, n) {
@@ -120,7 +120,7 @@ Section WithParameters.
           x + n < 2^width /\ map.split m (s$@src) mRs /\  map.split m (d$@dst) mRd /\
           x = word.sub src dst /\ v=n :> Z /\ length s = n :> Z /\ length d = n :> Z
         )
-        (fun                     T M DST SRC N X => t = T   /\  map.split M (s$@dst) mRd))
+        (fun                     T M DST SRC N X => (filterio t) = (filterio T)   /\  map.split M (s$@dst) mRd))
         lt
         _ _ _ _ _ _ _ _ _);
         (* TODO wrap this into a tactic with the previous refine *)
@@ -143,7 +143,7 @@ Section WithParameters.
         { intros ?v ?s ?mRs ?d ?mRd ?t ?m ?dst ?src ?n ?x.
           repeat straightline.
           cbn in localsmap.
-          eexists n0; split; cbv [expr expr_body localsmap get].
+          eexists n0. eexists t0. split; cbv [dexpr expr expr_body localsmap get].
           { rewrite ?Properties.map.get_put_dec. exists n0; cbn. auto. }
           split; cycle 1.
           { intros Ht; rewrite Ht in *.
@@ -193,11 +193,14 @@ Section WithParameters.
           repeat (rewrite ?map.get_put_dec, ?map.get_remove_dec; cbn).
           eexists.
           eexists.
+          eexists.
           { eauto. }
+          eexists.
           eexists.
           repeat (rewrite ?map.get_put_dec, ?map.get_remove_dec; cbn).
           eexists.
           { eauto. }
+          eexists.
           eexists.
           eexists.
           { eauto. }
@@ -255,7 +258,7 @@ Section WithParameters.
                     map.split m (d$@(word.sub dst (word.sub n (word.of_Z 1)))) mRd /\
           x = word.sub src dst /\ v=n :> Z /\ length s = n :> Z /\ length d = n :> Z
         )
-        (fun                     T M DST SRC N X => t = T   /\  map.split M (s$@(word.sub dst (word.sub n (word.of_Z 1)))) mRd))
+        (fun                     T M DST SRC N X => (filterio t) = (filterio T)   /\  map.split M (s$@(word.sub dst (word.sub n (word.of_Z 1)))) mRd))
         lt
         _ _ _ _ _ _ _ _ _);
         (* TODO wrap this into a tactic with the previous refine *)
@@ -278,7 +281,7 @@ Section WithParameters.
         { intros ?v ?s ?mRs ?d ?mRd ?t ?m ?dst ?src ?n ?x.
           repeat straightline.
           cbn in localsmap.
-          eexists n0; split; cbv [expr expr_body localsmap get].
+          eexists n0; eexists t0; split; cbv [dexpr expr expr_body localsmap get].
           { rewrite ?Properties.map.get_put_dec. exists n0; cbn. auto. }
           split; cycle 1.
           { intros Ht; rewrite Ht in *.
@@ -334,11 +337,14 @@ Section WithParameters.
           repeat (rewrite ?map.get_put_dec, ?map.get_remove_dec; cbn).
           eexists.
           eexists.
+          eexists.
           { eauto. }
+          eexists.
           eexists.
           repeat (rewrite ?map.get_put_dec, ?map.get_remove_dec; cbn).
           eexists.
           { eauto. }
+          eexists.
           eexists.
           eexists.
           { eauto. }
@@ -378,7 +384,7 @@ Section WithParameters.
     fnspec! "memmove" (dst src n : word) / (d s : list byte) (R Rs : mem -> Prop),
     { requires t m := m =* s$@src * Rs /\ m =* d$@dst * R /\
         length s = n :> Z /\ length d = n :> Z /\ n <= 2^(width-1);
-      ensures t' m := m =* s$@dst * R /\ t=t' }.
+      ensures t' m := m =* s$@dst * R /\ (filterio t)=(filterio t') }.
 
   Lemma memmove_ok_array : program_logic_goal_for_function! memmove.
   Proof.

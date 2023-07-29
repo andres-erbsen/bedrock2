@@ -103,7 +103,7 @@ Section WithParameters.
       length buf = 1520%nat ->
       WeakestPrecondition.call functions "recvEthernet" t m [p_addr] (fun t' m' rets =>
         exists bytes_written err, rets = [bytes_written; err] /\
-        exists iol, t' = iol ++ t /\
+        exists iol, (filterio t') = iol ++ (filterio t) /\
         exists ioh, mmio_trace_abstraction_relation ioh iol /\ Logic.or
           (word.unsigned err = 0 /\
             exists recv buf, (bytes p_addr recv * bytes (word.add p_addr bytes_written) buf * R) m' /\ lan9250_recv _ recv ioh /\
@@ -122,7 +122,7 @@ Section WithParameters.
       word.unsigned len = Z.of_nat (List.length buf) ->
       WeakestPrecondition.call functions "lightbulb_handle" t m [p_addr; len]
         (fun t' m' rets => exists v, rets = [v] /\ m' = m /\
-        exists iol, t' = iol ++ t /\
+        exists iol, (filterio t') = iol ++ (filterio t) /\
         exists ioh, mmio_trace_abstraction_relation ioh iol /\ Logic.or
           (exists cmd, lightbulb_packet_rep _ cmd buf /\ gpio_set _ 23 cmd ioh /\ word.unsigned v = 0)
           (not (exists cmd, lightbulb_packet_rep _ cmd buf) /\ ioh = nil /\ word.unsigned v <> 0)
@@ -136,7 +136,7 @@ Section WithParameters.
         (fun t' m' rets => exists v, rets = [v] /\
         (exists buf, (bytes p_addr buf * R) m' /\
         Z.of_nat (length buf) = 1520) /\
-        exists iol, t' = iol ++ t /\
+        exists iol, (filterio t') = iol ++ (filterio t) /\
         exists ioh, mmio_trace_abstraction_relation ioh iol /\ (
           (exists packet cmd, (lan9250_recv _ packet +++ gpio_set _ 23 cmd) ioh /\ lightbulb_packet_rep _ cmd packet /\ word.unsigned v = 0) \/
           (exists packet, (lan9250_recv _ packet) ioh /\ not (exists cmd, lightbulb_packet_rep _ cmd packet) /\ word.unsigned v = 0) \/
@@ -149,7 +149,7 @@ Section WithParameters.
     forall m t,
       WeakestPrecondition.call functions "lightbulb_init" t m nil
         (fun t' m' rets => rets = [] /\ m' = m /\
-          exists iol, t' = iol ++ t /\
+          exists iol, (filterio t') = iol ++ (filterio t) /\
           exists ioh, mmio_trace_abstraction_relation ioh iol /\
           BootSeq _ ioh
         ).
@@ -179,7 +179,7 @@ Section WithParameters.
       |- WeakestPrecondition.cmd _ ?c _ _ _ ?post =>
       let c := eval hnf in c in
           lazymatch c with
-          | cmd.cond _ _ _ => letexists; split; [solve[repeat straightline]|split]
+          | cmd.cond _ _ _ => letexists; letexists; split; [solve[repeat straightline]|split]
           end
     end.
 
@@ -209,10 +209,10 @@ Section WithParameters.
     straightline_call; repeat straightline.
     eexists; split; trivial.
 
-    1: repeat (eapply align_trace_cons || exact (eq_sym (List.app_nil_l _)) || eapply align_trace_app).
+    1: trace_alignment.
 
     eexists; split; cbv [mmio_trace_abstraction_relation].
-    1:repeat (eapply List.Forall2_cons || eapply List.Forall2_refl || eapply List.Forall2_app; eauto).
+    1: repeat (eapply List.Forall2_cons || eapply List.Forall2_refl || eapply List.Forall2_app; eauto).
     1,2 : match goal with
     |- mmio_event_abstraction_relation _ _ =>
         (left+right); eexists _, _; split; exact eq_refl
@@ -231,13 +231,14 @@ Section WithParameters.
           || straightline || straightline_call || split_if || ecancel_assumption || eauto || blia).
     all : split; [shelve|].
     all : eexists; split.
-    all: repeat (eapply align_trace_cons || exact (eq_sym (List.app_nil_l _)) || eapply align_trace_app).
+    all: try trace_alignment.
+    all: repeat (rewrite List.app_nil_r || rewrite List.app_nil_l).
     all : eexists; split.
-    all : try subst err; rewrite ?word.unsigned_of_Z.
+    all : try subst v; try subst v0; rewrite ?word.unsigned_of_Z.
     all : repeat (eapply List.Forall2_cons || eapply List.Forall2_refl || eapply List.Forall2_app || eauto 15 using concat_app).
-    { subst v. rewrite word.unsigned_xor_nowrap, H10, word.unsigned_of_Z in H4. case (H4 eq_refl). }
-    { subst v. rewrite word.unsigned_xor_nowrap, H9, word.unsigned_of_Z in H4. inversion H4. }
-    { subst v. rewrite word.unsigned_xor_nowrap, H9, word.unsigned_of_Z in H4. inversion H4. }
+    { rewrite word.unsigned_xor_nowrap, H10, word.unsigned_of_Z in H9. case (H9 eq_refl). }
+    { rewrite word.unsigned_xor_nowrap, H9, word.unsigned_of_Z in H10. inversion H10. }
+    { rewrite word.unsigned_xor_nowrap, H9, word.unsigned_of_Z in H10. inversion H10. }
 
     Unshelve.
     all : eexists; split; [ eauto | ].
@@ -275,14 +276,14 @@ Section WithParameters.
   Lemma lightbulb_handle_ok : program_logic_goal_for_function! lightbulb_handle.
   Proof.
     repeat (eauto || straightline || split_if || eapply interact_nomem || prove_ext_spec || trans_ltu).
-    all: subst r.
+    all: subst v; subst v1.
     1: replace (word.unsigned (word.of_Z 42)) with 42 in * by ZnWords.ZnWords.
     2: {
       eexists nil; split; eauto.
       eexists nil; split; cbv [mmio_trace_abstraction_relation]; eauto using List.Forall2_refl.
       right; repeat split; eauto.
       { intros (?&?&?). ZnWords.ZnWords. }
-      intros HX; rewrite ?word.unsigned_of_Z in HX; inversion HX. }
+      intros HX. rewrite word.unsigned_of_Z in HX. inversion HX. }
 
     seplog_use_array_load1 H 12.
     seplog_use_array_load1 H 13.
@@ -291,13 +292,13 @@ Section WithParameters.
     unshelve (repeat (eauto || straightline || split_if || eapply interact_nomem || prove_ext_spec)).
 
     1: letexists; split; [exact eq_refl|]; split; [split; trivial|].
-    { subst addr r; cbv [isMMIOAddr];
+    { subst addr v12; cbv [isMMIOAddr];
       rewrite !word.unsigned_of_Z; split; trivial.
       cbv -[Z.le Z.lt]. blia. }
     1: repeat straightline.
     1: repeat straightline; eapply interact_nomem; repeat straightline.
     1: letexists; letexists; split; [exact eq_refl|]; split; [split; trivial|].
-    { subst addr r; cbv [isMMIOAddr];
+    { subst addr v12; cbv [isMMIOAddr];
       rewrite !word.unsigned_of_Z; split; trivial.
       cbv -[Z.le Z.lt]. blia. }
     1: repeat straightline.
@@ -375,9 +376,9 @@ Section WithParameters.
     straightline.
     rename H into Hcall; clear H0 H1. rename H2 into H. rename H3 into H0.
     repeat (straightline || split_if || straightline_call || eauto 99 || prove_ext_spec || ZnWords).
-
+    
     3: {
-
+    rename v4 into num_bytes.
     refine (Loops.tailrec_earlyout
       (HList.polymorphic_list.cons (list byte) (HList.polymorphic_list.cons (mem -> Prop) HList.polymorphic_list.nil))
       ["buf";"num_bytes";"i";"read";"err"]
@@ -391,7 +392,7 @@ Section WithParameters.
          NUM_BYTES = num_bytes_loop /\
          exists RECV, (bytes (word.add buf i) RECV * R) M /\
          List.length RECV = List.length scratch /\
-         exists iol, T = iol ++ t /\ exists ioh, mmio_trace_abstraction_relation ioh iol /\
+         exists iol, (filterio T) = iol ++ (filterio t) /\ exists ioh, mmio_trace_abstraction_relation ioh iol /\
          (word.unsigned ERR = 0 /\ lan9250_readpacket _ RECV ioh \/
           word.unsigned ERR = 2^32-1 /\ TracePredicate.concat TracePredicate.any (spi_timeout _) ioh ) )
       )
@@ -409,7 +410,7 @@ Section WithParameters.
 
     {
       repeat (split; [trivial||ZnWords|]).
-      replace (word.add p_addr i) with p_addr by (subst i; ring).
+      replace (word.add p_addr v6) with p_addr by (subst v6; ring).
       progress trans_ltu.
 
       scancel_asm.
@@ -427,17 +428,18 @@ Section WithParameters.
           straightline.
           straightline.
           (* [repeat straightline] hangs *)
-          do 5 eexists; split; [repeat straightline|]; [].
+          do 8 eexists; split; [repeat straightline|]; [].
           left.
           repeat straightline.
-          { subst br0. rewrite word.unsigned_ltu, Z.ltb_irrefl, word.unsigned_of_Z; exact eq_refl. }
+          { subst br'. rewrite word.unsigned_ltu, Z.ltb_irrefl, word.unsigned_of_Z; exact eq_refl. }
           eexists; split; eauto.
           split; eauto.
           eexists; split.
-          { subst a; eauto. }
+          { trace_alignment. }
+          repeat (rewrite List.app_nil_r || rewrite List.app_nil_l).
           eexists; split; eauto.
           right; split.
-          { subst err. rewrite word.unsigned_of_Z. exact eq_refl. }
+          { subst v7. rewrite word.unsigned_of_Z. exact eq_refl. }
           intuition eauto. }
 
         (* store *)
@@ -462,19 +464,19 @@ Section WithParameters.
         { eapply List.length_firstn_inbounds; Z.div_mod_to_equations; blia. }
         straightline.
         (* after store *)
-        do 3 straightline.
+        do 6 straightline.
         (* TODO straightline hangs in Loops.enforce *)
         do 5 letexists. split. { repeat straightline. }
         right. do 3 letexists.
         repeat split; repeat straightline; repeat split.
         { intuition idtac. }
-        { subst i.
+        { subst v7.
           rewrite word.unsigned_add; cbv [word.wrap]; rewrite Z.mod_small;
           replace (word.unsigned (word.of_Z 4)) with 4.
           2,4: rewrite word.unsigned_of_Z; exact eq_refl.
           1,2: try (Z.div_mod_to_equations; blia). }
-        { replace (word.add x9 i)
-            with (word.add (word.add x9 x11) (word.of_Z 4)) by (subst i; ring).
+        { replace (word.add x9 v7)
+            with (word.add (word.add x9 x11) (word.of_Z 4)) by (subst v7; ring).
           ecancel_assumption. }
         { match goal with x1 := _ |- _ => subst x1; rewrite List.length_skipn end.
           ZnWords. }
@@ -487,21 +489,22 @@ Section WithParameters.
             cbv [scalar32 truncated_word truncate_word truncate_Z truncated_scalar littleendian ptsto_bytes.ptsto_bytes] in *.
             progress replace (word.add x9 (word.add x11 (word.of_Z 4))) with
                     (word.add (word.add x9 x11) (word.of_Z 4)) in * by ring.
-            SeparationLogic.seprewrite_in (@bytearray_index_merge) H25.
+            SeparationLogic.seprewrite_in (@bytearray_index_merge) H28.
             { rewrite word.unsigned_of_Z; exact eq_refl. } { ecancel_assumption. } }
           { subst RECV. rewrite List.app_length.
-            rewrite H26. subst x22. rewrite List.length_skipn.
+            rewrite H29. subst x22. rewrite List.length_skipn.
             unshelve erewrite (_ : length (HList.tuple.to_list _) = 4%nat); [exact eq_refl|].
             enough ((4 <= length x7)%nat) by blia.
             Z.div_mod_to_equations; blia. }
           cbv [truncate_word truncate_Z] in *.
           repeat match goal with x := _ |- _ => is_var x; subst x end; subst.
           eexists; split.
-          { rewrite List.app_assoc; eauto. }
+          { trace_alignment. }
+          repeat (rewrite List.app_nil_r || rewrite List.app_nil_l).
           eexists; split.
           { eapply List.Forall2_app; eauto.  }
           rewrite HList.tuple.to_list_of_list.
-          destruct H29; [left|right]; repeat (straightline || split || eauto using TracePredicate.any_app_more).
+          destruct H32; [left|right]; repeat (straightline || split || eauto using TracePredicate.any_app_more).
           eapply TracePredicate.concat_app; eauto.
           unshelve erewrite (_ : LittleEndianList.le_combine _ = word.unsigned x10); rewrite ?word.of_Z_unsigned; try solve [intuition idtac].
           {
@@ -514,25 +517,25 @@ Section WithParameters.
         left. split; eauto.
         enough (Hlen : length x7 = 0%nat) by (destruct x7; try solve[inversion Hlen]; exact eq_refl).
         PreOmega.zify.
-        rewrite H13.
+        rewrite H15.
         subst br.
-        rewrite word.unsigned_ltu in H11.
+        rewrite word.unsigned_ltu in H13.
         destruct (Z.ltb (word.unsigned x11) (word.unsigned num_bytes)) eqn:HJ.
-        { rewrite word.unsigned_of_Z in H11. inversion H11. }
+        { rewrite word.unsigned_of_Z in H13. inversion H13. }
         eapply Z.ltb_nlt in HJ.
         ZnWords. }
       repeat straightline.
 
-      subst i.
+      subst v6.
       progress replace (Z.to_nat (word.unsigned (word.sub p_addr p_addr) / 1)) with O in * by ZnWords.
       rewrite ?word.add_0_r, ?word.sub_0_r, ?Z.mul_1_l, ?Nat.add_0_l, ?Z2Nat.id, ?word.of_Z_unsigned in * by apply word.unsigned_range.
 
       eexists; split.
-      1: { repeat match goal with |- context [?x] => match type of x with list _ => subst x end end.
-        repeat rewrite List.app_assoc. f_equal. }
+      { trace_alignment. }
+      repeat (rewrite List.app_nil_r || rewrite List.app_nil_l).
       eexists; split.
       1:repeat eapply List.Forall2_app; eauto.
-      destruct H14; [left|right]; repeat straightline; repeat split; eauto.
+      destruct H16; [left|right]; repeat straightline; repeat split; eauto.
       { progress trans_ltu.
         cbn [List.firstn array] in *.
         replace (word.unsigned (word.of_Z 1521)) with 1521 in *
@@ -541,18 +544,18 @@ Section WithParameters.
         { cbn [seps] in *. SeparationLogic.ecancel_assumption. }
         { revert dependent x2. revert dependent x6. intros.
           destruct H5; repeat straightline; try contradiction.
-          destruct H9; repeat straightline; try contradiction.
+          destruct H10; repeat straightline; try contradiction.
           eexists _, _; split.
-          { rewrite <-!List.app_assoc. eauto using TracePredicate.concat_app. }
+          { eauto using TracePredicate.concat_app. }
           split; [zify_unsigned; eauto|].
         { cbv beta delta [lan9250_decode_length].
-          rewrite H11. rewrite List.firstn_length, Znat.Nat2Z.inj_min.
+          rewrite H13. rewrite List.firstn_length, Znat.Nat2Z.inj_min.
           replace (word.sub num_bytes (word.of_Z 0)) with num_bytes by ring; cbn [List.skipn].
           rewrite ?Znat.Z2Nat.id by eapply word.unsigned_range.
           transitivity (word.unsigned num_bytes); [ZnWords|exact eq_refl]. } }
         { pose proof word.unsigned_range num_bytes.
           rewrite List.length_skipn. blia. }
-        rewrite H11, List.length_firstn_inbounds, ?Znat.Z2Nat.id; cbn [List.skipn].
+        rewrite H13, List.length_firstn_inbounds, ?Znat.Z2Nat.id; cbn [List.skipn].
         all: try ZnWords.
         }
       { repeat match goal with H : _ |- _ => rewrite H; intro HX; solve[inversion HX] end. }
@@ -561,22 +564,21 @@ Section WithParameters.
           (rewrite word.unsigned_of_Z; exact eq_refl).
         all : cbn [seps array List.firstn List.skipn] in *.
         eexists _; split; eauto; repeat split; try blia.
-        { SeparationLogic.seprewrite_in @bytearray_index_merge H10.
-          { rewrite H11, List.firstn_length. ZnWords. }
+        { SeparationLogic.seprewrite_in @bytearray_index_merge H12.
+          { rewrite H13, List.firstn_length. ZnWords. }
           eassumption. }
-        { 1:rewrite List.app_length, List.length_skipn, H11, List.firstn_length.
+        { 1:rewrite List.app_length, List.length_skipn, H13, List.firstn_length.
           replace (word.sub num_bytes (word.of_Z 0)) with num_bytes by ring.
           enough (Z.to_nat (word.unsigned num_bytes) <= length buf)%nat by ZnWords.
           rewrite ?Znat.Z2Nat.id by eapply word.unsigned_range; blia. }
         right. right. split; eauto using TracePredicate.any_app_more. } }
 
     all: eexists; split;
-      [repeat match goal with |- context [?x] => match type of x with list _ => subst x end end;
-      rewrite ?List.app_assoc; eauto|].
+      [trace_alignment|repeat (rewrite List.app_nil_l || rewrite List.app_nil_r)].
     all: eexists; split;
       [repeat eapply List.Forall2_app; eauto|].
     all:
-      right; subst err;
+      right; try subst v0; try subst v1; try subst v6;
       split; [intro HX; rewrite word.unsigned_of_Z in HX; inversion HX|].
     all : repeat ((eexists; split; [solve[eauto]|]) || (split; [solve[eauto]|])).
     all : rewrite !word.unsigned_of_Z.
@@ -594,11 +596,12 @@ Section WithParameters.
       left; split; [exact eq_refl|].
       eexists _, _; split.
       1:eapply TracePredicate.concat_app; try intuition eassumption.
-      subst v0.
-      rewrite word.unsigned_ltu in H6.
+      subst v5.
+      rewrite word.unsigned_ltu in H7.
 
+      rename v4 into num_bytes.
       destruct (Z.ltb (word.unsigned num_bytes) (word.unsigned (word.of_Z 1521))) eqn:?.
-      all : rewrite word.unsigned_of_Z in Heqb, H6; try inversion H6.
+      all : rewrite word.unsigned_of_Z in Heqb, H7; try inversion H7.
       eapply Z.ltb_nlt in Heqb; revert Heqb.
       repeat match goal with |- context [?x] => match type of x with _ => subst x end end.
       cbv [lan9250_decode_length]. split. 2: cbn in *; blia.

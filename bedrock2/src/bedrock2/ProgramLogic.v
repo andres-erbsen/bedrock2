@@ -1,5 +1,5 @@
 From coqutil.Tactics Require Import Tactics letexists eabstract rdelta reference_to_string ident_of_string.
-Require Import bedrock2.Syntax.
+Require Import bedrock2.Syntax bedrock2.Semantics.
 Require Import bedrock2.WeakestPrecondition.
 Require Import bedrock2.WeakestPreconditionProperties.
 Require Import bedrock2.Loops.
@@ -10,6 +10,23 @@ Existing Class spec_of.
 
 Definition ct_spec_of (procname:String.string) := list (String.string * (list String.string * list String.string * Syntax.cmd.cmd)) -> Prop.
 Existing Class ct_spec_of.
+
+(* not sure where to put these lemmas *)
+Lemma align_trace_cons {T} x xs cont t (H : xs = app cont t) : @cons T x xs = app (cons x cont) t.
+Proof. intros. cbn. congruence. Qed.
+Lemma align_trace_app {T} x xs cont t (H : xs = app cont t) : @app T x xs = app (app x cont) t.
+Proof. intros. cbn. subst. rewrite List.app_assoc; trivial. Qed.
+
+Ltac trace_alignment :=
+    repeat match goal with
+      | t := cons _ _ |- _ => subst t
+      end;
+    repeat match goal with
+      | H1 : filterio _ = _ |- context [ filterio _ ]  => (*idtac "12t";*) repeat rewrite filterio_cons; rewrite H1
+      end;          
+    repeat (eapply align_trace_app
+      || eapply align_trace_cons
+      || exact (eq_refl (app nil _))).
 
 Module Import Coercions.
   Import Map.Interface Word.Interface BinInt.

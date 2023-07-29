@@ -223,24 +223,15 @@ Section WithParameters.
       | |- context G [app nil ?xs] =>
         let goal := context G [ xs ] in
         change goal
-      end. Print filterio_cons.
-  Check lightbulb_spec.align_trace_cons.
+      end.
 
-  Ltac trace_alignment :=
+  Ltac maybe_faster_trace_alignment :=
     match goal with
     | |- eq _ _ => idtac
     | |- exists _, @eq (list _) _ _ => idtac
     | _ => fail
     end;
-    repeat match goal with
-      | t := cons _ _ |- _ => subst t
-      end;
-    repeat match goal with
-      | H1 : filterio _ = _ |- context [ filterio _ ]  => (*idtac "12t";*) repeat rewrite filterio_cons; rewrite H1
-      end;          
-    repeat (eapply lightbulb_spec.align_trace_app
-      || eapply lightbulb_spec.align_trace_cons
-      || exact (eq_refl (app nil _))).
+    trace_alignment.
 
   Ltac mmio_trace_abstraction :=
     repeat match goal with
@@ -251,27 +242,13 @@ Section WithParameters.
         (left + right); eexists _, _; split; exact eq_refl
     end.
 
-
   Local Ltac slv :=   
-    solve [ trivial | eauto 2 using TracePredicate.any_app_more | assumption | blia | (*trace_alignment |*) mmio_trace_abstraction ].
+    solve [ trivial | eauto 2 using TracePredicate.any_app_more | assumption | blia | mmio_trace_abstraction ].
   Local Ltac slv_wta :=
-    slv || solve [ trace_alignment ].
-
-  Lemma cons_app_two {A : Type} (a : A) l : a :: l = [a] ++ l. Proof. reflexivity. Qed.
-  Lemma cons_app {A : Type} (a b : A) l : a :: b :: l = [a] ++ b :: l. Proof. reflexivity. Qed.
-
-  Ltac cons_to_app :=
-    multimatch goal with
-    | |- context [ ?a :: ?b ] =>
-        lazymatch b with
-        | @nil _ => idtac
-        | _ => rewrite (cons_app_two a b)
-        end
-    end.
+    slv || solve [ maybe_faster_trace_alignment ].
 
   Ltac t :=
     match goal with
-    (*| H : filterio _ = _ |- context [filterio => repeat simple rewrite filterio_cons in H; try rewrite H in *; clear H*)
     | _ => (*idtac "1t";*) slv
     | _ => (*idtac "2t";*) progress evl
     | H :  _ /\ _ \/ ?Y /\ _, G : not ?X |- _ =>

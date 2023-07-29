@@ -50,7 +50,12 @@ Definition filterio {width: Z}{BW: Bitwidth width}{word: word.word width}{mem: m
                 | _ => nil
                 end) t.
 
-Print access_size.access_size.
+Lemma filterio_cons {width: Z}{BW: Bitwidth width}{word: word.word width}{mem: map.map word byte} (t : trace) (e : event) :
+  filterio (e :: t) = match e with
+                     | IOevent e => cons e nil
+                     | _ => nil
+                      end ++ filterio t.
+Proof. reflexivity. Qed.
                             
 Definition ExtSpec{width: Z}{BW: Bitwidth width}{word: word.word width}{mem: map.map word byte} :=
   (* Given a trace of what happened so far,

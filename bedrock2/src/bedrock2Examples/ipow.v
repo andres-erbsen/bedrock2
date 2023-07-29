@@ -67,7 +67,7 @@ Proof.
     (* types of ghost variables*) HList.polymorphic_list.nil
     (* program variables *) (["e";"ret";"x"] : list String.string))
     (fun v t m e ret x => PrimitivePair.pair.mk (v = word.unsigned e) (* precondition *)
-    (fun   T M E RET X => T = t /\ M = m /\ (* postcondition *)
+    (fun   T M E RET X => (filterio T) = (filterio t) /\ M = m /\ (* postcondition *)
         word.unsigned RET = word.unsigned ret * word.unsigned x ^ word.unsigned e mod 2^64))
     (fun n m => 0 <= n < m) (* well_founded relation *)
     _ _ _ _ _);
@@ -86,7 +86,7 @@ Proof.
   { (* loop test *)
     repeat straightline; try show_program.
     { (* loop body *)
-      letexists; split; [repeat straightline|]. (* if condition evaluation *)
+      letexists; letexists; split; [repeat straightline|]. (* if condition evaluation *)
       split. (* if cases, path-blasting *)
       {
         repeat (straightline || (split; trivial; [])). all:t.
