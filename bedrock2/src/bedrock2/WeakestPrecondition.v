@@ -280,6 +280,27 @@ Notation "'ctfunc!' name a0 .. an '|' b0 .. bn '/' g0 .. gn '|' h0 .. hn ',' '{'
              tr name, mem name,
              pre at level 200).
 
+(* a's are public, b's are private. g's public, h's private. *)
+Notation "'ctfunc!' name '|' '/' g0 .. gn '|' h0 .. hn ',' '{' 'requires' tr mem := pre '}'" :=
+  (fun functions =>
+     (forall g0,
+         .. (forall gn,
+               (exists tr'',
+                   (forall h0,
+                       .. (forall hn,
+                             (forall tr mem,
+                                 pre ->
+                                 WeakestPrecondition.call
+                                   functions name tr mem nil
+                                   (fun tr' mem' rets =>
+                                      tr' = (tr'' ++ tr)%list))) ..))) ..))
+(at level 200,
+  name at level 0,
+  g0 closed binder, gn closed binder,
+  h0 closed binder, hn closed binder,
+  tr name, mem name,
+  pre at level 200).
+
 Notation "'fnspec!' name a0 .. an '/' g0 .. gn ',' '{' 'requires' tr mem := pre ';' 'ensures' tr' mem' ':=' post '}'" :=
   (fun functions =>
      (forall a0,
