@@ -11,51 +11,76 @@ Require Export bedrock2.Memory.
 Require Import Coq.Lists.List.
 
 (* BW is not needed on the rhs, but helps infer width *)
-Definition iotrace{width: Z}{BW: Bitwidth width}{word: word.word width}{mem: map.map word byte} :=
-  list ((mem * String.string * list word) * (mem * list word)).
+Definition io_event {width: Z}{BW: Bitwidth width}{word: word.word width}{mem: map.map word byte} : Type :=
+  (mem * String.string * list word) * (mem * list word).
+Definition io_trace {width: Z}{BW: Bitwidth width}{word: word.word width}{mem: map.map word byte} : Type :=
+  list io_event.
 
-(*match t : oldtrace with
-  | nil => output_to_explain = None
-  | (_, MMInput, [addr], (_, [value]))::trace =>
-    if (word.unsigned addr =? uart0_base + 0x004) && (word.unsigned (word.and value (word.of_Z (2 ^ 31))) =? 0)
-    then output_to_explain = Some value /\ spec trace None
-    else spec trace output_to_explain
-  | (_, MMOutput, [addr; value], (_, []))::trace => ( *) Compute (map.map (word.word 1) byte).
-Print map.map.
 
-Inductive event{width: Z}{BW: Bitwidth width}{word: word.word width}{mem: map.map word byte} :=
-| IOevent : mem (* memory state prior to ioevent occurring *) *
-              String.string (* type of event, e.g. input or output *) *
-              list word (* information about the ioevent that is known before it occurs
-                           - for an input event, the address from which the input will be read
-                           - for an output event, the address at which the output will be written,
-                             as well as the value to be written
-                         *) *
-              (mem (* memory state after ioevent occurs *) *
-                 list word (* information about the ioevent that isn't known until after it occurs
-                              - for an input event, the value which was read
-                              - for an output event, nothing
-                            *)
-              ) -> event
-| branch : bool -> event
-| read : access_size -> word -> event
-| write : access_size -> word -> event.
+Inductive leakage_event {width: Z}{BW: Bitwidth width}{word: word.word width}{mem: map.map word byte} : Type :=
+| IO_leakage : io_event -> leakage_event
+| branch : bool -> leakage_event
+| read : access_size -> word -> leakage_event
+| write : access_size -> word -> leakage_event.
+Definition leakage_trace {width: Z}{BW: Bitwidth width}{word: word.word width}{mem: map.map word byte} : Type :=
+  list leakage_event.
 
-Definition trace{width: Z}{BW: Bitwidth width}{word: word.word width}{mem: map.map word byte} := list event.
+Inductive stack_event :=
+| salloc (n : Z) : stack_event
+| fenter (numargs : nat) : stack_event
+| fexit : stack_event.
+(* this might be an unfortunate name. or maybe it's fortunate. *)
+Definition stack_trace := list stack_event.
 
-Definition filterio {width: Z}{BW: Bitwidth width}{word: word.word width}{mem: map.map word byte} (t : trace) : iotrace :=
-    flat_map (fun e =>
-                match e with
-                | IOevent e => cons e nil
-                | _ => nil
-                end) t.
+Inductive event {width: Z}{BW: Bitwidth width}{word: word.word width}{mem: map.map word byte} : Type :=
+| l_event : leakage_event -> event
+| s_event : stack_event -> event.
+Definition trace {width: Z}{BW: Bitwidth width}{word: word.word width}{mem: map.map word byte} : Type :=
+  list event.
 
-Lemma filterio_cons {width: Z}{BW: Bitwidth width}{word: word.word width}{mem: map.map word byte} (t : trace) (e : event) :
-  filterio (e :: t) = match e with
-                     | IOevent e => cons e nil
-                     | _ => nil
-                      end ++ filterio t.
-Proof. reflexivity. Qed.
+Definition IO_event {width: Z}{BW: Bitwidth width}{word: word.word width}{mem: map.map word byte}
+  (i : io_event) : event := l_event (IO_leakage i).
+Definition branch_event {width: Z}{BW: Bitwidth width}{word: word.word width}{mem: map.map word byte}
+  (b : bool) : event := l_event (branch b).
+Definition read_event {width: Z}{BW: Bitwidth width}{word: word.word width}{mem: map.map word byte}
+  (a : access_size) (w : word) : event := l_event (read a w).
+Definition write_event {width: Z}{BW: Bitwidth width}{word: word.word width}{mem: map.map word byte}
+  (a : access_size) (w : word) : event := l_event (write a w).
+Definition salloc_event {width: Z}{BW: Bitwidth width}{word: word.word width}{mem: map.map word byte}
+  (n : Z) : event := s_event (salloc n).
+Definition fenter_event {width: Z}{BW: Bitwidth width}{word: word.word width}{mem: map.map word byte}
+  (numargs : nat) : event := s_event (fenter numargs).
+Definition fexit_event {width: Z}{BW: Bitwidth width}{word: word.word width}{mem: map.map word byte}
+  : event := s_event fexit.
+
+Definition filterio {width: Z}{BW: Bitwidth width}{word: word.word width}{mem: map.map word byte}
+  (t : trace) : io_trace :=
+  flat_map (fun e =>
+              match e with
+              | l_event (IO_leakage i) => cons i nil
+              | _ => nil
+              end) t.
+
+Definition filterleakage {width: Z}{BW: Bitwidth width}{word: word.word width}{mem: map.map word byte}
+  (t : trace) : leakage_trace :=
+  flat_map (fun e =>
+              match e with
+              | l_event l => cons l nil
+              | _ => nil
+              end) t.
+
+Definition filterstack {width: Z}{BW: Bitwidth width}{word: word.word width}{mem: map.map word byte}
+  (t : trace) : stack_trace :=
+  flat_map (fun e =>
+              match e with
+              | s_event s => cons s nil
+              | _ => nil
+              end) t.
+
+(* I hope i don't actually need this anywhere*)
+(*Lemma filterio_cons (t : trace) (e : event) :
+  filterio (e :: t) = ltac:(let val := eval cbn [filterio flat_map] in (filterio (e :: t)) in exact val).
+Proof. reflexivity. Qed.*)
                             
 Definition ExtSpec{width: Z}{BW: Bitwidth width}{word: word.word width}{mem: map.map word byte} :=
   (* Given a trace of what happened so far,
@@ -134,14 +159,7 @@ Section semantics.
     Context (m : mem) (l : locals).
 
     Local Notation "' x <- a | y ; f" := (match a with x => f | _ => y end)
-                                           (right associativity, at level 70, x pattern). Print trace. Check expr.inlinetable.
-    Print access_size.access_size. Check expr.load.
-    Compute (expr.load access_size.one (expr.literal 5)).
-    Check expr.inlinetable. Print map.of_list_word.
-    Print load.
-    (* why does this need mc passed as an argument? can't we union two metrics? so we could just return the change in 
-       mc, rather than the total? this style does seem easier to work with. not a big deal anyway. *)
-    (* I guess I'll also pass the trace as an argument?  for consistency? *)
+                                           (right associativity, at level 70, x pattern). Print trace.
     Fixpoint eval_expr (e : expr) (mc : metrics) (tr : trace) : option (word * metrics * trace) :=
       match e with
       | expr.literal v => Some (
@@ -170,7 +188,7 @@ Section semantics.
           Some (
               v,
               addMetricInstructions 1 (addMetricLoads 2 mc'),
-              read aSize a' :: tr')
+              read_event aSize a' :: tr')
       | expr.op op e1 e2 =>
           'Some (v1, mc', tr') <- eval_expr e1 mc tr | None;
           'Some (v2, mc'', tr'') <- eval_expr e2 mc' tr' | None;
@@ -223,13 +241,12 @@ Module exec. Section WithEnv.
   Context {env: map.map String.string (list String.string * list String.string * cmd)}.
   Context {ext_spec: ExtSpec}.
   Context (e: env).
+  Context (stack_addr : stack_trace -> Z -> word).
 
   Local Notation metrics := MetricLog.
 
-  Implicit Types post : trace -> mem -> locals -> metrics -> Prop. (* COQBUG(unification finds Type instead of Prop and fails to downgrade *)
-  Print cmd.cmd. Print trace. Print event. Check cmd.store.
-  Compute (cmd.store access_size.one (expr.literal 5) (expr.literal 5)). Print anybytes. Print ftprint.
-  Print List.unfoldn. Print map.split. Print ext_spec.
+  Implicit Types post : trace -> mem -> locals -> metrics -> Prop. (* COQBUG(unification finds Type instead of Prop and fails to downgrade *) Search list.
+  
   Inductive exec :
     cmd -> trace -> mem -> locals -> metrics ->
     (trace -> mem -> locals -> metrics -> Prop) -> Prop :=
@@ -241,7 +258,7 @@ Module exec. Section WithEnv.
     t m l mc post
     v mc' t' (_ : eval_expr m l e mc t = Some (v, mc', t'))
     (_ : post t' m (map.put l x v) (addMetricInstructions 1
-                                  (addMetricLoads 1 mc')))
+                                      (addMetricLoads 1 mc')))
     : exec (cmd.set x e) t m l mc post
   | unset x
     t m l mc post
@@ -252,35 +269,36 @@ Module exec. Section WithEnv.
     a mc' t' (_ : eval_expr m l ea mc t = Some (a, mc', t'))
     v mc'' t'' (_ : eval_expr m l ev mc' t' = Some (v, mc'', t''))
     m' (_ : store sz m a v = Some m')
-    (_ : post (write sz a :: t'') m' l (addMetricInstructions 1
-                                       (addMetricLoads 1
-                                          (addMetricStores 1 mc''))))
+    (_ : post (write_event sz a :: t'') m' l (addMetricInstructions 1
+                                          (addMetricLoads 1
+                                             (addMetricStores 1 mc''))))
     : exec (cmd.store sz ea ev) t m l mc post
   | stackalloc x n body
     t mSmall l mc post
     (_ : Z.modulo n (bytes_per_word width) = 0)
-    (_ : forall a mStack mCombined,
+    (_ : forall mStack mCombined,
+        let a := stack_addr (filterstack t) n in
         anybytes a n mStack ->
         map.split mCombined mSmall mStack ->
-        exec body t mCombined (map.put l x a) (addMetricInstructions 1 (addMetricLoads 1 mc))
+        exec body (salloc_event n :: t) mCombined (map.put l x a) (addMetricInstructions 1 (addMetricLoads 1 mc))
           (fun t' mCombined' l' mc' =>
-            exists mSmall' mStack',
+             exists mSmall' mStack',
               anybytes a n mStack' /\
               map.split mCombined' mSmall' mStack' /\
               post t' mSmall' l' mc'))
-     : exec (cmd.stackalloc x n body) t mSmall l mc post
+    : exec (cmd.stackalloc x n body) t mSmall l mc post
   | if_true t m l mc e c1 c2 post
     v mc' t' (_ : eval_expr m l e mc t = Some (v, mc', t'))
     (_ : word.unsigned v <> 0)
-    (_ : exec c1 (branch true :: t') m l (addMetricInstructions 2
-                                            (addMetricLoads 2
-                                               (addMetricJumps 1 mc'))) post)
+    (_ : exec c1 (branch_event true :: t') m l (addMetricInstructions 2
+                                                    (addMetricLoads 2
+                                                       (addMetricJumps 1 mc'))) post)
     : exec (cmd.cond e c1 c2) t m l mc post
   | if_false e c1 c2
     t m l mc post
     v mc' t' (_ : eval_expr m l e mc t = Some (v, mc', t'))
     (_ : word.unsigned v = 0)
-    (_ : exec c2 (branch false :: t') m l (addMetricInstructions 2
+    (_ : exec c2 (branch_event false :: t') m l (addMetricInstructions 2
                                              (addMetricLoads 2
                                                 (addMetricJumps 1 mc'))) post)
     : exec (cmd.cond e c1 c2) t m l mc post
@@ -293,32 +311,30 @@ Module exec. Section WithEnv.
     t m l mc post
     v mc' t' (_ : eval_expr m l e mc t = Some (v, mc', t'))
     (_ : word.unsigned v = 0)
-    (_ : post (branch false :: t') m l (addMetricInstructions 1
-                                          (addMetricLoads 1
-                                             (addMetricJumps 1 mc'))))
+    (_ : post (branch_event false :: t') m l (addMetricInstructions 1
+                                                (addMetricLoads 1
+                                                   (addMetricJumps 1 mc'))))
     : exec (cmd.while e c) t m l mc post
   | while_true e c
       t m l mc post
       v mc' t' (_ : eval_expr m l e mc t = Some (v, mc', t'))
       (_ : word.unsigned v <> 0)
-      mid (_ : exec c (branch true :: t') m l (addMetricInstructions 2
-                                                 (addMetricLoads 2
-                                                    (addMetricJumps 1 mc'))) mid)
+      mid (_ : exec c (branch_event true :: t') m l (addMetricInstructions 2
+                                                       (addMetricLoads 2
+                                                          (addMetricJumps 1 mc'))) mid)
       (_ : forall t'' m' l' mc'', mid t'' m' l' mc'' ->
-                                 exec (cmd.while e c) t'' m' l' (*(addMetricInstructions 2
-                                                                   (addMetricLoads 2
-                                                                      (addMetricJumps 1*) mc''(* )))*) post)
+                                      exec (cmd.while e c) t'' m' l' mc'' post)
     : exec (cmd.while e c) t m l mc post
   | call binds fname arges
       t m l mc post
       params rets fbody (_ : map.get e fname = Some (params, rets, fbody))
       args mc' t' (_ : evaluate_call_args_log m l arges mc t = Some (args, mc', t'))
       lf (_ : map.of_list_zip params args = Some lf)
-      mid (_ : exec fbody t' m lf (addMetricInstructions 100 (addMetricJumps 100 (addMetricLoads 100 (addMetricStores 100 mc')))) mid)
+      mid (_ : exec fbody (fenter_event (length args) :: t') m lf (addMetricInstructions 100 (addMetricJumps 100 (addMetricLoads 100 (addMetricStores 100 mc')))) mid)
       (_ : forall t'' m' st1 mc'', mid t'' m' st1 mc'' ->
           exists retvs, map.getmany_of_list st1 rets = Some retvs /\
           exists l', map.putmany_of_list_zip binds retvs l = Some l' /\
-          post t'' m' l'  (addMetricInstructions 100 (addMetricJumps 100 (addMetricLoads 100 (addMetricStores 100 mc'')))))
+          post (fexit_event :: t'') m' l' (addMetricInstructions 100 (addMetricJumps 100 (addMetricLoads 100 (addMetricStores 100 mc'')))))
     : exec (cmd.call binds fname arges) t m l mc post
   | interact binds action arges
       t m l mc post
@@ -328,7 +344,7 @@ Module exec. Section WithEnv.
       (_ : forall mReceive resvals, mid mReceive resvals ->
           exists l', map.putmany_of_list_zip binds resvals l = Some l' /\
           forall m', map.split m' mKeep mReceive ->
-          post (IOevent ((mGive, action, args), (mReceive, resvals)) :: t') m' l'
+          post (IO_event ((mGive, action, args), (mReceive, resvals)) :: t') m' l'
             (addMetricInstructions 1
             (addMetricStores 1
             (addMetricLoads 2 mc'))))
