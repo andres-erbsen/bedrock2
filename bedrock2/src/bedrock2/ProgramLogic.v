@@ -22,7 +22,7 @@ Ltac trace_alignment :=
       | t := cons _ _ |- _ => subst t
       end;
     repeat match goal with
-      | H1 : filterio _ = _ |- context [ filterio _ ]  => (*idtac "12t";*) repeat rewrite filterio_cons; rewrite H1
+      | H1 : filterio _ = _ |- context [ filterio _ ]  => (*idtac "12t";*) cbn [filterio List.flat_map]; rewrite H1
       end;          
     repeat (eapply align_trace_app
       || eapply align_trace_cons

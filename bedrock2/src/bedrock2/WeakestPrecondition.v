@@ -171,19 +171,19 @@ Section WeakestPrecondition.
 
   Definition program funcs main t m l post : Prop := cmd (call funcs) main t m l post.
 End WeakestPrecondition.
-Check @call.
+Check @cmd.
 Ltac unfold1_cmd e :=
   lazymatch e with
-    @cmd ?width ?BW ?word ?mem ?locals ?ext_spec ?CA ?c ?t ?m ?l ?post =>
+    @cmd ?width ?BW ?word ?mem ?locals ?ext_spec ?saddr ?CA ?c ?t ?m ?l ?post =>
     let c := eval hnf in c in
-    constr:(@cmd_body width BW word mem locals ext_spec CA
-                      (@cmd width BW word mem locals ext_spec CA) c t m l post)
+    constr:(@cmd_body width BW word mem locals ext_spec saddr CA
+                      (@cmd width BW word mem locals ext_spec saddr CA) c t m l post)
   end.
 Ltac unfold1_cmd_goal :=
   let G := lazymatch goal with |- ?G => G end in
   let G := unfold1_cmd G in
   change G.
-
+Check @expr.
 Ltac unfold1_expr e :=
   lazymatch e with
     @expr ?width ?BW ?word ?mem ?locals ?m ?l ?t ?arg ?post =>
@@ -217,13 +217,13 @@ Ltac unfold1_list_map'_goal :=
   let G := lazymatch goal with |- ?G => G end in
   let G := unfold1_list_map' G in
   change G.
-
+Check @call.
 Ltac unfold1_call e :=
   lazymatch e with
-    @call ?width ?BW ?word ?mem ?locals ?ext_spec ?fs ?fname ?t ?m ?l ?post =>
+    @call ?width ?BW ?word ?mem ?locals ?ext_spec ?saddr ?fs ?fname ?t ?m ?l ?post =>
     let fs := eval hnf in fs in
-    constr:(@call_body width BW word mem locals ext_spec
-                       (@call width BW word mem locals ext_spec) fs fname t m l post)
+    constr:(@call_body width BW word mem locals ext_spec saddr
+                       (@call width BW word mem locals ext_spec saddr) fs fname t m l post)
   end.
 Ltac unfold1_call_goal :=
   let G := lazymatch goal with |- ?G => G end in

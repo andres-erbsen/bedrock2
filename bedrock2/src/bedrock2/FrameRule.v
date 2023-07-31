@@ -18,7 +18,9 @@ Section semantics.
   Context {locals: map.map String.string word}.
   Context {env: map.map String.string (list String.string * list String.string * cmd)}.
   Context {ext_spec: ExtSpec}.
+  Context (stack_addr: Semantics.stack_trace -> BinNums.Z -> word).
   Context {mem_ok: map.ok mem} {word_ok: word.ok word}.
+  Let exec := Semantics.exec stack_addr.
 
   Lemma frame_load: forall mSmall mBig mAdd a r (v: word),
       mmap.split mBig mSmall mAdd ->
@@ -150,7 +152,7 @@ Section semantics.
         | H: store _ _ _ _ = _ |- _ => eapply frame_store in H; [ | eassumption]
         end;
       fwd;
-      try solve [econstructor; eauto using frame_eval_expr].
+      try solve [econstructor; eauto using frame_eval_expr; eapply IHexec; assumption].
     { eapply exec.stackalloc. 1: eassumption.
       intros.
       rename mCombined into mCombinedBig.
@@ -193,7 +195,7 @@ Section semantics.
       1: eauto using frame_eval_expr.
       1: eassumption.
       { eapply IHexec. 1: eassumption. }
-      cbv beta. intros. fwd. eauto. }
+      cbv beta. intros. fwd. eapply H3; eauto. }
     { (* call *)
       econstructor. 1: eassumption.
       { eauto using frame_evaluate_call_args_log. }
