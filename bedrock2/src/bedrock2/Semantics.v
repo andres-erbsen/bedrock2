@@ -27,6 +27,7 @@ Definition leakage_trace {width: Z}{BW: Bitwidth width}{word: word.word width}{m
 
 Inductive stack_event :=
 | salloc (n : Z) : stack_event
+| sdealloc : stack_event
 | fenter (numargs : nat) : stack_event
 | fexit : stack_event.
 (* this might be an unfortunate name. or maybe it's fortunate. *)
@@ -52,6 +53,8 @@ Definition fenter_event {width: Z}{BW: Bitwidth width}{word: word.word width}{me
   (numargs : nat) : event := s_event (fenter numargs).
 Definition fexit_event {width: Z}{BW: Bitwidth width}{word: word.word width}{mem: map.map word byte}
   : event := s_event fexit.
+Definition sdealloc_event {width: Z}{BW: Bitwidth width}{word: word.word width}{mem: map.map word byte}
+  : event := s_event sdealloc.
 
 Definition filterio {width: Z}{BW: Bitwidth width}{word: word.word width}{mem: map.map word byte}
   (t : trace) : io_trace :=
@@ -285,7 +288,7 @@ Module exec. Section WithEnv.
              exists mSmall' mStack',
               anybytes a n mStack' /\
               map.split mCombined' mSmall' mStack' /\
-              post t' mSmall' l' mc'))
+              post (sdealloc_event :: t') mSmall' l' mc'))
     : exec (cmd.stackalloc x n body) t mSmall l mc post
   | if_true t m l mc e c1 c2 post
     v mc' t' (_ : eval_expr m l e mc t = Some (v, mc', t'))
