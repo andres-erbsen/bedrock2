@@ -80,7 +80,6 @@ Section WeakestPrecondition.
   Context {locals_ok : map.ok locals}.
   Context {env_ok : map.ok env}.
   Context {ext_spec_ok : Semantics.ext_spec.ok ext_spec}.
-  Check @WeakestPrecondition.cmd.
   
   Global Instance Proper_cmd :
     Proper (
@@ -186,7 +185,7 @@ Section WeakestPrecondition.
     (* This proof causes an "Illegal Application" error at Qed.
        Here (https://github.com/coq/coq/issues/4085), Jason suggests that this
        has something to do with existential variables, so I rewrite the proof below
-       without using existential variables.*)
+       without using existential variables. It still doesn't work. *)
       (*cbv [Proper respectful pointwise_relation Basics.impl]; ind_on (list (String.string * (list String.string * list String.string * Syntax.cmd.cmd)));
       cbn in *; intuition (try typeclasses eauto with core).
     destruct a.

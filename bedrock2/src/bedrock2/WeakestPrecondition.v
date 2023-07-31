@@ -10,7 +10,6 @@ Section WeakestPrecondition.
   Context (stack_addr : stack_trace -> Z -> word).
   Implicit Types (t : trace) (m : mem) (l : locals).
 
-  (* is there a better way to include trace in postcondition? easier to work with? *)
   Definition literal v (post : word -> Prop) : Prop :=
     dlet! v := word.of_Z v in post v.
   Definition get (l : locals) (x : String.string) (post : word -> Prop) : Prop :=
@@ -260,7 +259,7 @@ Notation "'fnspec!' name a0 .. an '/' g0 .. gn '~>' r0 .. rn ',' '{' 'requires' 
 (* a's are public, b's are private. g's public, h's private. *)
 Notation "'ctfunc!' name a0 .. an '|' b0 .. bn '/' g0 .. gn '|' h0 .. hn ',' '{' 'requires' tr mem := pre '}'" :=
   (fun functions =>
-     (forall stack_addr,
+     (forall stack_addr stack_trace,
          (forall a0,
              .. (forall an,
                    (forall g0,
@@ -271,11 +270,12 @@ Notation "'ctfunc!' name a0 .. an '|' b0 .. bn '/' g0 .. gn '|' h0 .. hn ',' '{'
                                            (forall h0,
                                                .. (forall hn,
                                                      (forall tr mem,
+                                                         filterstack tr = stack_trace ->
                                                          pre ->
                                                          WeakestPrecondition.call
                                                            stack_addr functions name tr mem (cons a0 .. (cons an nil) ..)
                                                            (fun tr' mem' rets =>
-                                                              tr' = (tr'' ++ tr)%list))) ..)) ..))) ..)) ..)))
+                                                              filterleakage tr' = (tr'' ++ filterleakage tr)%list))) ..)) ..))) ..)) ..)))
        (at level 200,
          name at level 0,
          a0 closed binder, an closed binder,
@@ -288,18 +288,19 @@ Notation "'ctfunc!' name a0 .. an '|' b0 .. bn '/' g0 .. gn '|' h0 .. hn ',' '{'
 (* a's are public, b's are private. g's public, h's private. *)
 Notation "'ctfunc!' name '|' '/' g0 .. gn '|' h0 .. hn ',' '{' 'requires' tr mem := pre '}'" :=
   (fun functions =>
-     (forall stack_addr,
+     (forall stack_addr stack_trace,
          (forall g0,
              .. (forall gn,
                    (exists tr'',
                        (forall h0,
                            .. (forall hn,
                                  (forall tr mem,
+                                     filterstack tr = stack_trace ->
                                      pre ->
                                      WeakestPrecondition.call
                                        stack_addr functions name tr mem nil
                                        (fun tr' mem' rets =>
-                                          tr' = (tr'' ++ tr)%list))) ..))) ..)))
+                                          filterleakage tr' = (tr'' ++ filterleakage tr)%list))) ..))) ..)))
     (at level 200,
       name at level 0,
       g0 closed binder, gn closed binder,

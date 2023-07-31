@@ -50,13 +50,7 @@ Section WithParameters.
   Proof. repeat straightline; eauto. Qed.
 
   Lemma swap_ct : program_logic_ct_goal_for_function! swap.
-  Proof. repeat straightline. subst t''0. subst t''. subst t'0.
-         Search (_ :: _ = _ ++ _).
-         instantiate (1 := [write access_size.word a_addr;
-                            write access_size.word b_addr;
-                            Semantics.read access_size.word a_addr;
-                            Semantics.read access_size.word b_addr]).
-  reflexivity. Qed.
+  Proof. repeat straightline. trace_alignment. Qed.
 
   Instance spec_of_bad_swap : spec_of "bad_swap" :=
     fnspec! "bad_swap" a_addr b_addr / a b R,
@@ -84,7 +78,14 @@ Section WithParameters.
       ensures T M :=  M =* scalar a_addr a * scalar b_addr b * R /\ (filterio T) = (filterio t)}.
 
   Lemma swap_swap_ok : program_logic_goal_for_function! swap_swap.
-  Proof. repeat (straightline || straightline_call); eauto using eq_trans. Qed.
+  Proof. repeat (straightline || straightline_call); eauto using eq_trans.
+         - Search (map.ok locals). apply locals_ok.
+         - Search (map.ok env). apply env_ok.
+         - apply ext_spec_ok.
+         - apply locals_ok.
+         - apply env_ok.
+         - apply ext_spec_ok. (* this garbage is here because I admitted Proper_call. *)
+  Qed.
 
   Lemma link_swap_swap_swap_swap : spec_of_swap_swap &[,swap_swap; swap].
   Proof. eauto using swap_swap_ok, swap_ok. Qed.
