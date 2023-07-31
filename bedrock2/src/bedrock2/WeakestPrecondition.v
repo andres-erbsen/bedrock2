@@ -7,7 +7,7 @@ Section WeakestPrecondition.
   Context {locals: map.map String.string word}.
   Context {env: map.map String.string (list String.string * list String.string * cmd)}.
   Context {ext_spec: ExtSpec}.
-  Context {stack_addr : stack_trace -> Z -> word}.
+  Context (stack_addr : stack_trace -> Z -> word).
   Implicit Types (t : trace) (m : mem) (l : locals).
 
   (* is there a better way to include trace in postcondition? easier to work with? *)
@@ -171,6 +171,7 @@ Section WeakestPrecondition.
 
   Definition program funcs main t m l post : Prop := cmd (call funcs) main t m l post.
 End WeakestPrecondition.
+Check @call.
 Ltac unfold1_cmd e :=
   lazymatch e with
     @cmd ?width ?BW ?word ?mem ?locals ?ext_spec ?CA ?c ?t ?m ?l ?post =>
