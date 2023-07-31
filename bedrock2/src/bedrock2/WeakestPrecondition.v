@@ -7,7 +7,7 @@ Section WeakestPrecondition.
   Context {locals: map.map String.string word}.
   Context {env: map.map String.string (list String.string * list String.string * cmd)}.
   Context {ext_spec: ExtSpec}.
-  Context (stack_addr : stack_trace -> Z -> word).
+  Context {stack_addr : stack_trace -> Z -> word}.
   Implicit Types (t : trace) (m : mem) (l : locals).
 
   (* is there a better way to include trace in postcondition? easier to work with? *)

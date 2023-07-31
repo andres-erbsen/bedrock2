@@ -9,6 +9,8 @@ Section WeakestPrecondition.
   Context {locals: map.map String.string word}.
   Context {env: map.map String.string (list String.string * list String.string * Syntax.cmd)}.
   Context {ext_spec: Semantics.ExtSpec}.
+  Context {stack_addr : Semantics.stack_trace -> BinNums.Z -> word}.
+
 
   Ltac ind_on X :=
     intros;
@@ -34,7 +36,6 @@ Section WeakestPrecondition.
 
   (* we prove weakening lemmas for all WP definitions in a syntax-directed fashion,
    * moving from postcondition towards precondition one logical connective at a time. *)
-  Print pointwise_relation. Locate "==>". Print respectful. Print pointwise_relation. Compute (pointwise_relation _ Basics.impl). Compute ((pointwise_relation _ Basics.impl) ==> Basics.impl)%signature. Print Proper. Compute (pointwise_relation _ ((pointwise_relation _ Basics.impl) ==> Basics.impl)).
   Global Instance Proper_literal : Proper (pointwise_relation _ ((pointwise_relation _ Basics.impl) ==> Basics.impl)) WeakestPrecondition.literal.
   Proof using. clear. cbv [WeakestPrecondition.literal]; cbv [Proper respectful pointwise_relation Basics.impl dlet.dlet]. eauto. Qed.
 
@@ -46,12 +47,6 @@ Section WeakestPrecondition.
 
   Global Instance Proper_store : Proper (pointwise_relation _ (pointwise_relation _ (pointwise_relation _ (pointwise_relation _ ((pointwise_relation _ Basics.impl) ==> Basics.impl))))) WeakestPrecondition.store.
   Proof using. clear. cbv [WeakestPrecondition.store]; cbv [Proper respectful pointwise_relation Basics.impl]; intros * ? (?&?&?); eauto. Qed.
-  Print Proper.
-  (* Proper = let U := Type in fun (A : U) (R : Relation_Definitions.relation A) (m : A) => R m m *) 
-  Check Proper. Print Proper. Check WeakestPrecondition.expr. Print pointwise_relation.
-  Compute (pointwise_relation _ Basics.impl).
-  Compute (Proper (pointwise_relation _ (pointwise_relation _ Basics.impl))).
-  Check WeakestPrecondition.expr.
 
   Global Instance Proper_expr : Proper (pointwise_relation _ (pointwise_relation _ (pointwise_relation _ (pointwise_relation _ ((pointwise_relation _ (pointwise_relation _ Basics.impl) ==> Basics.impl)))))) WeakestPrecondition.expr.
   Proof using.
@@ -85,19 +80,20 @@ Section WeakestPrecondition.
   Context {locals_ok : map.ok locals}.
   Context {env_ok : map.ok env}.
   Context {ext_spec_ok : Semantics.ext_spec.ok ext_spec}.
-
+  
   Global Instance Proper_cmd :
     Proper (
-     (pointwise_relation _ (pointwise_relation _ (pointwise_relation _ (pointwise_relation _ (pointwise_relation _ ((pointwise_relation _ (pointwise_relation _ Basics.impl))) ==> Basics.impl)))) ==>
+        (pointwise_relation _ (pointwise_relation _ (pointwise_relation _ (pointwise_relation _ (pointwise_relation _ ((pointwise_relation _ (pointwise_relation _ Basics.impl))) ==> Basics.impl)))) ==>
      pointwise_relation _ (
      pointwise_relation _ (
      pointwise_relation _ (
      pointwise_relation _ (
      (pointwise_relation _ (pointwise_relation _ (pointwise_relation _ Basics.impl))) ==>
-     Basics.impl)))))) WeakestPrecondition.cmd.
+     Basics.impl)))))) (WeakestPrecondition.cmd (stack_addr := stack_addr)(*why do i need to write this??*)).
   Proof using env_ok ext_spec_ok locals_ok mem_ok word_ok.
     cbv [Proper respectful pointwise_relation Basics.flip Basics.impl]; ind_on Syntax.cmd.cmd;
-      cbn in *; cbv [dlet.dlet] in *; intuition (try typeclasses eauto with core).
+      cbn in *; cbv [dlet.dlet] in *; intuition eauto.
+    (*intuition (try typeclasses eauto with core). this doesn't do anything?*)
     { destruct H1 as (?&?&?&?). eexists. eexists. split. Print WeakestPrecondition.cmd_body.
       1: eapply Proper_expr; eauto.
       1: cbv [pointwise_relation Basics.impl]; intuition eauto 2.
@@ -107,13 +103,12 @@ Section WeakestPrecondition.
       { destruct H2 as (?&?&?&?). eexists. eexists. split.
         { eapply Proper_expr; eauto; cbv [pointwise_relation Basics.impl]; eauto. }
         { eapply Proper_store; eauto; cbv [pointwise_relation Basics.impl]; eauto. } } }
-    { eapply H1; [ | | eapply H3; eassumption ].
-      2 : intros ? ? ? (?&?&?&?&?). all : eauto 7. }
+    { eapply IHa; eauto. intros ? ? ? (?&?&?&?&?). eauto 6. }
     { destruct H1 as (?&?&?&?). eexists. eexists. split.
-      (* some of these eautos could be replaced by 'intuition eauto 2', or something. 
-         does it matter? i think eauto is weaker, so probably better to use it. *)
       { eapply Proper_expr; eauto; cbv [pointwise_relation Basics.impl]; eauto. }
-      { intuition eauto 6. } }
+      { intuition eauto. } }
+    { eapply IHa1; eauto. intros. intuition eauto. }
+
     { destruct H1 as (?&?&?&?&?&HH).
       eassumption || eexists.
       eassumption || eexists.
@@ -126,7 +121,7 @@ Section WeakestPrecondition.
       1: eapply Proper_expr; eauto.
       1: cbv [pointwise_relation Basics.impl].
       all:intuition eauto 2.
-      - eapply H2; eauto; cbn; intros.
+      - eapply IHa; eauto; cbn; intros.
         match goal with H:_ |- _ => destruct H as (?&?&?); solve[eauto] end.
       - intuition eauto. }
     { destruct H1 as (?&?&?&?). eexists. eexists. split.
@@ -156,7 +151,7 @@ Section WeakestPrecondition.
      pointwise_relation _ (
      pointwise_relation _ (
      (pointwise_relation _ (pointwise_relation _ (pointwise_relation _ Basics.impl))) ==>
-     Basics.impl)))))) WeakestPrecondition.func.
+     Basics.impl)))))) (WeakestPrecondition.func (stack_addr := stack_addr)(*why do i need to do this*)).
   Proof using word_ok mem_ok locals_ok ext_spec_ok env_ok.
     cbv [Proper respectful pointwise_relation Basics.flip Basics.impl  WeakestPrecondition.func]; intros.
     destruct a. destruct p.
@@ -185,17 +180,41 @@ Section WeakestPrecondition.
      pointwise_relation _ (
      pointwise_relation _ (
      (pointwise_relation _ (pointwise_relation _ (pointwise_relation _ Basics.impl))) ==>
-     Basics.impl)))))))) WeakestPrecondition.call.
+     Basics.impl)))))))) (WeakestPrecondition.call (stack_addr := stack_addr)(*why*)).
   Proof using word_ok mem_ok locals_ok ext_spec_ok env_ok.
-    cbv [Proper respectful pointwise_relation Basics.impl]; ind_on (list (String.string * (list String.string * list String.string * Syntax.cmd.cmd)));
+    (* This proof causes an "Illegal Application" error at Qed.
+       Here (https://github.com/coq/coq/issues/4085), Jason suggests that this
+       has something to do with existential variables, so I rewrite the proof below
+       without using existential variables.*)
+      (*cbv [Proper respectful pointwise_relation Basics.impl]; ind_on (list (String.string * (list String.string * list String.string * Syntax.cmd.cmd)));
       cbn in *; intuition (try typeclasses eauto with core).
     destruct a.
-    destruct (String.eqb s a1); eauto.
+    destruct (String.eqb s a1); debug eauto.
+    
     eapply Proper_func;
       cbv [Proper respectful pointwise_relation Basics.flip Basics.impl  WeakestPrecondition.func];
-      eauto.
-  Qed.
-
+      eauto.*)
+    cbv [Proper respectful pointwise_relation Basics.impl]; ind_on (list (String.string * (list String.string * list String.string * Syntax.cmd.cmd)));
+      cbn in *; auto.
+    destruct a.
+    destruct (String.eqb s a1).
+    2: { apply (IHa stack_addr word_ok mem_ok locals_ok env_ok ext_spec_ok a1 a2 a3 a4 x y).
+         - apply H.
+         - apply H0. }
+    assert (idk:pointwise_relation String.string
+   (pointwise_relation Semantics.trace
+      (pointwise_relation mem
+         (pointwise_relation (list word)
+            (pointwise_relation Semantics.trace
+               (pointwise_relation mem (pointwise_relation (list word) Basics.impl)) ==>
+               Basics.impl)))) (WeakestPrecondition.call (stack_addr := stack_addr) a0) (WeakestPrecondition.call (stack_addr := stack_addr) a0)).
+    { cbv [pointwise_relation Basics.impl Proper respectful]. intros.
+      Check IHa. apply (IHa stack_addr word_ok mem_ok locals_ok env_ok ext_spec_ok a a5 a6 a7 x0 y0).
+      - apply H1.
+      - apply H2.
+    }
+    apply (Proper_func (WeakestPrecondition.call (stack_addr := stack_addr) a0) (WeakestPrecondition.call (stack_addr := stack_addr) a0) idk p a2 a3 a4 x y H). apply H0. Defined. Qed. Admitted. (*Qed stil fails, even without existential variables :( *)
+  
   Global Instance Proper_program :
     Proper (
      pointwise_relation _ (
@@ -204,7 +223,7 @@ Section WeakestPrecondition.
      pointwise_relation _ (
      pointwise_relation _ (
      (pointwise_relation _ (pointwise_relation _ (pointwise_relation _ Basics.impl))) ==>
-     Basics.impl)))))) WeakestPrecondition.program.
+     Basics.impl)))))) (WeakestPrecondition.program (stack_addr := stack_addr)).
   Proof using word_ok mem_ok locals_ok ext_spec_ok env_ok.
     cbv [Proper respectful pointwise_relation Basics.impl  WeakestPrecondition.program]; intros.
     eapply Proper_cmd;

@@ -243,8 +243,8 @@ Module exec. Section WithEnv.
   Context {locals: map.map String.string word}.
   Context {env: map.map String.string (list String.string * list String.string * cmd)}.
   Context {ext_spec: ExtSpec}.
+  Context {stack_addr : stack_trace -> Z -> word}.
   Context (e: env).
-  Context (stack_addr : stack_trace -> Z -> word).
 
   Local Notation metrics := MetricLog.
 
