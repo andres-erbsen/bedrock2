@@ -18,7 +18,7 @@ Section semantics.
   Context {locals: map.map String.string word}.
   Context {env: map.map String.string (list String.string * list String.string * cmd)}.
   Context {ext_spec: ExtSpec}.
-  Context (stack_addr: Semantics.stack_trace -> BinNums.Z -> word).
+  Context (stack_addr: Semantics.trace -> BinNums.Z -> word).
   Context {mem_ok: map.ok mem} {word_ok: word.ok word}.
   Let exec := Semantics.exec stack_addr.
 

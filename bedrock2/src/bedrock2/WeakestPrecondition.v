@@ -7,7 +7,7 @@ Section WeakestPrecondition.
   Context {locals: map.map String.string word}.
   Context {env: map.map String.string (list String.string * list String.string * cmd)}.
   Context {ext_spec: ExtSpec}.
-  Context (stack_addr : stack_trace -> Z -> word).
+  Context (stack_addr : trace -> Z -> word).
   Implicit Types (t : trace) (m : mem) (l : locals).
 
   Definition literal v (post : word -> Prop) : Prop :=
@@ -36,7 +36,7 @@ Section WeakestPrecondition.
         post t'' (interp_binop op v1 v2)))
       | expr.load s e =>
         rec t e (fun t' a =>
-        load s m a (post (cons (read_event s a) t')))
+        load s m a (post (cons (read s a) t')))
       | expr.inlinetable s tbl e =>
         rec t e (fun t' a =>
         load s (map.of_list_word tbl) a (post t'))
@@ -108,21 +108,21 @@ Section WeakestPrecondition.
         exists a t', dexpr m l t ea a t' /\
         exists v t'', dexpr m l t' ev v t'' /\
         store sz m a v (fun m =>
-        post (cons (write_event sz a) t'') m l)
+        post (cons (write sz a) t'') m l)
       | cmd.stackalloc x n c =>
         Z.modulo n (bytes_per_word width) = 0 /\
         forall mStack mCombined,
           let a := stack_addr (filterstack t) n in
           anybytes a n mStack -> map.split mCombined m mStack ->
           dlet! l := map.put l x a in
-          rec c (cons (salloc_event n) t) mCombined l (fun t' mCombined' l' =>
+          rec c (cons salloc t) mCombined l (fun t' mCombined' l' =>
           exists m' mStack',
           anybytes a n mStack' /\ map.split mCombined' m' mStack' /\
-          post (cons sdealloc_event t') m' l')
+          post t' m' l')
       | cmd.cond br ct cf =>
         exists v t', dexpr m l t br v t' /\
-        (word.unsigned v <> 0%Z -> rec ct (cons (branch_event true) t') m l post) /\
-        (word.unsigned v = 0%Z -> rec cf (cons (branch_event false) t') m l post)
+        (word.unsigned v <> 0%Z -> rec ct (cons (branch true) t') m l post) /\
+        (word.unsigned v = 0%Z -> rec cf (cons (branch false) t') m l post)
       | cmd.seq c1 c2 =>
         rec c1 t m l (fun t m l => rec c2 t m l post)
       | cmd.while e c =>
@@ -131,21 +131,21 @@ Section WeakestPrecondition.
         (exists v, inv v t m l) /\
         (forall v t m l, inv v t m l ->
           exists b t', dexpr m l t e b t' /\
-          (word.unsigned b <> 0%Z -> rec c (cons (branch_event true) t') m l (fun t' m l =>
+          (word.unsigned b <> 0%Z -> rec c (cons (branch true) t') m l (fun t' m l =>
             exists v', inv v' t' m l /\ lt v' v)) /\
-            (word.unsigned b = 0%Z -> post (cons (branch_event false) t') m l))
+            (word.unsigned b = 0%Z -> post (cons (branch false) t') m l))
       | cmd.call binds fname arges =>
         exists args t', dexprs m l t arges args t' /\ (* (call : String.string -> trace -> mem -> list word -> (trace -> mem -> list word -> Prop) -> Prop) *)
-        call fname (cons (fenter_event (length args)) t') m args (fun t'' m rets =>
+        call fname t' m args (fun t'' m rets =>
           exists l', map.putmany_of_list_zip binds rets l = Some l' /\
-          post (cons fexit_event t'') m l')
+          post t'' m l')
       | cmd.interact binds action arges =>
         exists args t', dexprs m l t arges args t' /\
         exists mKeep mGive, map.split m mKeep mGive /\
         ext_spec t' mGive action args (fun mReceive rets =>
           exists l', map.putmany_of_list_zip binds rets l = Some l' /\
           forall m', map.split m' mKeep mReceive ->
-          post (cons (IO_event ((mGive, action, args), (mReceive, rets))) t') m' l')
+          post (cons (IO ((mGive, action, args), (mReceive, rets))) t') m' l')
       end.
     Fixpoint cmd c := cmd_body cmd c.
   End WithFunctions.

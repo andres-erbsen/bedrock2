@@ -9,7 +9,7 @@ Section WeakestPrecondition.
   Context {locals: map.map String.string word}.
   Context {env: map.map String.string (list String.string * list String.string * Syntax.cmd)}.
   Context {ext_spec: Semantics.ExtSpec}.
-  Context (stack_addr : Semantics.stack_trace -> BinNums.Z -> word).
+  Context (stack_addr : Semantics.trace -> BinNums.Z -> word).
 
 
   Ltac ind_on X :=
@@ -403,7 +403,7 @@ Section WeakestPrecondition.
         (Hext : ext_spec t' map.empty binds args (fun mReceive (rets : list word) =>
            mReceive = map.empty /\
            exists l0 : locals, map.putmany_of_list_zip action rets l = Some l0 /\
-           post (cons (IO_event (map.empty, binds, args, (map.empty, rets))) t') m l0))
+           post (cons (IO (map.empty, binds, args, (map.empty, rets))) t') m l0))
     : WeakestPrecondition.cmd stack_addr call (cmd.interact action binds arges) t m l post.
   Proof using word_ok mem_ok ext_spec_ok.
     exists args. exists t'. split; [exact Hargs|].

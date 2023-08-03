@@ -278,7 +278,7 @@ Ltac straightline :=
         enter f; intros;
          repeat
           match goal with
-          | stack_addr:stack_trace -> BinNums.Z -> ?word, H:?P ?functions |- _ =>
+          | stack_addr:trace -> BinNums.Z -> ?word, H:?P ?functions |- _ =>
                 match type of functions with
                 | list (String.string * Syntax.func) =>
                     let f := fresh "f" in
