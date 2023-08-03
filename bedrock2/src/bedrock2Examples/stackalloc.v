@@ -102,55 +102,24 @@ Instance ct_spec_of_stackall : ct_spec_of "stackall" :=
     let swapspec := ct_spec_of_swap in
     program_logic_goal_for_function! stackswap.
   Proof.
-    straightline. Print straightline.
-    (* TODO: integrate below into straightline. *)
-    match goal with
-    | |- program_logic_goal_for ?f _ =>
-        idtac "2A"; enter f; intros end. cbv [swapspec ct_spec_of_swap] in H.
-    repeat match goal with
-    | stack_addr : stack_trace -> Z -> ?word, H: (forall (_ : stack_trace -> Z -> ?word), _) |- _ => let f := fresh "f" in
-        idtac H; assert (H := H stack_addr); destruct H as [f H] end.
-         match goal with
-         | |- call _ _ _ _ _ _ _ => idtac
-         | _ => eexists
-         end. intros; unfold1_call_goal; cbv beta match delta [call_body];
-         lazymatch goal with
-         | |- if ?test then ?T else _ => replace test with true by reflexivity; change T
-         end; cbv beta match delta [func].
     repeat straightline.
     set (R := eq mem0).
     pose proof (eq_refl : R mem0) as Hmem0.
     repeat straightline.
     repeat (destruct stack as [|?b stack]; try solve [cbn in H3; Lia.lia]; []).
-    clear H3. clear length_stack. clear H1. (*clear Hmem1.
-    subst R. *)
+    clear H3. clear length_stack. clear H1.
     seprewrite_in_by @scalar_of_bytes Hmem0 reflexivity.
     repeat straightline.
     repeat (destruct stack as [|?b stack]; try solve [cbn in length_stack; Lia.lia]; []).
     clear H6 length_stack H3.
     seprewrite_in_by @scalar_of_bytes H1 reflexivity.
     repeat straightline. 
-    (*destruct H8 as [m1_1 [m1_2 [H8_1 [H8_2 [m1_2_1 [m1_2_2 H8_3]]]]]].*)
-    Print straightline_ct_call. Search (exists _, _ -> _).
     assert (HToBytesa: exists n0 n1 n2 n3, a = word.of_Z (LittleEndianList.le_combine [n0; n1; n2; n3])). { admit. }
     assert (HToBytesb: exists n4 n5 n6 n7, b = word.of_Z (LittleEndianList.le_combine [n4; n5; n6; n7])). { admit. }
-      destruct HToBytesa as [n0 [n1 [n2 [n3 HToBytesa]]]].
+    destruct HToBytesa as [n0 [n1 [n2 [n3 HToBytesa]]]].
     destruct HToBytesb as [n4 [n5 [n6 [n7 HToBytesb]]]].
     subst a b.
-        (*TODO: put this in ProgramLogic, name it straightline_ct_call or something*)
-
-    lazymatch goal with
-  | |- call _ ?functions ?callee _ _ _ _ =>
-        (*let callee_spec := lazymatch constr:((_ : spec_of callee)) with
-                           | ?s => s
-                           end in*)
-        let Hcall := lazymatch goal with
-                     | H: context [ call _ functions callee _ _ _ _ ] |- _ => H
-                     end in
-         eapply WeakestPreconditionProperties.Proper_call; cycle
-         -1; [ eapply Hcall | try eabstract solve [ Morphisms.solve_proper ].. ];
-         [ .. | intros ? ? ? ? ]
-    end; eauto.
+    straightline_ct_call; eauto.
     - apply sep_assoc. eassumption.
     - apply locals_ok.
     - apply env_ok.

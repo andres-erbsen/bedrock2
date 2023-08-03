@@ -275,7 +275,24 @@ Ltac straightline :=
       replace test with true by reflexivity; change T end;
                         cbv match beta delta [WeakestPrecondition.func]*)
   | |- program_logic_goal_for ?f _ =>
-      idtac "2A";
+        enter f; intros;
+         repeat
+          match goal with
+          | stack_addr:stack_trace -> BinNums.Z -> ?word, H:?P ?functions |- _ =>
+                match type of functions with
+                | list (String.string * Syntax.func) =>
+                    let f := fresh "f" in
+                    pose proof (H stack_addr) as H; destruct H as [f H]
+                end
+          end;
+        match goal with
+        | |- call _ _ _ _ _ _ _ => idtac
+        | _ => eexists
+        end; intros; unfold1_call_goal; cbv beta match delta [call_body];
+        lazymatch goal with
+        | |- if ?test then ?T else _ => replace test with true by reflexivity; change T
+        end; cbv beta match delta [func]
+      (*idtac "2A";
       enter f; intros;
       match goal with
       | |- call _ _ _ _ _ _ _ => idtac
@@ -285,7 +302,7 @@ Ltac straightline :=
       unfold1_call_goal; cbv match beta delta [call_body];
                                    lazymatch goal with |- if ?test then ?T else _ =>
                                                          replace test with true by reflexivity; change T end;
-                                                       cbv match beta delta [WeakestPrecondition.func]
+                                                       cbv match beta delta [WeakestPrecondition.func]*)
   | |- WeakestPrecondition.cmd _ _ (cmd.set ?s ?e) _ _ _ ?post => idtac "3";
     unfold1_cmd_goal; cbv beta match delta [cmd_body];
     let __ := match s with String.String _ _ => idtac | String.EmptyString => idtac end in
@@ -418,16 +435,13 @@ Ltac straightline_call :=
 
 Ltac straightline_ct_call :=
   lazymatch goal with
-  | |- WeakestPrecondition.call _ ?functions ?callee _ _ _ _ =>
-    let callee_spec := lazymatch constr:(_:spec_of callee) with ?s => s end in
-    let Hcall := lazymatch goal with H: callee_spec functions |- _ => H end in
-    let Hcall' := fresh "Hcall'" in
-    assert (Hcall' := Hcall);
-    repeat (eassert (Hcall' := Hcall' _); try (destruct Hcall' as [p Hcall']; fail));
-    destruct Hcall' as [? Hcall'];
-    eapply WeakestPreconditionProperties.Proper_call; cycle -1;
-      [ eapply Hcall' | try eabstract (solve [Morphisms.solve_proper]) .. ];
-      [ clear Hcall' .. | clear Hcall'; intros ? ? ? ?]
+  | |- call _ ?functions ?callee _ _ _ _ =>
+      let Hcall := multimatch goal with
+                   | H: context [ call _ functions callee _ _ _ _ ] |- _ => H
+                   end in
+      eapply WeakestPreconditionProperties.Proper_call; cycle -1;
+        [ eapply Hcall | try eabstract solve [ Morphisms.solve_proper ].. ];
+        [ .. | intros ? ? ? ? ]
   end.
 
 Ltac current_trace_mem_locals :=

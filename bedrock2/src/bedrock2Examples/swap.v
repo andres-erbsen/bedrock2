@@ -49,8 +49,7 @@ Instance ct_bad_swap : ct_spec_of "bad_swap" :=
     { requires t m := m =* scalar a_addr a * scalar b_addr b * R }.*)
   
   Lemma swap_ct_and_ok : program_logic_goal_for_function! swap.
-  Proof. Print straightline. repeat straightline; auto. split; [trace_alignment|].
-  repeat straightline; eauto. Qed.
+  Proof. repeat straightline; auto. split; [trace_alignment|]. repeat straightline; eauto. Qed.
 
   (*Lemma swap_ct : program_logic_ct_goal_for_function! swap.
   Proof. repeat straightline. trace_alignment. Qed.*)
