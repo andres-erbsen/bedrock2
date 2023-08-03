@@ -294,13 +294,15 @@ Notation "'ctfunc!' name a0 .. an '|' b0 .. bn '/' g0 .. gn '|' h0 .. hn '~>' r0
       post at level 200).
 
 (* for swap *)
+(* trying out alternate definition with function. *)
+Definition appl {A B} (x : A) (f : A -> B) := f x.
 Notation "'ctfunc!' name a0 .. an '|' '/' '|' h0 .. hn ',' '{' 'requires' tr mem := pre ';' 'ensures' tr' mem' ':=' post '}'" :=
   (fun functions =>
      (forall stack_addr,
-         (forall a0,
-             .. (forall an,
-                   (forall tr,
-                       (exists tr'',
+         (forall tr,
+             (exists f,
+                 (forall a0,
+                     .. (forall an,
                            (forall h0,
                                .. (forall hn,
                                      (forall mem,
@@ -308,9 +310,9 @@ Notation "'ctfunc!' name a0 .. an '|' '/' '|' h0 .. hn ',' '{' 'requires' tr mem
                                          WeakestPrecondition.call
                                            stack_addr functions name tr mem (cons a0 .. (cons an nil) ..)
                                            (fun tr' mem' rets =>
-                                              tr' = (tr'' ++ tr)%list /\
+                                              tr' = ((appl a0 .. (appl an f) ..) ++ tr)%list /\
                                                 rets = nil /\
-                                                post))) ..)))) ..)))
+                                                post))) ..)) ..)))))
     (at level 200,
       name at level 0,
       a0 binder, an binder,

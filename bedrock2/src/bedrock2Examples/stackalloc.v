@@ -18,12 +18,12 @@ Definition stackdisj := func! () ~> (a,b) {
   /*skip*/
 }.
 
-Definition stackswap := func! (a, b) ~> (a, b) {
+Definition stackswap := func! (a, b) ~> (b, a) {
   stackalloc 4 as x;                          
   store(x, a);
   stackalloc 4 as y;                          
-  store(x, b);
-  swap(x, y);
+  store(y, b);
+  swap(y, x);
   a = load(x);
   b = load(y)
 }.
@@ -72,14 +72,14 @@ Section WithParameters.
   x = load4(a)
                            }.
 
-  Instance ct_spec_of_stackall : ct_spec_of "stackall" :=
-    ctfunc! "stackall" | / (dummy3 : nat) | (dummy4 : nat),
-      { requires tr mem := True }.
+  (*should fix notation so this works
+Instance ct_spec_of_stackall : ct_spec_of "stackall" :=
+    ctfunc! "stackall" | / |,
+      { requires tr mem := True }.*)
 
-  Lemma stackall_ct : program_logic_ct_goal_for_function! stackall.
+  (*Lemma stackall_ct : program_logic_goal_for_function! stackall.
   Proof.
-    straightline. straightline. straightline. straightline. straightline. straightline.
-    straightline. straightline. straightline. straightline.
+    repeat straightline.
     set (R := eq mem0).
     pose proof (eq_refl : R mem0) as Hmem0.
     straightline_stackalloc. eexists. eexists. split.
@@ -92,29 +92,95 @@ Section WithParameters.
       repeat straightline. }
     repeat straightline. simpl. instantiate (1 := [_]). simpl. f_equal. eauto.
     rewrite H. eauto.
-  Qed.
+  Qed.*)
 
-  Instance ct_spec_of_stackswap : ct_spec_of "stackswap" :=
-    ctfunc! "stackswap" | a b / (dummy1 : nat) | (dummy2 : nat),
-      { requires tr mem := True }.
-
+  Instance ct_spec_of_stackswap : spec_of "stackswap" :=
+    ctfunc! "stackswap" | a b / | ~> B A,
+      { requires tr mem := True ; ensures tr' mem' := B = a /\ A = b }.
   Search (spec_of "swap").
-
-  (* this is dumb.  i should figure out how to deal with the multiple specs sitting around.*)
-  Instance local_spec_of_swap : spec_of "swap" := ct_swap.
-
-  Lemma stackswap_ct : program_logic_ct_goal_for_function! stackswap.
+  Lemma stackswap_ct :
+    let swapspec := ct_spec_of_swap in
+    program_logic_goal_for_function! stackswap.
   Proof.
     repeat straightline.
-    try straightline. Print straightline.
     set (R := eq mem0).
     pose proof (eq_refl : R mem0) as Hmem0.
     repeat straightline.
-    Print Array.array.
-    repeat (destruct stack as [|?b stack]; try solve [cbn in H4; Lia.lia]; []);
-      clear H4 length_stack. Search Array.array. Locate "*". Print sep.
+    repeat (destruct stack as [|?b stack]; try solve [cbn in H3; Lia.lia]; []).
+    clear H3. clear length_stack. clear H1. (*clear Hmem1.
+    subst R. *)
     seprewrite_in_by @scalar_of_bytes Hmem0 reflexivity.
-    repeat straightline. straightline_call. Print straightline_call.
+    repeat straightline.
+    repeat (destruct stack as [|?b stack]; try solve [cbn in length_stack; Lia.lia]; []).
+    clear H6 length_stack H3.
+    seprewrite_in_by @scalar_of_bytes H1 reflexivity.
+    repeat straightline. 
+    (*destruct H8 as [m1_1 [m1_2 [H8_1 [H8_2 [m1_2_1 [m1_2_2 H8_3]]]]]].*)
+    straightline_ct_call; eauto.
+    - apply sep_assoc. eassumption.
+    - apply locals_ok.
+    - apply env_ok.
+    - apply ext_spec_ok.
+    - repeat straightline.
+      Import symmetry eplace. Check @scalar_of_bytes. 
+      assert (HToBytesa: exists n0 n1 n2 n3, a = word.of_Z (LittleEndianList.le_combine [n0; n1; n2; n3])). { admit. }
+      assert (HToBytesb: exists n4 n5 n6 n7, b = word.of_Z (LittleEndianList.le_combine [n4; n5; n6; n7])). { admit. }
+      destruct HToBytesa as [n0 [n1 [n2 [n3 HToBytesa]]]].
+      destruct HToBytesb as [n4 [n5 [n6 [n7 HToBytesb]]]].
+      subst a b.
+      seprewrite_in_by (symmetry! @scalar_of_bytes) H8 reflexivity.
+      assert (length [n0; n1; n2; n3] = 4%nat) by reflexivity.
+      straightline_stackdealloc.
+      seprewrite_in_by (symmetry! @scalar_of_bytes) H8 reflexivity.
+      assert (length [n4; n5; n6; n7] = 4%nat) by reflexivity.
+      straightline_stackdealloc.
+      repeat straightline. split.
+      2: { repeat straightline. }
+      subst t'1. subst t'0. subst t''. simpl. Unshelve.
+      2: { Abort.
+
+  cbv [ct_spec_of_swap] in *. assert (thing := swapspec functions). trace_alignment. eauto. Unshelve. 2: { eauto. trace_alignment.
+ltimatch goal with
+                  | Hm:_ m |- _ => Hm
+                  end in
+        idtac Hm;
+        let stack := match type of Hm with
+                     | context [ Array.array ptsto _ a ?stack ] => stack
+                     end
+        in                        idtac "3";
+
+        let length_stack := match goal with
+                            | H:length stack = _ |- _ => H
+                            end in
+        idtac "4";
+        let Hm' := fresh Hm in
+        pose proof Hm as Hm';
+         (let Psep := match type of Hm with
+                      | ?P _ => P
+                      end in
+          let Htmp := fresh "Htmp" in
+          eassert (Htmp : Lift1Prop.iff1 Psep (_ ⋆ Array.array ptsto (word.of_Z 1) a stack)%sep)
+           by ecancel || fail "failed to find stack frame in" Psep "using ecancel";
+           eapply (fun m => proj1 (Htmp m)) in Hm;
+           (let m' := fresh m in
+            rename m into m';
+             (let mStack := fresh in
+              destruct Hm as (m, (mStack, (Hsplit, (Hm, Harray1)))); move Hm at bottom;
+               pose proof (Array.array_1_to_anybytes _ _ _ Harray1) as Hanybytes;
+               rewrite length_stack in Hanybytes; refine
+               (ex_intro _ m (ex_intro _ mStack (conj Hanybytes (conj Hsplit _)))); clear Htmp
+               Hsplit mStack Harray1 Hanybytes)))
+  end.
+      Print straightline try straightline_stackdealloc. repeat straightline. eexists. eexists. split.
+      + apply H3.
+      + repeat straightline. Print straightline_stackdealloc. assert (n := 5). kstraightline_stackdealloc. straightline_call. repeat straightline. eexists. eexists. split; repeat straightline.
+      + eexists. split; repeat straightline. Print load. split; repeat straightline. Search (map.putmany_of_list_zip nil). eexists. split.
+      + repeat straightline. Search (_ * _ * _)%sep. Search map.split. apply sep_assoc. exists m1_2_1, m1_1. split. { apply Properties.map.split_comm. assumption. }
+      [repeat straightline|]. straightline. eexists. eexists. intuition eauto. eexists. eexists. intuition eauto. simpl. subst t''. subst a1. simpl in H8. repeat straightline. Locate "*". Search sep. apply sep_assoc. eexists. eexists. intuition eauto.
+      apply sep_comm. eapply H10. repeat straightline. subst t''. simpl in H8. Check sep_comm.
+      Search sep.
+        apply sep_comm. in repeat straightline. (* this should be straightline_ct_call. *)
+    straightline_ct_call. Print straightline_call.
     cbv [local_spec_of_swap ct_swap] in H. eapply H. assert (H':= H stack_addr straightline_call.
     cbv [sdealloc_event]. cbn [filterleakage List.flat_map]. repeat rewrite List.app_nil_l || rewrite List.app_nil_r. filterleakage List.flat_map]. clear t'0. simpl. clear t'1.
     straightline_call.
@@ -129,7 +195,7 @@ Section WithParameters.
     seprewrite_in_by @scalar32_of_bytes Hmem0 reflexivity.
 
     repeat straightline.
-    eapply store_word_of_sep.straightline_stackalloc.*)
+    eapply store_word_of_sep.straightline_stackalloc.*)*)
     
     
   
@@ -163,9 +229,11 @@ Section WithParameters.
     seprewrite_in_by @scalar32_of_bytes H0 reflexivity.
     repeat straightline.
     seprewrite_in_by (symmetry! @scalar32_of_bytes) H0 reflexivity.
+    Print straightline_stackdealloc.
     repeat straightline.
     set [Byte.byte.of_Z (word.unsigned v0); b0; b1; b2] as ss in *.
     assert (length ss = Z.to_nat 4) by reflexivity.
+    Print straightline_stackdealloc. subst a.
     repeat straightline.
     Tactics.ssplit; eauto.
 
