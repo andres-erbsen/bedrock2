@@ -102,6 +102,21 @@ Instance ct_spec_of_stackall : ct_spec_of "stackall" :=
     let swapspec := ct_spec_of_swap in
     program_logic_goal_for_function! stackswap.
   Proof.
+    straightline. Print straightline.
+    (* TODO: integrate below into straightline. *)
+    match goal with
+    | |- program_logic_goal_for ?f _ =>
+        idtac "2A"; enter f; intros end. cbv [swapspec ct_spec_of_swap] in H.
+    repeat match goal with
+    | stack_addr : stack_trace -> Z -> ?word, H: (forall (_ : stack_trace -> Z -> ?word), _) |- _ => let f := fresh "f" in
+        idtac H; assert (H := H stack_addr); destruct H as [f H] end.
+         match goal with
+         | |- call _ _ _ _ _ _ _ => idtac
+         | _ => eexists
+         end. intros; unfold1_call_goal; cbv beta match delta [call_body];
+         lazymatch goal with
+         | |- if ?test then ?T else _ => replace test with true by reflexivity; change T
+         end; cbv beta match delta [func].
     repeat straightline.
     set (R := eq mem0).
     pose proof (eq_refl : R mem0) as Hmem0.
@@ -116,18 +131,32 @@ Instance ct_spec_of_stackall : ct_spec_of "stackall" :=
     seprewrite_in_by @scalar_of_bytes H1 reflexivity.
     repeat straightline. 
     (*destruct H8 as [m1_1 [m1_2 [H8_1 [H8_2 [m1_2_1 [m1_2_2 H8_3]]]]]].*)
-    straightline_ct_call; eauto.
+    Print straightline_ct_call. Search (exists _, _ -> _).
+    assert (HToBytesa: exists n0 n1 n2 n3, a = word.of_Z (LittleEndianList.le_combine [n0; n1; n2; n3])). { admit. }
+    assert (HToBytesb: exists n4 n5 n6 n7, b = word.of_Z (LittleEndianList.le_combine [n4; n5; n6; n7])). { admit. }
+      destruct HToBytesa as [n0 [n1 [n2 [n3 HToBytesa]]]].
+    destruct HToBytesb as [n4 [n5 [n6 [n7 HToBytesb]]]].
+    subst a b.
+        (*TODO: put this in ProgramLogic, name it straightline_ct_call or something*)
+
+    lazymatch goal with
+  | |- call _ ?functions ?callee _ _ _ _ =>
+        (*let callee_spec := lazymatch constr:((_ : spec_of callee)) with
+                           | ?s => s
+                           end in*)
+        let Hcall := lazymatch goal with
+                     | H: context [ call _ functions callee _ _ _ _ ] |- _ => H
+                     end in
+         eapply WeakestPreconditionProperties.Proper_call; cycle
+         -1; [ eapply Hcall | try eabstract solve [ Morphisms.solve_proper ].. ];
+         [ .. | intros ? ? ? ? ]
+    end; eauto.
     - apply sep_assoc. eassumption.
     - apply locals_ok.
     - apply env_ok.
     - apply ext_spec_ok.
     - repeat straightline.
       Import symmetry eplace. Check @scalar_of_bytes. 
-      assert (HToBytesa: exists n0 n1 n2 n3, a = word.of_Z (LittleEndianList.le_combine [n0; n1; n2; n3])). { admit. }
-      assert (HToBytesb: exists n4 n5 n6 n7, b = word.of_Z (LittleEndianList.le_combine [n4; n5; n6; n7])). { admit. }
-      destruct HToBytesa as [n0 [n1 [n2 [n3 HToBytesa]]]].
-      destruct HToBytesb as [n4 [n5 [n6 [n7 HToBytesb]]]].
-      subst a b.
       seprewrite_in_by (symmetry! @scalar_of_bytes) H8 reflexivity.
       assert (length [n0; n1; n2; n3] = 4%nat) by reflexivity.
       straightline_stackdealloc.
@@ -136,68 +165,9 @@ Instance ct_spec_of_stackall : ct_spec_of "stackall" :=
       straightline_stackdealloc.
       repeat straightline. split.
       2: { repeat straightline. }
-      subst t'1. subst t'0. subst t''. simpl. Unshelve.
-      2: { Abort.
-
-  cbv [ct_spec_of_swap] in *. assert (thing := swapspec functions). trace_alignment. eauto. Unshelve. 2: { eauto. trace_alignment.
-ltimatch goal with
-                  | Hm:_ m |- _ => Hm
-                  end in
-        idtac Hm;
-        let stack := match type of Hm with
-                     | context [ Array.array ptsto _ a ?stack ] => stack
-                     end
-        in                        idtac "3";
-
-        let length_stack := match goal with
-                            | H:length stack = _ |- _ => H
-                            end in
-        idtac "4";
-        let Hm' := fresh Hm in
-        pose proof Hm as Hm';
-         (let Psep := match type of Hm with
-                      | ?P _ => P
-                      end in
-          let Htmp := fresh "Htmp" in
-          eassert (Htmp : Lift1Prop.iff1 Psep (_ ⋆ Array.array ptsto (word.of_Z 1) a stack)%sep)
-           by ecancel || fail "failed to find stack frame in" Psep "using ecancel";
-           eapply (fun m => proj1 (Htmp m)) in Hm;
-           (let m' := fresh m in
-            rename m into m';
-             (let mStack := fresh in
-              destruct Hm as (m, (mStack, (Hsplit, (Hm, Harray1)))); move Hm at bottom;
-               pose proof (Array.array_1_to_anybytes _ _ _ Harray1) as Hanybytes;
-               rewrite length_stack in Hanybytes; refine
-               (ex_intro _ m (ex_intro _ mStack (conj Hanybytes (conj Hsplit _)))); clear Htmp
-               Hsplit mStack Harray1 Hanybytes)))
-  end.
-      Print straightline try straightline_stackdealloc. repeat straightline. eexists. eexists. split.
-      + apply H3.
-      + repeat straightline. Print straightline_stackdealloc. assert (n := 5). kstraightline_stackdealloc. straightline_call. repeat straightline. eexists. eexists. split; repeat straightline.
-      + eexists. split; repeat straightline. Print load. split; repeat straightline. Search (map.putmany_of_list_zip nil). eexists. split.
-      + repeat straightline. Search (_ * _ * _)%sep. Search map.split. apply sep_assoc. exists m1_2_1, m1_1. split. { apply Properties.map.split_comm. assumption. }
-      [repeat straightline|]. straightline. eexists. eexists. intuition eauto. eexists. eexists. intuition eauto. simpl. subst t''. subst a1. simpl in H8. repeat straightline. Locate "*". Search sep. apply sep_assoc. eexists. eexists. intuition eauto.
-      apply sep_comm. eapply H10. repeat straightline. subst t''. simpl in H8. Check sep_comm.
-      Search sep.
-        apply sep_comm. in repeat straightline. (* this should be straightline_ct_call. *)
-    straightline_ct_call. Print straightline_call.
-    cbv [local_spec_of_swap ct_swap] in H. eapply H. assert (H':= H stack_addr straightline_call.
-    cbv [sdealloc_event]. cbn [filterleakage List.flat_map]. repeat rewrite List.app_nil_l || rewrite List.app_nil_r. filterleakage List.flat_map]. clear t'0. simpl. clear t'1.
-    straightline_call.
-    repeat destruct Hmem0 as [? [? [? [? Hmem0]]]]. eapply store_word_of_sep. 1: repeat straightline. c@scalar_of_bytes.
-    eapply store_word_of_sep. klSearch scalar. 1: cbn [Array.array word.add word.of_Z] in Hmem0.
-    Print scalar. Search ptsto. Abort. (*Print Lift1Prop.impl1. 1: eapply anybytes_to_scalar in H2.
-    cbn [Array.array] in Hmem0.
-    repeat straightline.
-    straightline_stackalloc.
-    straightline.
-    Check @scalar32_of_bytes.
-    seprewrite_in_by @scalar32_of_bytes Hmem0 reflexivity.
-
-    repeat straightline.
-    eapply store_word_of_sep.straightline_stackalloc.*)*)
-    
-    
+      trace_alignment.
+      (* only the word-to-bytes admits remain *)
+  Abort.
   
   Instance spec_of_stacknondet : spec_of "stacknondet" := fun functions => forall stack_addr m t,
       WeakestPrecondition.call stack_addr functions

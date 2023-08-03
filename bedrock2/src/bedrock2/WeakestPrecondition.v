@@ -299,8 +299,8 @@ Definition appl {A B} (x : A) (f : A -> B) := f x.
 Notation "'ctfunc!' name a0 .. an '|' '/' '|' h0 .. hn ',' '{' 'requires' tr mem := pre ';' 'ensures' tr' mem' ':=' post '}'" :=
   (fun functions =>
      (forall stack_addr,
-         (forall tr,
-             (exists f,
+         (exists f,
+             (forall tr,
                  (forall a0,
                      .. (forall an,
                            (forall h0,
