@@ -259,30 +259,31 @@ Notation "'fnspec!' name a0 .. an '/' g0 .. gn '~>' r0 .. rn ',' '{' 'requires' 
          post at level 200).
 
 (* general form *)
+(* trying out alternate definition with function. *)
+Definition appl {A B} (x : A) (f : A -> B) := f x.
 Notation "'ctfunc!' name a0 .. an '|' b0 .. bn '/' g0 .. gn '|' h0 .. hn '~>' r0 .. rn ',' '{' 'requires' tr mem := pre ';' 'ensures' tr' mem' ':=' post '}'" :=
   (fun functions =>
      (forall stack_addr,
-         (forall a0,
-             .. (forall an,
-                   (forall g0,
-                       .. (forall gn,
-                             (forall tr,
-                                 (exists tr'',
-                                     (forall b0,
-                                         .. (forall bn,
+         (exists f,
+             (forall tr mem,
+                 (forall a0,
+                     .. (forall an,
+                           (forall b0,
+                               .. (forall bn,
+                                     (forall g0,
+                                         .. (forall gn, 
                                                (forall h0,
                                                    .. (forall hn,
-                                                         (forall mem,
-                                                             pre ->
-                                                             WeakestPrecondition.call
-                                                               stack_addr functions name tr mem (cons a0 .. (cons an (cons b0 .. (cons bn nil) ..)) ..)
-                                                               (fun tr' mem' rets =>
-                                                                  (exists r0,
-                                                                      .. (exists rn,
-                                                                            tr' = (tr'' ++ tr)%list /\
-                                                                              rets = (cons r0 .. (cons rn nil) ..) /\
-                                                                              post) ..)))) ..)) ..)))) ..)) ..)))
-    (at level 200,
+                                                         pre ->
+                                                         WeakestPrecondition.call
+                                                           stack_addr functions name tr mem (cons a0 .. (cons an (cons b0 .. (cons bn nil) ..)) ..)
+                                                           (fun tr' mem' rets =>
+                                                              (exists r0,
+                                                                  .. (exists rn,
+                                                                        tr' = (((appl a0 .. (appl an (appl g0 .. (appl gn (appl tr f)) ..)) ..)) ++ tr)%list /\
+                                                                    rets = (cons r0 .. (cons rn nil) ..) /\
+                                                                    post) ..))) ..)) ..)) ..)) ..)))))
+       (at level 200,
       name at level 0,
       a0 binder, an binder,
       b0 binder, bn binder,
@@ -294,25 +295,22 @@ Notation "'ctfunc!' name a0 .. an '|' b0 .. bn '/' g0 .. gn '|' h0 .. hn '~>' r0
       post at level 200).
 
 (* for swap *)
-(* trying out alternate definition with function. *)
-Definition appl {A B} (x : A) (f : A -> B) := f x.
 Notation "'ctfunc!' name a0 .. an '|' '/' '|' h0 .. hn ',' '{' 'requires' tr mem := pre ';' 'ensures' tr' mem' ':=' post '}'" :=
   (fun functions =>
      (forall stack_addr,
          (exists f,
-             (forall tr,
+             (forall tr mem,
                  (forall a0,
                      .. (forall an,
                            (forall h0,
                                .. (forall hn,
-                                     (forall mem,
-                                         pre ->
-                                         WeakestPrecondition.call
-                                           stack_addr functions name tr mem (cons a0 .. (cons an nil) ..)
-                                           (fun tr' mem' rets =>
-                                              tr' = ((appl a0 .. (appl an f) ..) ++ tr)%list /\
-                                                rets = nil /\
-                                                post))) ..)) ..)))))
+                                     pre ->
+                                     WeakestPrecondition.call
+                                       stack_addr functions name tr mem (cons a0 .. (cons an nil) ..)
+                                       (fun tr' mem' rets =>
+                                          tr' = ((appl a0 .. (appl an (appl tr f)) ..) ++ tr)%list /\
+                                            rets = nil /\
+                                            post)) ..)) ..)))))
     (at level 200,
       name at level 0,
       a0 binder, an binder,
@@ -321,27 +319,54 @@ Notation "'ctfunc!' name a0 .. an '|' '/' '|' h0 .. hn ',' '{' 'requires' tr mem
       pre at level 200,
       post at level 200).
 
+(* for memequal *)
+Notation "'ctfunc!' name a0 .. an '|' '/' '|' h0 .. hn '~>' r0 .. rn ',' '{' 'requires' tr mem := pre ';' 'ensures' tr' mem' ':=' post '}'" :=
+  (fun functions =>
+     (forall stack_addr,
+         (exists f,
+             (forall tr mem,
+                 (forall a0,
+                     .. (forall an,
+                           (forall h0,
+                               .. (forall hn,
+                                     pre ->
+                                     WeakestPrecondition.call
+                                       stack_addr functions name tr mem (cons a0 .. (cons an nil) ..)
+                                       (fun tr' mem' rets =>
+                                          (exists r0,
+                                              .. (exists rn,
+                                                    tr' = ((appl a0 .. (appl an (appl tr f)) ..) ++ tr)%list /\
+                                                      rets = (cons r0 .. (cons rn nil) ..) /\
+                                                      post) ..))) ..)) ..)))))
+    (at level 200,
+      name at level 0,
+      a0 binder, an binder,
+      h0 binder, hn binder,
+      r0 closed binder, rn closed binder,
+      tr name, tr' name, mem name, mem' name,
+      pre at level 200,
+      post at level 200).
+
 (* for stackswap *)
 Notation "'ctfunc!' name '|' b0 .. bn '/' '|' '~>' r0 .. rn ',' '{' 'requires' tr mem := pre ';' 'ensures' tr' mem' ':=' post '}'" :=
   (fun functions =>
      (forall stack_addr,
-         (forall tr,
-             (exists tr'',
+         (exists f,
+             (forall tr mem,
                  (forall b0,
                      .. (forall bn,
-                           (forall mem,
-                               pre ->
-                               WeakestPrecondition.call
-                                 stack_addr functions name tr mem (cons b0 .. (cons bn nil) ..)
-                                 (fun tr' mem' rets =>
-                                    tr' = (tr'' ++ tr)%list /\
-                                      (exists r0,
-                                          .. (exists rn,
-                                                rets = (cons r0 .. (cons rn nil) ..) /\
-                                                  post) ..)))) ..)))))
-    (at level 200,
-      name at level 0,
-      b0 binder, bn binder,
+                           pre ->
+                           WeakestPrecondition.call
+                             stack_addr functions name tr mem (cons b0 .. (cons bn nil) ..)
+                             (fun tr' mem' rets =>
+                                tr' = (f tr ++ tr)%list /\
+                                  (exists r0,
+                                      .. (exists rn,
+                                            rets = (cons r0 .. (cons rn nil) ..) /\
+                                              post) ..))) ..)))))
+(at level 200,
+  name at level 0,
+  b0 binder, bn binder,
       r0 closed binder, rn closed binder,
       tr name, tr' name, mem name, mem' name,
       pre at level 200,

@@ -28,13 +28,13 @@ Section WithParameters.
   Context {width} {BW: Bitwidth width}.
   Context {word: word.word width} {mem: map.map word byte} {locals: map.map string word}.
   Context {ext_spec: ExtSpec}.
-  Import ProgramLogic.Coercions.
+  Import ProgramLogic.Coercions. Locate "ctfunc!".
 
   Global Instance spec_of_memequal : spec_of "memequal" :=
-    fnspec! "memequal" (x y n : word) / (xs ys : list byte) (Rx Ry : mem -> Prop) ~> r,
+    ctfunc! "memequal" (x y n : word) | / | (xs ys : list byte) (Rx Ry : mem -> Prop) ~> r,
     { requires t m := m =* xs$@x * Rx /\ m =* ys$@y * Ry /\
                       length xs = n :>Z /\ length ys = n :>Z;
-      ensures t' m' := m=m' /\ t=t' /\ (r = 0 :>Z \/ r = 1 :>Z) /\
+      ensures t' m' := m=m' /\ (filterio t)=(filterio t') /\ (r = 0 :>Z \/ r = 1 :>Z) /\
                        (r  = 1 :>Z <-> xs  = ys) }.
 
   Context {word_ok: word.ok word} {mem_ok: map.ok mem} {locals_ok : map.ok locals}
@@ -43,13 +43,21 @@ Section WithParameters.
 
   Import coqutil.Tactics.letexists coqutil.Tactics.Tactics coqutil.Tactics.autoforward.
   Import coqutil.Word.Properties coqutil.Map.Properties.
+  Print Loops.tailrec. Check word.of_Z. Search (Z -> ?word).
+  Print word. Print word.word.
+  Fixpoint newtrace x y n :=
+    match n with
+    | S n' => newtrace (word.add x (word.of_Z 1)) (word.add y (word.of_Z 1)) n' ++
+                       [read_event access_size.one y; read_event access_size.one x; branch_event true] 
+    | O => []
+    end.
 
   Local Ltac ZnWords := destruct width_cases; bedrock2.ZnWords.ZnWords.
   Lemma memequal_ok : program_logic_goal_for_function! memequal.
   Proof.
-    repeat straightline.
+    repeat straightline. Check (Loops.tailrec _).
 
-    refine ((Loops.tailrec
+    refine ((Loops.tailrec _
       (HList.polymorphic_list.cons _
       (HList.polymorphic_list.cons _
       (HList.polymorphic_list.cons _
@@ -60,9 +68,9 @@ Section WithParameters.
         m =* xs$@x * Rx /\  m =* ys$@y * Ry /\
         v=n :> Z /\ length xs = n :> Z /\ length ys = n :> Z
       )
-      (fun                     T M (X Y N R : word) => m = M /\ t = T /\
+      (fun                     T M (X Y N R : word) => m = M /\ branch_event false :: newtrace x y (Z.to_nat (word.unsigned n)) ++ t = T /\
         exists z, R = Z.lor r z :> Z /\ (z  = 0 :>Z <-> xs  = ys)
-      ))
+      )) 
       lt
       _ _ _ _ _ _ _ _ _);
       (* TODO wrap this into a tactic with the previous refine *)
@@ -85,11 +93,11 @@ Section WithParameters.
       { intros ?v ?xs ?Rx ?ys ?Ry ?t ?m ?x ?y ?n ?r.
         repeat straightline.
         cbn in localsmap.
-        eexists n0; split; cbv [expr expr_body localsmap get].
+        eexists n0; eexists t0; split; cbv [dexpr expr expr_body localsmap get].
         { rewrite ?Properties.map.get_put_dec. exists n0; cbn. auto. }
         split; cycle 1.
         { intros Ht; rewrite Ht in *.
-          intuition idtac; destruct xs0, ys0; cbn in *; try discriminate; [].
+          intuition idtac. destruct xs0, ys0; cbn in *; try discriminate; [].
           exists 0; intuition eauto. rewrite Z.lor_0_r. trivial. }
 
         intros Ht.
@@ -147,11 +155,15 @@ Section WithParameters.
         split.
         { cbn in *; ZnWords. }
         intuition idtac; repeat straightline_cleanup.
+        { replace (n0 =? 0) with false by ZnWords.
+          replace (Z.to_nat n0) with (S (Z.to_nat (word.sub n0 v5))) by ZnWords.
+          cbn [newtrace List.app]. rewrite <- List.app_assoc. cbn [List.app].
+          subst v3 v4. apply H8. } 
         rewrite H10, word.unsigned_or_nowrap, <-Z.lor_assoc.
         eexists; split; trivial.
         transitivity (hxs = hys /\ xs0 = ys0); [|intuition congruence].
         rewrite <-H11. rewrite Z.lor_eq_0_iff. eapply and_iff_compat_r.
-        subst v0 v1. rewrite word.unsigned_xor_nowrap, Z.lxor_eq_0_iff.
+        subst v1 v2. rewrite word.unsigned_xor_nowrap, Z.lxor_eq_0_iff.
         split; [|intros;subst;trivial].
         intro HH.
         pose proof byte.unsigned_range hxs;
@@ -159,7 +171,7 @@ Section WithParameters.
         eapply word.unsigned_inj in HH; eapply word.of_Z_inj_small in HH; try ZnWords.
         eapply byte.unsigned_inj in HH; trivial. }
 
-      intuition idtac. case H6 as (?&?&?). subst. subst r.
+      intuition idtac. case H6 as (?&?&?). subst. subst v.
       eapply WeakestPreconditionProperties.dexpr_expr.
       letexists; split; cbn.
       { rewrite ?Properties.map.get_put_dec; cbn; exact eq_refl. }
@@ -168,8 +180,15 @@ Section WithParameters.
 
       rewrite word.unsigned_of_Z_0, Z.lor_0_l in H5; subst x4 v.
       setoid_rewrite word.unsigned_eqb; setoid_rewrite word.unsigned_of_Z_0.
-      eexists; ssplit; eauto; destr Z.eqb; autoforward with typeclass_instances in E;
-        rewrite ?word.unsigned_of_Z_1, ?word.unsigned_of_Z_0; eauto.
+      eexists; ssplit; eauto; try (destr Z.eqb; autoforward with typeclass_instances in E;
+        rewrite ?word.unsigned_of_Z_1, ?word.unsigned_of_Z_0; eauto).
+      { instantiate (1 := fun t n y x => branch_event false :: newtrace x y (Z.to_nat n)). reflexivity. }
+      { rewrite List.flat_map_app.
+        replace (filterio t) with ([] ++ filterio t) by reflexivity.
+        f_equal. clear. generalize dependent x. generalize dependent y.
+        induction (Z.to_nat n); try reflexivity. simpl. intros. rewrite List.flat_map_app.
+        simpl. rewrite <- IHn0. reflexivity. }
+      
       all : intuition eauto; discriminate.
   Qed.
 End WithParameters.

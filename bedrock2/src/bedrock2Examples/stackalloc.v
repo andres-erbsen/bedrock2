@@ -195,9 +195,9 @@ Instance ct_spec_of_stackall : ct_spec_of "stackall" :=
   Definition stacknondet_c := String.list_byte_of_string (c_module (("main",stacknondet_main)::("stacknondet",stacknondet)::nil)).
   (* Goal True. print_list_byte stacknondet_c. Abort. *)
 
-  Instance spec_of_stackdisj : spec_of "stackdisj" := fun functions => forall m t,
-      WeakestPrecondition.call functions
-        "stackdisj" t m [] (fun t' m' rets => exists a b, rets = [a;b] /\ a <> b /\ m'=m/\t'=t).
+  Instance spec_of_stackdisj : spec_of "stackdisj" := fun functions => forall stack_addr m t,
+      WeakestPrecondition.call stack_addr functions
+        "stackdisj" t m [] (fun t' m' rets => exists a b, rets = [a;b] /\ a <> b /\ m'=m/\(filterio t')=(filterio t)).
 
   Lemma stackdisj_ok : program_logic_goal_for_function! stackdisj.
   Proof.
