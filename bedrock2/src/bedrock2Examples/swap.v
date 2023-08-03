@@ -33,24 +33,27 @@ Section WithParameters.
   Context {word: word.word 32} {mem: map.map word Byte.byte}.
   Context {word_ok: word.ok word} {mem_ok: map.ok mem}.
 
-  Instance spec_of_swap : spec_of "swap" :=
-    fnspec! "swap" a_addr b_addr / a b R,
+  Instance ct_spec_of_swap : spec_of "swap" :=
+    ctfunc! "swap" a_addr b_addr | / | a b R,
     { requires t m := m =* scalar a_addr a * scalar b_addr b * R;
       ensures T M :=  M =* scalar a_addr b * scalar b_addr a * R /\ (filterio T) = (filterio t) }.
   
-  Instance ct_swap : ct_spec_of "swap" :=
-    ctfunc! "swap" a_addr b_addr | (dummy1 : nat) / (dummy2 : nat) | a b R,
-    { requires t m := m =* scalar a_addr a * scalar b_addr b * R }.
+  (*Instance ct_swap : ct_spec_of "swap" :=
+    ctfunc! "swap" a_addr b_addr | / (dummy : nat) | a b R,
+    { requires t m := m =* scalar a_addr a * scalar b_addr b * R }.*)
+  Locate "ctfunc!".
   
-  Instance ct_bad_swap : ct_spec_of "bad_swap" :=
-    ctfunc! "bad_swap" a_addr | b_addr / (dummy : nat) | a b R,
-    { requires t m := m =* scalar a_addr a * scalar b_addr b * R }.
+  (* I should make this work again.
+Instance ct_bad_swap : ct_spec_of "bad_swap" :=
+    ctfunc! "bad_swap" | a_addr b_addr / | a b R,
+    { requires t m := m =* scalar a_addr a * scalar b_addr b * R }.*)
   
-  Lemma swap_ok : program_logic_goal_for_function! swap.
-  Proof. repeat straightline; eauto. Qed.
+  Lemma swap_ct_and_ok : program_logic_goal_for_function! swap.
+  Proof. Print straightline. repeat straightline; auto. split; [trace_alignment|].
+  repeat straightline; eauto. Qed.
 
-  Lemma swap_ct : program_logic_ct_goal_for_function! swap.
-  Proof. repeat straightline. trace_alignment. Qed.
+  (*Lemma swap_ct : program_logic_ct_goal_for_function! swap.
+  Proof. repeat straightline. trace_alignment. Qed.*)
 
   Instance spec_of_bad_swap : spec_of "bad_swap" :=
     fnspec! "bad_swap" a_addr b_addr / a b R,
@@ -59,8 +62,8 @@ Section WithParameters.
   Lemma bad_swap_ok : program_logic_goal_for_function! bad_swap.
   Proof. repeat straightline; eauto. Abort.
 
-  Lemma bad_swap_ct : program_logic_ct_goal_for_function! bad_swap.
-  Proof. repeat straightline; eauto. Abort.
+  (*Lemma bad_swap_ct : program_logic_ct_goal_for_function! bad_swap.
+  Proof. repeat straightline; eauto. Abort.*)
 
   Definition spec_of_swap_same : spec_of "swap" :=
     fnspec! "swap" a_addr b_addr / a R,
@@ -77,8 +80,9 @@ Section WithParameters.
     { requires t m := m =* scalar a_addr a * scalar b_addr b * R;
       ensures T M :=  M =* scalar a_addr a * scalar b_addr b * R /\ (filterio T) = (filterio t)}.
 
-  Lemma swap_swap_ok : program_logic_goal_for_function! swap_swap.
-  Proof. repeat (straightline || straightline_call); eauto using eq_trans.
+  Lemma swap_swap_ok :
+    let spec_of_swap := ct_spec_of_swap in program_logic_goal_for_function! swap_swap.
+  Proof. repeat (straightline || straightline_ct_call); eauto using eq_trans.
          - Search (map.ok locals). apply locals_ok.
          - Search (map.ok env). apply env_ok.
          - apply ext_spec_ok.
@@ -88,7 +92,7 @@ Section WithParameters.
   Qed.
 
   Lemma link_swap_swap_swap_swap : spec_of_swap_swap &[,swap_swap; swap].
-  Proof. eauto using swap_swap_ok, swap_ok. Qed.
+  Proof. eauto using swap_swap_ok, swap_ct_and_ok. Qed.
 
   (* Print Assumptions link_swap_swap_swap_swap. *)
   (*

@@ -18,6 +18,16 @@ Definition stackdisj := func! () ~> (a,b) {
   /*skip*/
 }.
 
+Definition stackswap := func! (a, b) ~> (a, b) {
+  stackalloc 4 as x;                          
+  store(x, a);
+  stackalloc 4 as y;                          
+  store(x, b);
+  swap(x, y);
+  a = load(x);
+  b = load(y)
+}.
+
 Require Import bedrock2.WeakestPrecondition.
 Require Import bedrock2.Semantics bedrock2.FE310CSemantics.
 Require Import coqutil.Map.Interface bedrock2.Map.Separation bedrock2.Map.SeparationLogic.
@@ -25,6 +35,7 @@ Require Import coqutil.Map.Interface bedrock2.Map.Separation bedrock2.Map.Separa
 Require bedrock2.WeakestPreconditionProperties.
 From coqutil.Tactics Require Import letexists eabstract.
 Require Import bedrock2.ProgramLogic bedrock2.Scalars.
+Require Import bedrock2Examples.swap.
 Require Import coqutil.Word.Interface.
 From coqutil.Tactics Require Import reference_to_string .
 From bedrock2 Require ToCString PrintListByte.
@@ -56,10 +67,6 @@ Section WithParameters.
     intuition congruence.
   Qed.
 
-  Instance ct_spec_of_stacknondet : ct_spec_of "stacknondet" :=
-    ctfunc! "stacknondet" | / (dummy3 : nat) | (dummy4 : nat),
-      { requires tr mem := True }.
-
   Definition stackall := func! () ~> () {
   stackalloc 4 as a;
   x = load4(a)
@@ -87,47 +94,47 @@ Section WithParameters.
     rewrite H. eauto.
   Qed.
 
-  Lemma stacknondet_ct : program_logic_ct_goal_for_function! stacknondet.
+  Instance ct_spec_of_stackswap : ct_spec_of "stackswap" :=
+    ctfunc! "stackswap" | a b / (dummy1 : nat) | (dummy2 : nat),
+      { requires tr mem := True }.
+
+  Search (spec_of "swap").
+
+  (* this is dumb.  i should figure out how to deal with the multiple specs sitting around.*)
+  Instance local_spec_of_swap : spec_of "swap" := ct_swap.
+
+  Lemma stackswap_ct : program_logic_ct_goal_for_function! stackswap.
   Proof.
-    straightline. straightline. straightline. straightline. straightline. straightline.
-    straightline. straightline. straightline. straightline. straightline.
     repeat straightline.
+    try straightline. Print straightline.
     set (R := eq mem0).
     pose proof (eq_refl : R mem0) as Hmem0.
     repeat straightline.
-    repeat (destruct stack as [|?b stack]; try solve [cbn in H3; Lia.lia]; []).
-    seprewrite_in_by @scalar32_of_bytes Hmem0 reflexivity.
-    repeat straightline.
-    repeat (destruct stack as [|?b stack]; try solve [cbn in H4; Lia.lia]; []).
-    Import symmetry eplace.
-    seprewrite_in_by (symmetry! @scalar32_of_bytes) Hmem0 reflexivity.
+    Print Array.array.
+    repeat (destruct stack as [|?b stack]; try solve [cbn in H4; Lia.lia]; []);
+      clear H4 length_stack. Search Array.array. Locate "*". Print sep.
+    seprewrite_in_by @scalar_of_bytes Hmem0 reflexivity.
+    repeat straightline. straightline_call. Print straightline_call.
+    cbv [local_spec_of_swap ct_swap] in H. eapply H. assert (H':= H stack_addr straightline_call.
+    cbv [sdealloc_event]. cbn [filterleakage List.flat_map]. repeat rewrite List.app_nil_l || rewrite List.app_nil_r. filterleakage List.flat_map]. clear t'0. simpl. clear t'1.
+    straightline_call.
+    repeat destruct Hmem0 as [? [? [? [? Hmem0]]]]. eapply store_word_of_sep. 1: repeat straightline. c@scalar_of_bytes.
+    eapply store_word_of_sep. klSearch scalar. 1: cbn [Array.array word.add word.of_Z] in Hmem0.
+    Print scalar. Search ptsto. Abort. (*Print Lift1Prop.impl1. 1: eapply anybytes_to_scalar in H2.
     cbn [Array.array] in Hmem0.
-    cbn [Array.array] in Hmem1.
-    Import Ring_tac.
     repeat straightline.
-    assert ((Array.array ptsto (word.of_Z 1) a [(Byte.byte.of_Z (word.unsigned v0)); b0; b1; b2] ⋆ R)%sep m).
-    { cbn [Array.array].
-      use_sep_assumption; cancel; Morphisms.f_equiv; f_equal; f_equal; ring. }
-    seprewrite_in_by @scalar32_of_bytes H7 reflexivity.
-    repeat straightline.
-    seprewrite_in_by (symmetry! @scalar32_of_bytes) H7 reflexivity.
-    repeat straightline.
-    Tactics.ssplit; eauto.
-    eexists. eexists. Print anybytes. split; try split; try straightline.
-    - rewrite H in *. eauto.
-    - repeat straightline. straightline_stackalloc. eassumption.
+    straightline_stackalloc.
+    straightline.
+    Check @scalar32_of_bytes.
+    seprewrite_in_by @scalar32_of_bytes Hmem0 reflexivity.
 
-    subst v. subst v1. subst ss.
-    eapply Properties.word.unsigned_inj.
-    rewrite ?Properties.word.unsigned_sru_nowrap.
-    2,3: rewrite ?Properties.word.unsigned_of_Z_nowrap by Lia.lia; reflexivity.
-    rewrite ?Properties.word.unsigned_of_Z_nowrap; try Lia.lia.
-    2,3: eapply (LittleEndianList.le_combine_bound [_;_;_;_]).*)
-  (*eexists. eexists. split; repeat straightline.
-    { eexists. split; repeat straightline. Search anybytes. all: cbv [anybytes] in H0.
-      1: straightline. 1: straightline.*) Abort.
-  Instance spec_of_stacknondet : spec_of "stacknondet" := fun functions => forall m t,
-      WeakestPrecondition.call functions
+    repeat straightline.
+    eapply store_word_of_sep.straightline_stackalloc.*)
+    
+    
+  
+  Instance spec_of_stacknondet : spec_of "stacknondet" := fun functions => forall stack_addr m t,
+      WeakestPrecondition.call stack_addr functions
         "stacknondet" t m [] (fun t' m' rets => exists a b, rets = [a;b] /\ a = b /\ m'=m/\(filterio t')=(filterio t)).
 
   Add Ring wring : (Properties.word.ring_theory (word := word))

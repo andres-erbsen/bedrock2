@@ -8,8 +8,8 @@ Require Import bedrock2.Map.SeparationLogic bedrock2.Scalars.
 Definition spec_of (procname:String.string) := list (String.string * (list String.string * list String.string * Syntax.cmd.cmd)) -> Prop.
 Existing Class spec_of.
 
-Definition ct_spec_of (procname:String.string) := list (String.string * (list String.string * list String.string * Syntax.cmd.cmd)) -> Prop.
-Existing Class ct_spec_of.
+(*Definition ct_spec_of (procname:String.string) := list (String.string * (list String.string * list String.string * Syntax.cmd.cmd)) -> Prop.
+Existing Class ct_spec_of.*)
 
 (* not sure where to put these lemmas *)
 Lemma align_trace_cons {T} x xs cont t (H : xs = app cont t) : @cons T x xs = app (cons x cont) t.
@@ -69,6 +69,13 @@ Ltac assuming_correctness_of_in callees functions P :=
     let f_spec := lazymatch constr:(_:spec_of f) with ?x => x end in
     constr:(f_spec functions -> ltac:(let t := assuming_correctness_of_in callees functions P in exact t))
   end.
+(*Ltac assuming_ct_of_in callees functions P :=
+  lazymatch callees with
+  | nil => P
+  | cons ?f ?callees =>
+    let f_spec := lazymatch constr:(_:spec_of f) with ?x => x end in
+    constr:(f_spec functions -> ltac:(let t := assuming_ct_of_in callees functions P in exact t))
+  end.*)
 Require Import String List coqutil.Macros.ident_to_string.
 
 Ltac program_logic_goal_for_function proc :=
@@ -85,10 +92,10 @@ Notation "program_logic_goal_for_function! proc" := (program_logic_goal_for proc
    program_logic_goal_for_function proc))
   (at level 10, only parsing).
 
-Ltac program_logic_ct_goal_for_function proc :=
+(*Ltac program_logic_ct_goal_for_function proc :=
   let __ := constr:(proc : Syntax.func) in
   constr_string_basename_of_constr_reference_cps ltac:(Tactics.head proc) ltac:(fun fname =>
-  let spec := lazymatch constr:(_:ct_spec_of fname) with ?s => s end in
+  let spec := lazymatch constr:(_:spec_of fname) with ?s => s end in
   exact (forall functions : list (string * Syntax.func), ltac:(
     let callees := eval cbv in (callees (snd proc)) in
     let s := assuming_correctness_of_in callees functions (spec (cons (fname, proc) functions)) in
@@ -97,7 +104,7 @@ Definition program_logic_ct_goal_for (_ : Syntax.func) (P : Prop) := P.
 
 Notation "program_logic_ct_goal_for_function! proc" := (program_logic_ct_goal_for proc ltac:(
    program_logic_ct_goal_for_function proc))
-  (at level 10, only parsing).
+  (at level 10, only parsing).*)
 
 (* Users might want to override this with
      Ltac normalize_body_of_function f ::= Tactics.rdelta.rdelta f.
@@ -118,7 +125,7 @@ Ltac bind_body_of_function f_ :=
 
 (* note: f might have some implicit parameters (eg a record of constants) *)
 Ltac enter f :=
-  cbv beta delta [program_logic_goal_for program_logic_ct_goal_for]; intros;
+  cbv beta delta [program_logic_goal_for (*program_logic_ct_goal_for*)]; intros;
   bind_body_of_function f;
   lazymatch goal with |- ?s ?p => let s := rdelta s in change (s p); cbv beta end.
 
@@ -261,18 +268,24 @@ Ltac fwd_uniq := repeat fwd_uniq_step.
 Ltac straightline :=
   match goal with
   | _ => idtac "1"; straightline_cleanup
-  | |- program_logic_goal_for ?f _ => idtac "2";
+  (*| |- program_logic_goal_for ?f _ => idtac "2";
     enter f; intros;
     unfold1_call_goal; cbv match beta delta [call_body];
     lazymatch goal with |- if ?test then ?T else _ =>
       replace test with true by reflexivity; change T end;
-                        cbv match beta delta [WeakestPrecondition.func]
-  | |- program_logic_ct_goal_for ?f _ => idtac "2A";
-    enter f; intros; eexists; intros;
-    unfold1_call_goal; cbv match beta delta [call_body];
-    lazymatch goal with |- if ?test then ?T else _ =>
-      replace test with true by reflexivity; change T end;
-    cbv match beta delta [WeakestPrecondition.func]
+                        cbv match beta delta [WeakestPrecondition.func]*)
+  | |- program_logic_goal_for ?f _ =>
+      idtac "2A";
+      enter f; intros;
+      match goal with
+      | |- call _ _ _ _ _ _ _ => idtac
+      | _ => eexists(*for ct case*)
+      end;
+      intros;
+      unfold1_call_goal; cbv match beta delta [call_body];
+                                   lazymatch goal with |- if ?test then ?T else _ =>
+                                                         replace test with true by reflexivity; change T end;
+                                                       cbv match beta delta [WeakestPrecondition.func]
   | |- WeakestPrecondition.cmd _ _ (cmd.set ?s ?e) _ _ _ ?post => idtac "3";
     unfold1_cmd_goal; cbv beta match delta [cmd_body];
     let __ := match s with String.String _ _ => idtac | String.EmptyString => idtac end in
@@ -401,6 +414,20 @@ Ltac straightline_call :=
     eapply WeakestPreconditionProperties.Proper_call; cycle -1;
       [ eapply Hcall | try eabstract (solve [Morphisms.solve_proper]) .. ];
       [ .. | intros ? ? ? ?]
+  end.
+
+Ltac straightline_ct_call :=
+  lazymatch goal with
+  | |- WeakestPrecondition.call _ ?functions ?callee _ _ _ _ =>
+    let callee_spec := lazymatch constr:(_:spec_of callee) with ?s => s end in
+    let Hcall := lazymatch goal with H: callee_spec functions |- _ => H end in
+    let Hcall' := fresh "Hcall'" in
+    assert (Hcall' := Hcall);
+    repeat (eassert (Hcall' := Hcall' _); try (destruct Hcall' as [p Hcall']; fail));
+    destruct Hcall' as [? Hcall'];
+    eapply WeakestPreconditionProperties.Proper_call; cycle -1;
+      [ eapply Hcall' | try eabstract (solve [Morphisms.solve_proper]) .. ];
+      [ clear Hcall' .. | clear Hcall'; intros ? ? ? ?]
   end.
 
 Ltac current_trace_mem_locals :=

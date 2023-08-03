@@ -231,6 +231,8 @@ Ltac unfold1_call_goal :=
 
 Import Coq.ZArith.ZArith.
 
+(**)
+
 Notation "'fnspec!' name a0 .. an '/' g0 .. gn '~>' r0 .. rn ',' '{' 'requires' tr mem := pre ';' 'ensures' tr' mem' ':=' post '}'" :=
   (fun functions =>
      (forall stack_addr,
@@ -256,57 +258,92 @@ Notation "'fnspec!' name a0 .. an '/' g0 .. gn '~>' r0 .. rn ',' '{' 'requires' 
          pre at level 200,
          post at level 200).
 
-(* a's are public, b's are private. g's public, h's private. *)
-Notation "'ctfunc!' name a0 .. an '|' b0 .. bn '/' g0 .. gn '|' h0 .. hn ',' '{' 'requires' tr mem := pre '}'" :=
+(* general form *)
+Notation "'ctfunc!' name a0 .. an '|' b0 .. bn '/' g0 .. gn '|' h0 .. hn '~>' r0 .. rn ',' '{' 'requires' tr mem := pre ';' 'ensures' tr' mem' ':=' post '}'" :=
   (fun functions =>
-     (forall stack_addr stack_trace,
+     (forall stack_addr,
          (forall a0,
              .. (forall an,
                    (forall g0,
                        .. (forall gn,
-                             (exists tr'',
-                                 (forall b0,
-                                     .. (forall bn,
-                                           (forall h0,
-                                               .. (forall hn,
-                                                     (forall tr mem,
-                                                         filterstack tr = stack_trace ->
-                                                         pre ->
-                                                         WeakestPrecondition.call
-                                                           stack_addr functions name tr mem (cons a0 .. (cons an nil) ..)
-                                                           (fun tr' mem' rets =>
-                                                              filterleakage tr' = (tr'' ++ filterleakage tr)%list))) ..)) ..))) ..)) ..)))
-       (at level 200,
-         name at level 0,
-         a0 closed binder, an closed binder,
-         b0 closed binder, bn closed binder,
-         g0 closed binder, gn closed binder,
-         h0 closed binder, hn closed binder,
-         tr name, mem name,
-         pre at level 200).
-
-(* a's are public, b's are private. g's public, h's private. *)
-Notation "'ctfunc!' name '|' '/' g0 .. gn '|' h0 .. hn ',' '{' 'requires' tr mem := pre '}'" :=
-  (fun functions =>
-     (forall stack_addr stack_trace,
-         (forall g0,
-             .. (forall gn,
-                   (exists tr'',
-                       (forall h0,
-                           .. (forall hn,
-                                 (forall tr mem,
-                                     filterstack tr = stack_trace ->
-                                     pre ->
-                                     WeakestPrecondition.call
-                                       stack_addr functions name tr mem nil
-                                       (fun tr' mem' rets =>
-                                          filterleakage tr' = (tr'' ++ filterleakage tr)%list))) ..))) ..)))
+                             (forall tr,
+                                 (exists tr'',
+                                     (forall b0,
+                                         .. (forall bn,
+                                               (forall h0,
+                                                   .. (forall hn,
+                                                         (forall mem,
+                                                             pre ->
+                                                             WeakestPrecondition.call
+                                                               stack_addr functions name tr mem (cons a0 .. (cons an (cons b0 .. (cons bn nil) ..)) ..)
+                                                               (fun tr' mem' rets =>
+                                                                  (exists r0,
+                                                                      .. (exists rn,
+                                                                            tr' = (tr'' ++ tr)%list /\
+                                                                              rets = (cons r0 .. (cons rn nil) ..) /\
+                                                                              post) ..)))) ..)) ..)))) ..)) ..)))
     (at level 200,
       name at level 0,
-      g0 closed binder, gn closed binder,
-      h0 closed binder, hn closed binder,
-      tr name, mem name,
-      pre at level 200).
+      a0 binder, an binder,
+      b0 binder, bn binder,
+      g0 binder, gn binder,
+      h0 binder, hn binder,
+      r0 closed binder, rn closed binder,
+      tr name, tr' name, mem name, mem' name,
+      pre at level 200,
+      post at level 200).
+
+(* for swap *)
+Notation "'ctfunc!' name a0 .. an '|' '/' '|' h0 .. hn ',' '{' 'requires' tr mem := pre ';' 'ensures' tr' mem' ':=' post '}'" :=
+  (fun functions =>
+     (forall stack_addr,
+         (forall a0,
+             .. (forall an,
+                   (forall tr,
+                       (exists tr'',
+                           (forall h0,
+                               .. (forall hn,
+                                     (forall mem,
+                                         pre ->
+                                         WeakestPrecondition.call
+                                           stack_addr functions name tr mem (cons a0 .. (cons an nil) ..)
+                                           (fun tr' mem' rets =>
+                                              tr' = (tr'' ++ tr)%list /\
+                                                rets = nil /\
+                                                post))) ..)))) ..)))
+    (at level 200,
+      name at level 0,
+      a0 binder, an binder,
+      h0 binder, hn binder,
+      tr name, tr' name, mem name, mem' name,
+      pre at level 200,
+      post at level 200).
+
+(* for stackswap *)
+Notation "'ctfunc!' name '|' b0 .. bn '/' '|' '~>' r0 .. rn ',' '{' 'requires' tr mem := pre ';' 'ensures' tr' mem' ':=' post '}'" :=
+  (fun functions =>
+     (forall stack_addr,
+         (forall tr,
+             (exists tr'',
+                 (forall b0,
+                     .. (forall bn,
+                           (forall mem,
+                               pre ->
+                               WeakestPrecondition.call
+                                 stack_addr functions name tr mem (cons b0 .. (cons bn nil) ..)
+                                 (fun tr' mem' rets =>
+                                    tr' = (tr'' ++ tr)%list /\
+                                      (exists r0,
+                                          .. (exists rn,
+                                                rets = (cons r0 .. (cons rn nil) ..) /\
+                                                  post) ..)))) ..)))))
+    (at level 200,
+      name at level 0,
+      b0 binder, bn binder,
+      r0 closed binder, rn closed binder,
+      tr name, tr' name, mem name, mem' name,
+      pre at level 200,
+      post at level 200).
 
 Notation "'fnspec!' name a0 .. an '/' g0 .. gn ',' '{' 'requires' tr mem := pre ';' 'ensures' tr' mem' ':=' post '}'" :=
   (fun functions =>
