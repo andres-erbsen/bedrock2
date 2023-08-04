@@ -40,25 +40,33 @@ Require Import coqutil.Word.Interface.
 From coqutil.Tactics Require Import reference_to_string .
 From bedrock2 Require ToCString PrintListByte.
 
+(* where to put all of this? *)
 Require Import coqutil.Z.Lia.
-Section oneLemmaThatDoesntBelongHere.
-  Context {width: Z} {word: word.word width} {word_ok : word.ok word}. Print word.word.
+Section aLemmaThatDoesntBelongHere.
+  Context {width: Z} {word: word.word width} {word_ok : word.ok word}.
   Lemma word_to_bytes (a : word) :
         a = word.of_Z (LittleEndianList.le_combine (LittleEndianList.le_split (Z.to_nat ((width + 7) / 8)) (word.unsigned a))).
   Proof.
-    rewrite LittleEndianList.le_combine_split. Search (word.of_Z (word.unsigned _)).
-    Search (_ mod _ = _). rewrite Z.mod_small.
+    rewrite LittleEndianList.le_combine_split. rewrite Z.mod_small.
     - symmetry. apply word.of_Z_unsigned.
-    - Search word.unsigned. assert (H := Properties.word.unsigned_range a).
-      destruct H as [H1 H2]. split; try apply H1. clear H1. eapply Z.lt_le_trans; try apply H2.
-      Search (_ ^ _ < _ ^ _). clear H2. apply Z.pow_le_mono_r; try blia. Print word.word.
-      Print word.ok. Search (Z.of_nat (Z.to_nat _)). rewrite Znat.Z2Nat.id.
-      + Search (_ / _ * _). replace ((width + 7) / 8 * 8) with (width + 7 - (width + 7) mod 8).
-        -- Search (_ mod _ < _). assert (H := Z.mod_pos_bound (width + 7) 8). blia.
-        -- Search (_ / _ * _). rewrite Zdiv.Zmod_eq_full; blia.
-      + Search (0 <= _ / _).  apply Z.div_pos; try blia. destruct word_ok. blia.
+    - assert (H := Properties.word.unsigned_range a). destruct H as [H1 H2].
+      split; try apply H1. clear H1.
+      eapply Z.lt_le_trans; try apply H2. clear H2.
+      apply Z.pow_le_mono_r; try blia.
+      rewrite Znat.Z2Nat.id.
+      + replace ((width + 7) / 8 * 8) with (width + 7 - (width + 7) mod 8).
+        -- assert (H := Z.mod_pos_bound (width + 7) 8). blia.
+        -- rewrite Zdiv.Zmod_eq_full; blia.
+      + apply Z.div_pos; try blia. destruct word_ok. blia.
   Qed.
-End oneLemmaThatDoesntBelongHere.
+
+  Lemma word_to_bytes' (a : word) :
+    exists l, length l = (Z.to_nat ((width + 7) / 8)) /\
+                a = word.of_Z (LittleEndianList.le_combine l).
+  Proof.
+    eexists. split; try apply word_to_bytes. apply LittleEndianList.length_le_split.
+  Qed.
+End aLemmaThatDoesntBelongHere.
                                                            
 Section WithParameters.
   Context {word: word.word 32} {mem: map.map word Byte.byte}.
@@ -87,39 +95,9 @@ Section WithParameters.
     intuition congruence.
   Qed.
 
-  Definition stackall := func! () ~> () {
-  stackalloc 4 as a;
-  x = load4(a)
-                           }.
-
-  (*should fix notation so this works
-Instance ct_spec_of_stackall : ct_spec_of "stackall" :=
-    ctfunc! "stackall" | / |,
-      { requires tr mem := True }.*)
-
-  (*Lemma stackall_ct : program_logic_goal_for_function! stackall.
-  Proof.
-    repeat straightline.
-    set (R := eq mem0).
-    pose proof (eq_refl : R mem0) as Hmem0.
-    straightline_stackalloc. eexists. eexists. split.
-    { repeat straightline. eexists. split; repeat straightline. Print ptsto.
-      repeat (destruct stack as [|?b stack]; try solve [cbn in H3; Lia.lia]; []).
-      repeat straightline.
-      clear H2.
-      Print seprewrite0_in.
-      seprewrite_in_by @scalar32_of_bytes Hmem0 reflexivity.
-      repeat straightline. }
-    repeat straightline. simpl. instantiate (1 := [_]). simpl. f_equal. eauto.
-    rewrite H. eauto.
-  Qed.*)
-  Search LittleEndianList.le_combine.
-
-
   Instance ct_spec_of_stackswap : spec_of "stackswap" :=
     ctfunc! "stackswap" | a b / | ~> B A,
       { requires tr mem := True ; ensures tr' mem' := B = a /\ A = b }.
-  Search (spec_of "swap").
   Lemma stackswap_ct :
     let swapspec := ct_spec_of_swap in
     program_logic_goal_for_function! stackswap.
@@ -135,11 +113,13 @@ Instance ct_spec_of_stackall : ct_spec_of "stackall" :=
     repeat (destruct stack as [|?b stack]; try solve [cbn in length_stack; Lia.lia]; []).
     clear H6 length_stack H3.
     seprewrite_in_by @scalar_of_bytes H1 reflexivity.
-    repeat straightline. 
-    assert (HToBytesa: exists n0 n1 n2 n3, a = word.of_Z (LittleEndianList.le_combine [n0; n1; n2; n3])). { admit. }
-    assert (HToBytesb: exists n4 n5 n6 n7, b = word.of_Z (LittleEndianList.le_combine [n4; n5; n6; n7])). { admit. }
-    destruct HToBytesa as [n0 [n1 [n2 [n3 HToBytesa]]]].
-    destruct HToBytesb as [n4 [n5 [n6 [n7 HToBytesb]]]].
+    repeat straightline.
+    assert (HToBytesa := word_to_bytes' a).
+    destruct HToBytesa as [la [length_la HToBytesa]].
+    repeat (destruct la as [|? la]; try solve [cbn in length_la; Lia.lia]; []).
+    assert (HToBytesb := word_to_bytes' b).
+    destruct HToBytesb as [lb [length_lb HToBytesb]].
+    repeat (destruct lb as [|? lb]; try solve [cbn in length_lb; Lia.lia]; []).
     subst a b.
     straightline_ct_call; eauto.
     - apply sep_assoc. eassumption.
@@ -149,16 +129,13 @@ Instance ct_spec_of_stackall : ct_spec_of "stackall" :=
     - repeat straightline.
       Import symmetry eplace. Check @scalar_of_bytes. 
       seprewrite_in_by (symmetry! @scalar_of_bytes) H8 reflexivity.
-      assert (length [n0; n1; n2; n3] = 4%nat) by reflexivity.
       straightline_stackdealloc.
       seprewrite_in_by (symmetry! @scalar_of_bytes) H8 reflexivity.
-      assert (length [n4; n5; n6; n7] = 4%nat) by reflexivity.
       straightline_stackdealloc.
       repeat straightline. split.
-      2: { repeat straightline. }
-      trace_alignment.
-      (* only the word-to-bytes admits remain *)
-  Abort.
+      + trace_alignment.
+      + repeat straightline.
+  Qed.
   
   Instance spec_of_stacknondet : spec_of "stacknondet" := fun functions => forall stack_addr m t,
       WeakestPrecondition.call stack_addr functions
