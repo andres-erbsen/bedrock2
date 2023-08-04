@@ -165,7 +165,7 @@ Section semantics.
           eval_expr
             (if word.eqb vc (word.of_Z 0) then e2 else e1)
             (addMetricInstructions 2 (addMetricLoads 2 (addMetricJumps 1 mc')))
-            tr'
+            ((if word.eqb vc (word.of_Z 0) then branch false else branch true) :: tr')
       end.
 
     Fixpoint eval_expr_old (e : expr) : option word :=

@@ -42,7 +42,7 @@ Section WeakestPrecondition.
         load s (map.of_list_word tbl) a (post t'))
       | expr.ite c e1 e2 =>
         rec t c (fun t' b =>
-        rec t' (if word.eqb b (word.of_Z 0) then e2 else e1) (fun t'' v =>
+        rec (cons (if word.eqb b (word.of_Z 0) then branch false else branch true) t') (if word.eqb b (word.of_Z 0) then e2 else e1) (fun t'' v =>
         post t'' v))
     end.
     Fixpoint expr t e := expr_body expr t e.
