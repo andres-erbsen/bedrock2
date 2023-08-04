@@ -283,11 +283,11 @@ Module exec. Section WithEnv.
       t m l mc post
       v mc' t' (_ : eval_expr m l e mc t = Some (v, mc', t'))
       (_ : word.unsigned v <> 0)
-      mid (_ : exec c (branch true :: t') m l (addMetricInstructions 2
-                                                       (addMetricLoads 2
-                                                          (addMetricJumps 1 mc'))) mid)
+      mid (_ : exec c (branch true :: t') m l mc' mid)
       (_ : forall t'' m' l' mc'', mid t'' m' l' mc'' ->
-                                      exec (cmd.while e c) t'' m' l' mc'' post)
+                                      exec (cmd.while e c) t'' m' l' (addMetricInstructions 2
+                                                                        (addMetricLoads 2
+                                                                           (addMetricJumps 1 mc''))) post)
     : exec (cmd.while e c) t m l mc post
   | call binds fname arges
       t m l mc post
