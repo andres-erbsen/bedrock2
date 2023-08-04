@@ -40,13 +40,33 @@ Require Import coqutil.Word.Interface.
 From coqutil.Tactics Require Import reference_to_string .
 From bedrock2 Require ToCString PrintListByte.
 
+Require Import coqutil.Z.Lia.
+Section oneLemmaThatDoesntBelongHere.
+  Context {width: Z} {word: word.word width} {word_ok : word.ok word}. Print word.word.
+  Lemma word_to_bytes (a : word) :
+        a = word.of_Z (LittleEndianList.le_combine (LittleEndianList.le_split (Z.to_nat ((width + 7) / 8)) (word.unsigned a))).
+  Proof.
+    rewrite LittleEndianList.le_combine_split. Search (word.of_Z (word.unsigned _)).
+    Search (_ mod _ = _). rewrite Z.mod_small.
+    - symmetry. apply word.of_Z_unsigned.
+    - Search word.unsigned. assert (H := Properties.word.unsigned_range a).
+      destruct H as [H1 H2]. split; try apply H1. clear H1. eapply Z.lt_le_trans; try apply H2.
+      Search (_ ^ _ < _ ^ _). clear H2. apply Z.pow_le_mono_r; try blia. Print word.word.
+      Print word.ok. Search (Z.of_nat (Z.to_nat _)). rewrite Znat.Z2Nat.id.
+      + Search (_ / _ * _). replace ((width + 7) / 8 * 8) with (width + 7 - (width + 7) mod 8).
+        -- Search (_ mod _ < _). assert (H := Z.mod_pos_bound (width + 7) 8). blia.
+        -- Search (_ / _ * _). rewrite Zdiv.Zmod_eq_full; blia.
+      + Search (0 <= _ / _).  apply Z.div_pos; try blia. destruct word_ok. blia.
+  Qed.
+End oneLemmaThatDoesntBelongHere.
+                                                           
 Section WithParameters.
   Context {word: word.word 32} {mem: map.map word Byte.byte}.
   Context {word_ok: word.ok word} {mem_ok: map.ok mem}.
 
   Instance spec_of_stacktrivial : spec_of "stacktrivial" := fun functions => forall stack_addr m t,
       WeakestPrecondition.call stack_addr functions
-        "stacktrivial" t m [] (fun t' m' rets => rets = [] /\ m'=m /\ (filterleakage t')=(filterleakage t)).
+        "stacktrivial" t m [] (fun t' m' rets => rets = [] /\ m'=m /\ (filterio t')=(filterio t)).
 
   Lemma stacktrivial_ok : program_logic_goal_for_function! stacktrivial.
   Proof.
@@ -93,6 +113,8 @@ Instance ct_spec_of_stackall : ct_spec_of "stackall" :=
     repeat straightline. simpl. instantiate (1 := [_]). simpl. f_equal. eauto.
     rewrite H. eauto.
   Qed.*)
+  Search LittleEndianList.le_combine.
+
 
   Instance ct_spec_of_stackswap : spec_of "stackswap" :=
     ctfunc! "stackswap" | a b / | ~> B A,
