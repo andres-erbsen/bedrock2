@@ -85,6 +85,9 @@ Module ext_spec.
 End ext_spec.
 Arguments ext_spec.ok {_ _ _ _} _.
 
+Definition PickSp {width: Z}{BW: Bitwidth width}{word: word.word width}{mem: map.map word byte} : Type :=
+  trace -> Z -> word.
+
 Section binops.
   Context {width : Z} {word : Word.Interface.word width}.
   Definition interp_binop (bop : bopname) : word -> word -> word :=
@@ -123,7 +126,7 @@ Section semantics.
     Context (m : mem) (l : locals).
 
     Local Notation "' x <- a | y ; f" := (match a with x => f | _ => y end)
-                                           (right associativity, at level 70, x pattern). Print trace.
+                                           (right associativity, at level 70, x pattern).
     Fixpoint eval_expr (e : expr) (mc : metrics) (tr : trace) : option (word * metrics * trace) :=
       match e with
       | expr.literal v => Some (
@@ -204,12 +207,12 @@ Module exec. Section WithEnv.
   Context {locals: map.map String.string word}.
   Context {env: map.map String.string (list String.string * list String.string * cmd)}.
   Context {ext_spec: ExtSpec}.
-  Context (stack_addr : trace -> Z -> word).
+  Context {pick_sp: PickSp}.
   Context (e: env).
 
   Local Notation metrics := MetricLog.
 
-  Implicit Types post : trace -> mem -> locals -> metrics -> Prop. (* COQBUG(unification finds Type instead of Prop and fails to downgrade *) Search list.
+  Implicit Types post : trace -> mem -> locals -> metrics -> Prop. (* COQBUG(unification finds Type instead of Prop and fails to downgrade *)
   
   Inductive exec :
     cmd -> trace -> mem -> locals -> metrics ->
@@ -241,7 +244,7 @@ Module exec. Section WithEnv.
     t mSmall l mc post
     (_ : Z.modulo n (bytes_per_word width) = 0)
     (_ : forall mStack mCombined,
-        let a := stack_addr (filterstack t) n in
+        let a := pick_sp (filterstack t) n in
         anybytes a n mStack ->
         map.split mCombined mSmall mStack ->
         exec body (salloc :: t) mCombined (map.put l x a) (addMetricInstructions 1 (addMetricLoads 1 mc))
