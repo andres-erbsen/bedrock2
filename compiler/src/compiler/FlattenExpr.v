@@ -28,6 +28,7 @@ Section FlattenExpr1.
           {ExprImp_env: map.map string (list string * list string * cmd)}
           {FlatImp_env: map.map string (list string * list string * FlatImp.stmt string)}
           {ext_spec: ExtSpec}
+          (stack_addr: trace -> Z -> word)
           {NGstate: Type}
           {NG: NameGen String.string NGstate}
           {locals_ok: map.ok locals}
@@ -346,15 +347,15 @@ Section FlattenExpr1.
     map_solver locals_ok.
 
   Lemma seq_with_modVars: forall env t m (l: locals) mc s1 s2 mid post,
-    FlatImp.exec env s1 t m l mc mid ->
+    FlatImp.exec stack_addr env s1 t m l mc mid ->
     (forall t' m' l' mc',
         mid t' m' l' mc' ->
         map.only_differ l (FlatImp.modVars s1) l' ->
-        FlatImp.exec env s2 t' m' l' mc' post) ->
-    FlatImp.exec env (FlatImp.SSeq s1 s2) t m l mc post.
+        FlatImp.exec stack_addr env s2 t' m' l' mc' post) ->
+    FlatImp.exec stack_addr env (FlatImp.SSeq s1 s2) t m l mc post.
   Proof.
     intros *. intros E1 E2. eapply @FlatImp.exec.seq.
-    - eapply FlatImp.exec.intersect.
+    - eapply FlatImp.exec.intersect; try assumption.
       + exact E1.
       + eapply FlatImp.modVarsSound; try typeclasses eauto. exact E1.
     - simpl. intros. simp. eauto.
@@ -365,16 +366,16 @@ Section FlattenExpr1.
       subset a b -> subset b c -> subset a c.
   Proof. apply subset_trans. Qed.
 
-  Goal True. idtac "FlattenExpr: Entering slow lemmas section". Abort.
+  Goal True. idtac "FlattenExpr: Entering slow lemmas section". Abort. Check eval_expr.
 
-  Lemma flattenExpr_correct_aux : forall e fenv oResVar ngs1 ngs2 resVar s initialH initialL initialM initialMcH initialMcL finalMcH res t,
+  Lemma flattenExpr_correct_aux : forall e fenv oResVar ngs1 ngs2 resVar s initialH initialL initialM initialMcH initialMcL finalMcH res t t',
     flattenExpr ngs1 oResVar e = (s, resVar, ngs2) ->
     map.extends initialL initialH ->
     map.undef_on initialH (allFreshVars ngs1) ->
     disjoint (union (ExprImp.allVars_expr e) (of_option oResVar)) (allFreshVars ngs1) ->
-    eval_expr initialM initialH e initialMcH = Some (res, finalMcH) ->
-    FlatImp.exec fenv s t initialM initialL initialMcL (fun t' finalM finalL finalMcL =>
-      t' = t /\ finalM = initialM /\ map.get finalL resVar = Some res /\
+    eval_expr initialM initialH e initialMcH t = Some (res, finalMcH, t') ->
+    FlatImp.exec stack_addr fenv s t initialM initialL initialMcL (fun t'2 finalM finalL finalMcL =>
+      t'2 = t' /\ finalM = initialM /\ map.get finalL resVar = Some res /\
       (finalMcL - initialMcL <= finalMcH - initialMcH)%metricsH).
   Proof.
     induction e; intros *; intros F Ex U D Ev; simpl in *; simp.
@@ -500,33 +501,33 @@ Section FlattenExpr1.
   Qed.
   Goal True. idtac "FlattenExpr: flattenExpr_correct_aux done". Abort.
 
-  Lemma flattenExpr_correct_with_modVars : forall e fenv oResVar ngs1 ngs2 resVar s t m lH lL initialMcH initialMcL finalMcH res,
+  Lemma flattenExpr_correct_with_modVars : forall e fenv oResVar ngs1 ngs2 resVar s t t' m lH lL initialMcH initialMcL finalMcH res,
     flattenExpr ngs1 oResVar e = (s, resVar, ngs2) ->
     map.extends lL lH ->
     map.undef_on lH (allFreshVars ngs1) ->
     disjoint (union (ExprImp.allVars_expr e) (of_option oResVar)) (allFreshVars ngs1) ->
-    eval_expr m lH e initialMcH = Some (res, finalMcH) ->
-    FlatImp.exec fenv s t m lL initialMcL (fun t' m' lL' finalMcL =>
+    eval_expr m lH e initialMcH t = Some (res, finalMcH, t') ->
+    FlatImp.exec stack_addr fenv s t m lL initialMcL (fun t'2 m' lL' finalMcL =>
       map.only_differ lL (FlatImp.modVars s) lL' /\
-      t' = t /\ m' = m /\ map.get lL' resVar = Some res /\
+      t'2 = t' /\ m' = m /\ map.get lL' resVar = Some res /\
       (finalMcL - initialMcL <= finalMcH - initialMcH)%metricsH).
   Proof.
     intros *. intros F Ex U D Ev.
-    epose proof (flattenExpr_correct_aux _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ F Ex U D Ev) as P.
-    eapply FlatImp.exec.intersect; cycle 1.
+    epose proof (flattenExpr_correct_aux _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ F Ex U D Ev) as P.
+    eapply FlatImp.exec.intersect; try assumption; cycle 1.
     - exact P.
     - rapply FlatImp.modVarsSound. exact P.
   Qed.
 
-  Lemma flattenExprs_correct: forall es fenv ngs1 ngs2 resVars s t m lH lL initialMcH initialMcL finalMcH resVals,
+  Lemma flattenExprs_correct: forall es fenv ngs1 ngs2 resVars s t t' m lH lL initialMcH initialMcL finalMcH resVals,
     flattenExprs ngs1 es = (s, resVars, ngs2) ->
     map.extends lL lH ->
     map.undef_on lH (allFreshVars ngs1) ->
     disjoint (ExprImp.allVars_exprs es) (allFreshVars ngs1) ->
-    evaluate_call_args_log m lH es initialMcH = Some (resVals, finalMcH) ->
+    evaluate_call_args_log m lH es initialMcH t = Some (resVals, finalMcH, t') ->
     (* List.option_all (List.map (eval_expr m lH) es) = Some resVals -> *)
-    FlatImp.exec fenv s t m lL initialMcL (fun t' m' lL' finalMcL =>
-      t' = t /\ m' = m /\
+    FlatImp.exec stack_addr fenv s t m lL initialMcL (fun t'2 m' lL' finalMcL =>
+      t'2 = t' /\ m' = m /\
       map.getmany_of_list lL' resVars = Some resVals /\
       map.only_differ lL (FlatImp.modVars s) lL' /\
       (finalMcL - initialMcL <= finalMcH - initialMcH)%metricsH).
@@ -592,14 +593,14 @@ Section FlattenExpr1.
     | intros; simpl in *; simp; repeat rewrite_match; t_safe ].
 
   Lemma flattenBooleanExpr_correct_aux :
-    forall e fenv ngs1 ngs2 resCond (s: FlatImp.stmt string) (initialH initialL: locals) initialM t initialMcH initialMcL finalMcH res,
+    forall e fenv ngs1 ngs2 resCond (s: FlatImp.stmt string) (initialH initialL: locals) initialM t t' initialMcH initialMcL finalMcH res,
     flattenExprAsBoolExpr ngs1 e = (s, resCond, ngs2) ->
     map.extends initialL initialH ->
     map.undef_on initialH (allFreshVars ngs1) ->
     disjoint (ExprImp.allVars_expr e) (allFreshVars ngs1) ->
-    eval_expr initialM initialH e initialMcH = Some (res, finalMcH) ->
-    FlatImp.exec fenv s t initialM initialL initialMcL (fun t' finalM finalL finalMcL =>
-      t' = t /\ finalM = initialM /\
+    eval_expr initialM initialH e initialMcH t = Some (res, finalMcH, t') ->
+    FlatImp.exec stack_addr fenv s t initialM initialL initialMcL (fun t'2 finalM finalL finalMcL =>
+      t'2 = t' /\ finalM = initialM /\
       FlatImp.eval_bcond finalL resCond = Some (negb (word.eqb res (word.of_Z 0))) /\
       (finalMcL - initialMcL <= finalMcH - initialMcH)%metricsH).
   Proof.
@@ -629,19 +630,19 @@ Section FlattenExpr1.
   Goal True. idtac "FlattenExpr: flattenBooleanExpr_correct_aux done". Abort.
 
   Lemma flattenBooleanExpr_correct_with_modVars:
-    forall e fenv ngs1 ngs2 resCond (s: FlatImp.stmt string) (initialH initialL: locals) initialM t initialMcH initialMcL finalMcH res,
+    forall e fenv ngs1 ngs2 resCond (s: FlatImp.stmt string) (initialH initialL: locals) initialM t t' initialMcH initialMcL finalMcH res,
     flattenExprAsBoolExpr ngs1 e = (s, resCond, ngs2) ->
     map.extends initialL initialH ->
     map.undef_on initialH (allFreshVars ngs1) ->
     disjoint (ExprImp.allVars_expr e) (allFreshVars ngs1) ->
-    eval_expr initialM initialH e initialMcH = Some (res, finalMcH) ->
-    FlatImp.exec fenv s t initialM initialL initialMcL (fun t' finalM finalL finalMcL =>
-      (t' = t /\ finalM = initialM /\
+    eval_expr initialM initialH e initialMcH t = Some (res, finalMcH, t') ->
+    FlatImp.exec stack_addr fenv s t initialM initialL initialMcL (fun t'2 finalM finalL finalMcL =>
+      (t'2 = t' /\ finalM = initialM /\
        FlatImp.eval_bcond finalL resCond = Some (negb (word.eqb res (word.of_Z 0))) /\
        (finalMcL - initialMcL <= finalMcH - initialMcH)%metricsH) /\
        map.only_differ initialL (FlatImp.modVars s) finalL (* <-- added *)).
   Proof.
-    intros. eapply FlatImp.exec.intersect.
+    intros. eapply FlatImp.exec.intersect; try assumption.
     - eapply flattenBooleanExpr_correct_aux; eassumption.
     - rapply FlatImp.modVarsSound.
       eapply flattenBooleanExpr_correct_aux; eassumption.
@@ -685,14 +686,14 @@ Section FlattenExpr1.
   Lemma flattenStmt_correct_aux: forall eH eL,
       flatten_functions eH = Success eL ->
       forall eH0 sH t m mcH lH post,
-      Semantics.exec eH0 sH t m lH mcH post ->
+      Semantics.exec stack_addr eH0 sH t m lH mcH post ->
       eH0 = eH ->
       forall ngs ngs' sL lL mcL,
       flattenStmt ngs sH = (sL, ngs') ->
       map.extends lL lH ->
       map.undef_on lH (allFreshVars ngs) ->
       disjoint (ExprImp.allVars_cmd sH) (allFreshVars ngs) ->
-      FlatImp.exec eL sL t m lL mcL (fun t' m' lL' mcL' => exists lH' mcH',
+      FlatImp.exec stack_addr eL sL t m lL mcL (fun t' m' lL' mcL' => exists lH' mcH',
         post t' m' lH' mcH' /\ (* <-- put first so that eassumption will instantiate lH' correctly *)
         map.extends lL' lH' /\
         (* this one is a property purely about ExprImp (it's the conclusion of
@@ -746,7 +747,7 @@ Section FlattenExpr1.
       eapply @FlatImp.exec.stackalloc. 1: eassumption.
       intros. rename H2 into IHexec.
       eapply @FlatImp.exec.weaken.
-      { eapply IHexec; try reflexivity; try eassumption; maps. }
+      { eapply IHexec; try reflexivity; try eassumption; try maps. subst a. maps. }
       { intros. simpl in *. simp. do 2 eexists. ssplit; try eassumption.
         do 2 eexists. ssplit; try eassumption; try solve_MetricLog. maps. }
 
@@ -828,7 +829,7 @@ Section FlattenExpr1.
          and the expression to avoid issues later. This is a modified version of the
          postcondition offered by IHexec - the metric differences are now between the
          start and end of the loop rather than after the expression execution and the end
-         of the loop *)
+         of the loop *) Search mc.
       eapply @FlatImp.exec.loop with (mid2 := (fun t' m' lL' mcL' => exists lH' mcH',
         mid t' m' lH' mcH' /\
         map.extends lL' lH' /\
@@ -852,7 +853,7 @@ Section FlattenExpr1.
       + simpl in *. simp. rename H4 into IH3.
         match goal with
         | H: _ |- _ => specialize IH3 with (1 := H)
-        end.
+        end. Check FlatImp.exec.weaken.
         eapply FlatImp.exec.weaken.
         * eapply IH3; try reflexivity.
           { clear IH3 IHexec. rewrite E. rewrite E0. reflexivity. }
@@ -931,8 +932,8 @@ Section FlattenExpr1.
   Lemma flattenStmt_correct: forall eH eL sH sL lL t m mc post,
       flatten_functions eH = Success eL ->
       ExprImp2FlatImp sH = sL ->
-      Semantics.exec eH sH t m map.empty mc post ->
-      FlatImp.exec eL sL t m lL mc (fun t' m' lL' mcL' => exists lH' mcH',
+      Semantics.exec stack_addr eH sH t m map.empty mc post ->
+      FlatImp.exec stack_addr eL sL t m lL mc (fun t' m' lL' mcL' => exists lH' mcH',
         post t' m' lH' mcH' /\
         map.extends lL' lH' /\
         (mcL' - mc <= mcH' - mc)%metricsH).

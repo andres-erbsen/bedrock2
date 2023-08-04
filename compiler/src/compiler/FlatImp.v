@@ -275,6 +275,7 @@ Module exec.
     Context {mem: map.map word byte} {locals: map.map varname word}
             {env: map.map String.string (list varname * list varname * stmt varname)}.
     Context {ext_spec: ExtSpec}.
+    Context (stack_addr : trace -> BinNums.Z -> word).
     Context {varname_eq_spec: EqDecider varname_eqb}
             {word_ok: word.ok word}
             {mem_ok: map.ok mem}
@@ -309,7 +310,7 @@ Module exec.
             outcome mReceive resvals ->
             exists l', map.putmany_of_list_zip resvars resvals l = Some l' /\
             forall m', map.split m' mKeep mReceive ->
-            post (((mGive, action, argvals), (mReceive, resvals)) :: t) m' l'
+            post (IO ((mGive, action, argvals), (mReceive, resvals)) :: t) m' l'
                  (addMetricInstructions 1
                  (addMetricStores 1
                  (addMetricLoads 2 mc)))) ->
@@ -330,7 +331,7 @@ Module exec.
     | load: forall t m l mc sz x a o v addr post,
         map.get l a = Some addr ->
         load sz m (word.add addr (word.of_Z o)) = Some v ->
-        post t m (map.put l x v)
+        post (read sz addr :: t) m (map.put l x v)
              (addMetricLoads 2
              (addMetricInstructions 1 mc)) ->
         exec (SLoad sz x a o) t m l mc post
@@ -338,7 +339,7 @@ Module exec.
         map.get l a = Some addr ->
         map.get l v = Some val ->
         store sz m (word.add addr (word.of_Z o)) val = Some m' ->
-        post t m' l
+        post (write sz addr :: t) m' l
              (addMetricLoads 1
              (addMetricInstructions 1
              (addMetricStores 1 mc))) ->
@@ -355,10 +356,11 @@ Module exec.
         exec (SInlinetable sz x table i) t m l mc post
     | stackalloc: forall t mSmall l mc x n body post,
         n mod (bytes_per_word width) = 0 ->
-        (forall a mStack mCombined,
+        (forall mStack mCombined,
+            let a := stack_addr (filterstack t) n in
             anybytes a n mStack ->
             map.split mCombined mSmall mStack ->
-            exec body t mCombined (map.put l x a) (addMetricLoads 1 (addMetricInstructions 1 mc))
+            exec body (salloc :: t) mCombined (map.put l x a) (addMetricLoads 1 (addMetricInstructions 1 mc))
              (fun t' mCombined' l' mc' =>
               exists mSmall' mStack',
                 anybytes a n mStack' /\
@@ -385,14 +387,14 @@ Module exec.
         exec (SSet x y) t m l mc post
     | if_true: forall t m l mc cond  bThen bElse post,
         eval_bcond l cond = Some true ->
-        exec bThen t m l
+        exec bThen (branch true :: t) m l
              (addMetricLoads 2
              (addMetricInstructions 2
              (addMetricJumps 1 mc))) post ->
         exec (SIf cond bThen bElse) t m l mc post
     | if_false: forall t m l mc cond bThen bElse post,
         eval_bcond l cond = Some false ->
-        exec bElse t m l
+        exec bElse (branch false :: t) m l
              (addMetricLoads 2
              (addMetricInstructions 2
              (addMetricJumps 1 mc))) post ->
@@ -408,14 +410,14 @@ Module exec.
         (forall t' m' l' mc',
             mid1 t' m' l' mc' ->
             eval_bcond l' cond = Some false ->
-            post t' m' l'
+            post (branch false :: t') m' l'
                  (addMetricLoads 1
                  (addMetricInstructions 1
                  (addMetricJumps 1 mc')))) ->
         (forall t' m' l' mc',
             mid1 t' m' l' mc' ->
             eval_bcond l' cond = Some true ->
-            exec body2 t' m' l' mc' mid2) ->
+            exec body2 (branch true :: t') m' l' mc' mid2) ->
         (forall t'' m'' l'' mc'',
             mid2 t'' m'' l'' mc'' ->
             exec (SLoop body1 cond body2) t'' m'' l''
@@ -468,8 +470,8 @@ Module exec.
     Lemma loop_cps: forall body1 cond body2 t m l mc post,
       exec body1 t m l mc (fun t m l mc => exists b,
         eval_bcond l cond = Some b /\
-        (b = false -> post t m l (addMetricLoads 1 (addMetricInstructions 1 (addMetricJumps 1 mc)))) /\
-        (b = true -> exec body2 t m l mc (fun t m l mc =>
+        (b = false -> post (branch false :: t) m l (addMetricLoads 1 (addMetricInstructions 1 (addMetricJumps 1 mc)))) /\
+        (b = true -> exec body2 (branch true :: t) m l mc (fun t m l mc =>
            exec (SLoop body1 cond body2) t m l
                 (addMetricLoads 2 (addMetricInstructions 2 (addMetricJumps 1 mc))) post))) ->
       exec (SLoop body1 cond body2) t m l mc post.
@@ -609,6 +611,7 @@ Module exec.
   End FlatImpExec.
 End exec.
 Notation exec := exec.exec.
+Check exec.intersect.
 
 Section FlatImp2.
   Context (varname: Type).
@@ -617,6 +620,7 @@ Section FlatImp2.
   Context {mem: map.map word byte} {locals: map.map varname word}
           {env: map.map String.string (list varname * list varname * stmt varname)}.
   Context {ext_spec: ExtSpec}.
+  Context (stack_addr : trace -> Z -> word).
   Context {varname_eq_spec: EqDecider varname_eqb}
           {word_ok: word.ok word}
           {mem_ok: map.ok mem}
@@ -627,11 +631,11 @@ Section FlatImp2.
   Definition SimState: Type := trace * mem * locals * MetricLog.
   Definition SimExec(e: env)(c: stmt varname): SimState -> (SimState -> Prop) -> Prop :=
     fun '(t, m, l, mc) post =>
-      exec e c t m l mc (fun t' m' l' mc' => post (t', m', l', mc')).
+      exec stack_addr e c t m l mc (fun t' m' l' mc' => post (t', m', l', mc')).
 
   Lemma modVarsSound: forall e s initialT (initialSt: locals) initialM (initialMc: MetricLog) post,
-      exec e s initialT initialM initialSt initialMc post ->
-      exec e s initialT initialM initialSt initialMc
+      exec stack_addr e s initialT initialM initialSt initialMc post ->
+      exec stack_addr e s initialT initialM initialSt initialMc
            (fun finalT finalM finalSt _ => map.only_differ initialSt (modVars s) finalSt).
   Proof.
     induction 1;
@@ -651,7 +655,7 @@ Section FlatImp2.
     - eapply exec.stackalloc; try eassumption.
       intros.
       eapply exec.weaken.
-      + eapply exec.intersect.
+      + eapply exec.intersect; try assumption.
         * eapply H0; eassumption.
         * eapply H1; eassumption.
       + simpl. intros. simp.
@@ -671,7 +675,7 @@ Section FlatImp2.
       + intros. simp. eauto.
       + intros. simp. simpl. map_solver locals_ok.
       + intros. simp. simpl in *.
-        eapply exec.intersect; [eauto|].
+        eapply exec.intersect; try assumption; [eauto|].
         eapply exec.weaken.
         * eapply H3; eassumption.
         * simpl. intros. map_solver locals_ok.

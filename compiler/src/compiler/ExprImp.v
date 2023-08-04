@@ -22,6 +22,7 @@ Section ExprImp1.
   Context {locals: map.map String.string word}.
   Context {env: map.map String.string (list String.string * list String.string * cmd)}.
   Context {ext_spec: ExtSpec}.
+  Context (stack_addr: trace -> Z -> word).
 
   Notation var := String.string (only parsing).
   Notation func := String.string (only parsing).
@@ -29,7 +30,7 @@ Section ExprImp1.
 
   Definition SimState: Type := trace * mem * locals * bedrock2.MetricLogging.MetricLog.
   Definition SimExec(e: env)(c: cmd): SimState -> (SimState -> Prop) -> Prop :=
-    fun '(t, m, l, mc) post => exec e c t m l mc
+    fun '(t, m, l, mc) post => exec stack_addr e c t m l mc
                                     (fun t' m' l' mc' => post (t', m', l', mc')).
 
   (*Hypothesis String.string_empty: String.string = Empty_set.*)
@@ -46,7 +47,7 @@ Section ExprImp1.
       | Some v => Success v
       | None => error:("evaluation of expression" e "failed")
       end.
-
+    
     (* Fixoint semantics are not used at the moment, but could be useful to run a source program *)
     Fixpoint eval_cmd(f: nat)(st: locals)(m: mem)(s: cmd): result (locals * mem) :=
       match f with
@@ -391,6 +392,7 @@ Section ExprImp2.
   Context {locals_ok: map.ok locals}.
   Context {mem_ok: map.ok mem}.
   Context {ext_spec_ok: ext_spec.ok ext_spec}.
+  Context (stack_addr: trace -> Z -> word).
 
   Ltac state_calc := map_solver locals_ok.
   Ltac set_solver := set_solver_generic String.string.
@@ -413,17 +415,17 @@ Section ExprImp2.
   Qed.
 
   Lemma weaken_exec: forall env t l m mc s post1,
-      exec env s t m l mc post1 ->
+      exec stack_addr env s t m l mc post1 ->
       forall post2: _ -> _ -> _ -> _ -> Prop,
         (forall t' m' l' mc', post1 t' m' l' mc' -> post2 t' m' l' mc') ->
-        exec env s t m l mc post2.
+        exec stack_addr env s t m l mc post2.
   Proof. eapply exec.weaken. Qed.
 
   Lemma intersect_exec: forall env t l m mc s post1,
-      exec env s t m l mc post1 ->
+      exec stack_addr env s t m l mc post1 ->
       forall post2,
-        exec env s t m l mc post2 ->
-        exec env s t m l mc (fun t' m' l' mc' => post1 t' m' l' mc' /\ post2 t' m' l' mc').
+        exec stack_addr env s t m l mc post2 ->
+        exec stack_addr env s t m l mc (fun t' m' l' mc' => post1 t' m' l' mc' /\ post2 t' m' l' mc').
   Proof. intros. eapply exec.intersect; eassumption. Qed.
 
   (* As we see, one can prove this lemma as is, but the proof is a bit cumbersome because
@@ -436,8 +438,8 @@ Section ExprImp2.
      So it makes more sense to directly prove the conjunction version which follows after
      this proof. *)
   Lemma modVarsSound_less_useful: forall e s t m l mc post,
-      exec e s t m l mc post ->
-      exec e s t m l mc (fun t' m' l' mc' => map.only_differ l (modVars s) l').
+      exec stack_addr e s t m l mc post ->
+      exec stack_addr e s t m l mc (fun t' m' l' mc' => map.only_differ l (modVars s) l').
   Proof.
     induction 1;
       try solve [ econstructor; [eassumption..|simpl; map_solver locals_ok] ].
@@ -484,8 +486,8 @@ Section ExprImp2.
   Qed.
 
   Lemma modVarsSound: forall e s t m l mc post,
-      exec e s t m l mc post ->
-      exec e s t m l mc (fun t' m' l' mc' => map.only_differ l (modVars s) l' /\ post t' m' l' mc').
+      exec stack_addr e s t m l mc post ->
+      exec stack_addr e s t m l mc (fun t' m' l' mc' => map.only_differ l (modVars s) l' /\ post t' m' l' mc').
   Proof.
     induction 1;
       try solve [econstructor; repeat split; try eassumption; simpl; map_solver locals_ok].
