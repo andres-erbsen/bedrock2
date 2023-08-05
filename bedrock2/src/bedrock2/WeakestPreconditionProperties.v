@@ -77,10 +77,10 @@ Section WeakestPrecondition.
   Context {word_ok : word.ok word} {mem_ok : map.ok mem}.
   Context {locals_ok : map.ok locals}.
   Context {env_ok : map.ok env}.
-  Context {ext_spec_ok : Semantics.ext_spec.ok ext_spec}.
+  Context {ext_spec_ok : Semantics.ext_spec.ok ext_spec}. Check @WeakestPrecondition.cmd.
   
   Global Instance Proper_cmd :
-    forall stack_addr,
+    forall pick_sp,
     Proper (
         (pointwise_relation _ (pointwise_relation _ (pointwise_relation _ (pointwise_relation _ (pointwise_relation _ ((pointwise_relation _ (pointwise_relation _ Basics.impl))) ==> Basics.impl)))) ==>
      pointwise_relation _ (
@@ -88,12 +88,12 @@ Section WeakestPrecondition.
      pointwise_relation _ (
      pointwise_relation _ (
      (pointwise_relation _ (pointwise_relation _ (pointwise_relation _ Basics.impl))) ==>
-     Basics.impl)))))) (WeakestPrecondition.cmd stack_addr(*why do i need to write this??*)).
+     Basics.impl)))))) (@WeakestPrecondition.cmd _ _ _ _ _ _ pick_sp).
   Proof using env_ok ext_spec_ok locals_ok mem_ok word_ok.
     cbv [Proper respectful pointwise_relation Basics.flip Basics.impl]; ind_on Syntax.cmd.cmd;
       cbn in *; cbv [dlet.dlet] in *; intuition eauto.
     (*intuition (try typeclasses eauto with core). this doesn't do anything?*)
-    { destruct H1 as (?&?&?&?). eexists. eexists. split. Print WeakestPrecondition.cmd_body.
+    { destruct H1 as (?&?&?&?). eexists. eexists. split.
       1: eapply Proper_expr; eauto.
       1: cbv [pointwise_relation Basics.impl]; intuition eauto 2.
       auto. }
@@ -143,7 +143,7 @@ Section WeakestPrecondition.
   Qed.
 
   Global Instance Proper_func :
-    forall stack_addr,
+    forall pick_sp,
     Proper (
      (pointwise_relation _ (pointwise_relation _ (pointwise_relation _ (pointwise_relation _ (pointwise_relation _ ((pointwise_relation _ (pointwise_relation _ Basics.impl))) ==> Basics.impl)))) ==>
      pointwise_relation _ (
@@ -151,7 +151,7 @@ Section WeakestPrecondition.
      pointwise_relation _ (
      pointwise_relation _ (
      (pointwise_relation _ (pointwise_relation _ (pointwise_relation _ Basics.impl))) ==>
-     Basics.impl)))))) (WeakestPrecondition.func stack_addr(*why do i need to do this*)).
+     Basics.impl)))))) (@WeakestPrecondition.func _ _ _ _ _ _ pick_sp).
   Proof using word_ok mem_ok locals_ok ext_spec_ok env_ok.
     cbv [Proper respectful pointwise_relation Basics.flip Basics.impl  WeakestPrecondition.func]; intros.
     destruct a. destruct p.
@@ -172,9 +172,9 @@ Section WeakestPrecondition.
     - eauto.
   Qed.
 
+  Context {pick_sp: Semantics.PickSp}.
   (* If I put this before Proper_func (and remove the 'forall stack_addr' from Proper_func),
      then Qed fails in Proper_call. *)
-  Context (stack_addr: Semantics.trace -> BinNums.Z -> word).
   
   Global Instance Proper_call :
     Proper (
@@ -184,7 +184,7 @@ Section WeakestPrecondition.
      pointwise_relation _ (
      pointwise_relation _ (
      (pointwise_relation _ (pointwise_relation _ (pointwise_relation _ Basics.impl))) ==>
-     Basics.impl)))))))) (WeakestPrecondition.call stack_addr (*why*)).
+     Basics.impl)))))))) WeakestPrecondition.call.
   Proof using word_ok mem_ok locals_ok ext_spec_ok env_ok.
       cbv [Proper respectful pointwise_relation Basics.impl]; ind_on (list (String.string * (list String.string * list String.string * Syntax.cmd.cmd)));
       cbn in *; intuition (try typeclasses eauto with core).
@@ -204,7 +204,7 @@ Section WeakestPrecondition.
      pointwise_relation _ (
      pointwise_relation _ (
      (pointwise_relation _ (pointwise_relation _ (pointwise_relation _ Basics.impl))) ==>
-     Basics.impl)))))) (WeakestPrecondition.program stack_addr).
+     Basics.impl)))))) WeakestPrecondition.program.
   Proof using word_ok mem_ok locals_ok ext_spec_ok env_ok.
     cbv [Proper respectful pointwise_relation Basics.impl  WeakestPrecondition.program]; intros.
     eapply Proper_cmd;
@@ -308,14 +308,14 @@ Section WeakestPrecondition.
   Local Notation semantics_call := (fun e n t m args post =>
     exists params rets fbody, map.get e n = Some (params, rets, fbody) /\
     exists lf, map.putmany_of_list_zip params args map.empty = Some lf /\
-    forall mc', Semantics.exec stack_addr e fbody t m lf mc' (fun t' m' st1 mc'' =>
+    forall mc', Semantics.exec e fbody t m lf mc' (fun t' m' st1 mc'' =>
       exists retvs, map.getmany_of_list st1 rets = Some retvs /\
       post t' m' retvs)).
 
   Local Hint Constructors Semantics.exec : core.
   Lemma sound_cmd' e c t m l mc post
-        (H:WeakestPrecondition.cmd stack_addr (semantics_call e) c t m l post)
-    : Semantics.exec stack_addr e c t m l mc (fun t' m' l' mc' => post t' m' l').
+        (H:WeakestPrecondition.cmd (semantics_call e) c t m l post)
+    : Semantics.exec e c t m l mc (fun t' m' l' mc' => post t' m' l').
   Proof.
     ind_on Syntax.cmd; repeat (t; try match reverse goal with H : WeakestPrecondition.expr _ _ _ _ _ |- _ => eapply expr_sound in H end).
     { destruct (BinInt.Z.eq_dec (Interface.word.unsigned x) (BinNums.Z0)) as [Hb|Hb]; cycle 1.
@@ -336,7 +336,7 @@ Section WeakestPrecondition.
     Context fs (E: env) (HE: List.Forall (fun '(k, v) => map.get E k = Some v) fs).
     Import coqutil.Tactics.Tactics.
     Lemma sound_call' n t m args post
-      (H : WeakestPrecondition.call stack_addr fs n t m args post)
+      (H : WeakestPrecondition.call fs n t m args post)
       : semantics_call E n t m args post.
     Proof.
       revert H; revert post args m t n; induction HE; intros.
@@ -356,8 +356,8 @@ Section WeakestPrecondition.
     Qed.
 
     Lemma sound_cmd'' c t m l mc post
-      (H : WeakestPrecondition.cmd stack_addr (WeakestPrecondition.call stack_addr fs) c t m l post)
-      : Semantics.exec stack_addr E c t m l mc (fun t' m' l' mc' => post t' m' l').
+      (H : WeakestPrecondition.cmd (WeakestPrecondition.call fs) c t m l post)
+      : Semantics.exec E c t m l mc (fun t' m' l' mc' => post t' m' l').
     Proof.
       eapply Proper_cmd in H; [ .. | reflexivity ].
       1: apply sound_cmd'; exact H.
@@ -369,8 +369,8 @@ Section WeakestPrecondition.
 
   Lemma sound_cmd fs c t m l mc post
     (Hnd : List.NoDup (List.map fst fs))
-    (H : WeakestPrecondition.cmd stack_addr (WeakestPrecondition.call stack_addr fs) c t m l post)
-    : Semantics.exec stack_addr (map.of_list fs) c t m l mc (fun t' m' l' mc' => post t' m' l').
+    (H : WeakestPrecondition.cmd (WeakestPrecondition.call fs) c t m l post)
+    : Semantics.exec (map.of_list fs) c t m l mc (fun t' m' l' mc' => post t' m' l').
   Proof.
     eapply sound_cmd'';
       try eapply Properties.map.all_gets_from_map_of_NoDup_list; eauto.
@@ -385,7 +385,7 @@ Section WeakestPrecondition.
            mReceive = map.empty /\
            exists l0 : locals, map.putmany_of_list_zip action rets l = Some l0 /\
            post (cons (IO (map.empty, binds, args, (map.empty, rets))) t') m l0))
-    : WeakestPrecondition.cmd stack_addr call (cmd.interact action binds arges) t m l post.
+    : WeakestPrecondition.cmd call (cmd.interact action binds arges) t m l post.
   Proof using word_ok mem_ok ext_spec_ok.
     exists args. exists t'. split; [exact Hargs|].
     exists m.

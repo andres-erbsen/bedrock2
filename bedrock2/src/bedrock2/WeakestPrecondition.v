@@ -7,7 +7,7 @@ Section WeakestPrecondition.
   Context {locals: map.map String.string word}.
   Context {env: map.map String.string (list String.string * list String.string * cmd)}.
   Context {ext_spec: ExtSpec}.
-  Context (stack_addr : trace -> Z -> word).
+  Context {pick_sp: PickSp}.
   Implicit Types (t : trace) (m : mem) (l : locals).
 
   Definition literal v (post : word -> Prop) : Prop :=
@@ -70,7 +70,7 @@ Section WeakestPrecondition.
         f acc x (fun acc' y =>
         rec acc' xs' (fun acc'' ys' =>
         post acc'' (cons y ys')))
-      end. Check list_map'_body.
+      end.
     Fixpoint list_map' acc xs := list_map'_body list_map' acc xs.
    End WithF'.
 
@@ -112,7 +112,7 @@ Section WeakestPrecondition.
       | cmd.stackalloc x n c =>
         Z.modulo n (bytes_per_word width) = 0 /\
         forall mStack mCombined,
-          let a := stack_addr (filterstack t) n in
+          let a := pick_sp (filterstack t) n in
           anybytes a n mStack -> map.split mCombined m mStack ->
           dlet! l := map.put l x a in
           rec c (cons salloc t) mCombined l (fun t' mCombined' l' =>

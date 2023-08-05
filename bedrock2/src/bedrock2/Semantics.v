@@ -88,6 +88,8 @@ Arguments ext_spec.ok {_ _ _ _} _.
 Definition PickSp {width: Z}{BW: Bitwidth width}{word: word.word width}{mem: map.map word byte} : Type :=
   trace -> Z -> word.
 
+Existing Class PickSp.
+
 Section binops.
   Context {width : Z} {word : Word.Interface.word width}.
   Definition interp_binop (bop : bopname) : word -> word -> word :=
