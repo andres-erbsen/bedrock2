@@ -50,6 +50,7 @@ Definition uart0_rxdata := 0x10013004. Definition uart0_txdata  := 0x10013000.
       False
     end%list%bool.
 
+Context {pick_sp: PickSp}.
 
 Require Import bedrock2.NotationsCustomEntry.
 
@@ -126,7 +127,7 @@ From coqutil Require Import Z.div_mod_to_equations.
 
 Ltac t :=
   match goal with
-  | |- WeakestPrecondition.cmd _ (cmd.interact _ _ _) _ _ _ _ => eexists; split; [solve[repeat straightline]|]
+  | |- WeakestPrecondition.cmd _ (cmd.interact _ _ _) _ _ _ _ => eexists; eexists; split; [solve[repeat straightline]|]
   | |- map.split _ _ _ => eapply Properties.map.split_empty_r; reflexivity
   | H: map.of_list_zip ?ks ?vs = Some ?m |- _ => cbn in H; injection H; clear H; intro H; symmetry in H
   | H: map.putmany_of_list_zip ?ks ?vs ?m0 = Some ?m |- _ => cbn in H; injection H; clear H; intro H; symmetry in H
@@ -165,12 +166,12 @@ Proof.
   eexists _, _, (fun v t _ l => exists p, map.of_list_zip ["running"; "prev"; "one"; "dot"]%string [v; p; word.of_Z(1); word.of_Z(46)] = Some l ); repeat t.
   eexists _, _, (fun v t _ l => exists rxv, map.putmany_of_list_zip ["polling"; "rx"]%string [v; rxv] l0 = Some l); repeat t.
   eexists _, _, (fun v t _ l => exists txv, map.putmany_of_list_zip ["polling"; "tx"]%string [v; txv] l0 = Some l); repeat t.
-  eexists; split; repeat t.
+  eexists; eexists; split; repeat t.
 Defined.
 
 
 Import List. Import ListNotations.
-Fixpoint echo_server_spec (t : trace) (output_to_explain : option word) : Prop := let spec := echo_server_spec in
+Fixpoint echo_server_spec (t : io_trace) (output_to_explain : option word) : Prop := let spec := echo_server_spec in
   match t with
   | nil => output_to_explain = None
   | (_, MMInput, [addr], (_, [value]))::trace =>
@@ -243,15 +244,15 @@ Definition echo_server: cmd :=
 
 Lemma echo_server_correct m :
   WeakestPrecondition.cmd (fun _ _ _ _ _ => False) echo_server nil m map.empty
-  (fun t m l => echo_server_spec t None).
+  (fun t m l => echo_server_spec (filterio t) None).
 Proof.
   repeat t.
-  eexists _, _, (fun v t _ l => map.of_list_zip ["running"; "one"]%string [v; word.of_Z(1)] = Some l /\ echo_server_spec t None ); repeat t.
+  eexists _, _, (fun v t _ l => map.of_list_zip ["running"; "one"]%string [v; word.of_Z(1)] = Some l /\ echo_server_spec (filterio t) None ); repeat t.
   { repeat split. admit. (* hfrosccfg*) }
   eexists _, _, (fun v t _ l => exists rxv, map.putmany_of_list_zip ["polling"; "rx"]%string [v; rxv] l0 = Some l /\
                                             if Z.eq_dec (word.unsigned (word.and rxv (word.of_Z (2^31)))) 0
-                                            then echo_server_spec t (Some rxv)
-                                            else echo_server_spec t None); repeat t.
+                                            then echo_server_spec (filterio t) (Some rxv)
+                                            else echo_server_spec (filterio t) None); repeat t.
   { match goal with |- if ?D then _ else _ => destruct D end; cbn [Z.eq_dec echo_server_spec ].
     all: try rewrite e, ?Bool.andb_true_r.
     all: repeat match goal with |- if _ then ?A else ?B => change A end.

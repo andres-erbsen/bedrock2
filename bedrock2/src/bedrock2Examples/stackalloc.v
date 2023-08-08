@@ -69,11 +69,11 @@ Section aLemmaThatDoesntBelongHere.
 End aLemmaThatDoesntBelongHere.
                                                            
 Section WithParameters.
-  Context {word: word.word 32} {mem: map.map word Byte.byte}.
+  Context {word: word.word 32} {mem: map.map word Byte.byte} {pick_sp: PickSp}.
   Context {word_ok: word.ok word} {mem_ok: map.ok mem}.
 
-  Instance spec_of_stacktrivial : spec_of "stacktrivial" := fun functions => forall stack_addr m t,
-      WeakestPrecondition.call stack_addr functions
+  Instance spec_of_stacktrivial : spec_of "stacktrivial" := fun functions => forall m t,
+      WeakestPrecondition.call functions
         "stacktrivial" t m [] (fun t' m' rets => rets = [] /\ m'=m /\ (filterio t')=(filterio t)).
 
   Lemma stacktrivial_ok : program_logic_goal_for_function! stacktrivial.
@@ -121,24 +121,19 @@ Section WithParameters.
     destruct HToBytesb as [lb [length_lb HToBytesb]].
     repeat (destruct lb as [|? lb]; try solve [cbn in length_lb; Lia.lia]; []).
     subst a b.
-    straightline_ct_call; eauto.
-    - apply sep_assoc. eassumption.
-    - apply locals_ok.
-    - apply env_ok.
-    - apply ext_spec_ok.
-    - repeat straightline.
-      Import symmetry eplace. Check @scalar_of_bytes. 
-      seprewrite_in_by (symmetry! @scalar_of_bytes) H8 reflexivity.
-      straightline_stackdealloc.
-      seprewrite_in_by (symmetry! @scalar_of_bytes) H8 reflexivity.
-      straightline_stackdealloc.
-      repeat straightline. split.
-      + trace_alignment.
-      + repeat straightline.
+    straightline_ct_call.
+    { apply sep_assoc. eassumption. }
+    repeat straightline.
+    Import symmetry.
+    seprewrite_in_by (symmetry! @scalar_of_bytes) H8 reflexivity.
+    straightline_stackdealloc.
+    seprewrite_in_by (symmetry! @scalar_of_bytes) H8 reflexivity.
+    straightline_stackdealloc.
+    repeat straightline. split; try trace_alignment. repeat straightline.
   Qed.
   
-  Instance spec_of_stacknondet : spec_of "stacknondet" := fun functions => forall stack_addr m t,
-      WeakestPrecondition.call stack_addr functions
+  Instance spec_of_stacknondet : spec_of "stacknondet" := fun functions => forall m t,
+      WeakestPrecondition.call functions
         "stacknondet" t m [] (fun t' m' rets => exists a b, rets = [a;b] /\ a = b /\ m'=m/\(filterio t')=(filterio t)).
 
   Add Ring wring : (Properties.word.ring_theory (word := word))
@@ -194,8 +189,8 @@ Section WithParameters.
   Definition stacknondet_c := String.list_byte_of_string (c_module (("main",stacknondet_main)::("stacknondet",stacknondet)::nil)).
   (* Goal True. print_list_byte stacknondet_c. Abort. *)
 
-  Instance spec_of_stackdisj : spec_of "stackdisj" := fun functions => forall stack_addr m t,
-      WeakestPrecondition.call stack_addr functions
+  Instance spec_of_stackdisj : spec_of "stackdisj" := fun functions => forall m t,
+      WeakestPrecondition.call functions
         "stackdisj" t m [] (fun t' m' rets => exists a b, rets = [a;b] /\ a <> b /\ m'=m/\(filterio t')=(filterio t)).
 
   Lemma stackdisj_ok : program_logic_goal_for_function! stackdisj.

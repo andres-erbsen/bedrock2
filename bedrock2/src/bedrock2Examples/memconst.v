@@ -24,13 +24,14 @@ Local Notation "xs $@ a" := (Array.array ptsto (word.of_Z 1) a xs) (at level 10,
 Section WithParameters.
   Context {width} {BW: Bitwidth width}.
   Context {word: word.word width} {mem: map.map word byte} {locals: map.map string word}.
+  Context {pick_sp: PickSp}.
   Context {ext_spec: ExtSpec}.
   Import ProgramLogic.Coercions.
 
   Global Instance spec_of_memconst ident bs : spec_of "memconst" :=
     fnspec! ident (p : word) / (ds : list byte) (R : mem -> Prop),
     { requires t m := m =* ds$@p * R /\ length ds = length bs :>Z /\ length bs < 2^width ;
-      ensures t' m := m =* bs$@p * R /\ t=t' }.
+      ensures t' m := m =* bs$@p * R /\ filterio t=filterio t' }.
 
   Context {word_ok: word.ok word} {mem_ok: map.ok mem} {locals_ok : map.ok locals}
     {env : map.map string (list string * list string * Syntax.cmd)} {env_ok : map.ok env}
@@ -54,7 +55,7 @@ Section WithParameters.
       ["p";"i"])
       (fun (n:nat) (ds : list byte) R t m p i => PrimitivePair.pair.mk (
         m =* ds$@p * R /\ i + n = length bs :> Z /\ length ds = n)
-      (fun              T M P N => t = T /\ M =* (List.skipn (Z.to_nat i) bs)$@p * R))
+      (fun              T M P N => filterio t = filterio T /\ M =* (List.skipn (Z.to_nat i) bs)$@p * R))
       lt
       _ _ _ _ _ _ _);
       (* TODO wrap this into a tactic with the previous refine *)
@@ -77,8 +78,8 @@ Section WithParameters.
     { intros ?n ?ds ?R ?t ?m ?p ?i.
       repeat straightline.
       cbn in localsmap.
-      eexists; split; cbv [expr expr_body localsmap get].
-      { rewrite ?Properties.map.get_put_dec. eexists; cbn; split; reflexivity. }
+      eexists; eexists; split; cbv [dexpr expr expr_body localsmap get].
+      { rewrite ?Properties.map.get_put_dec. eexists; eexists; cbn; split; reflexivity. }
       rewrite !word.unsigned_ltu.
       destr Z.ltb; split; intros;
         rewrite ?word.unsigned_of_Z_0, ?word.unsigned_of_Z_1 in H5; try congruence;
@@ -108,11 +109,11 @@ Section WithParameters.
       destruct ds0 in *; cbn [length Array.array] in *; [exfalso; ZnWords|].
       repeat straightline.
 
-      letexists; split.
+      letexists; letexists; split.
       { eexists. rewrite ?Properties.map.get_put_dec; cbn. split; eauto.
         repeat straightline. }
 
-      letexists; split.
+      letexists; letexists; split.
       { eexists. rewrite ?Properties.map.get_put_dec; cbn. split; eauto.
         repeat straightline. }
 
@@ -132,18 +133,18 @@ Section WithParameters.
 
       pose proof byte.unsigned_range b.
       rewrite word.unsigned_of_Z_nowrap, byte.of_Z_unsigned in H9 by ZnWords.
-      replace (Z.to_nat v0) with (1 + (Z.to_nat i0))%nat in H9 by ZnWords.
+      replace (Z.to_nat v1) with (1 + (Z.to_nat i))%nat in H9 by ZnWords.
       rewrite <-List.skipn_skipn in H9.
       rewrite List.nth_error_as_skipn in Heqo.
-      remember (List.skipn (Z.to_nat i0) bs) as ts in *.
+      remember (List.skipn (Z.to_nat i) bs) as ts in *.
       destruct ts in *; cbn [List.skipn List.hd_error Array.array] in *; [discriminate|].
-      subst v.
+      subst v0.
       use_sep_assumption.
       cancel.
       Morphisms.f_equiv.
       congruence. }
 
     intuition idtac; cbn; ssplit; eauto.
-    replace (Z.to_nat i) with O in * by ZnWords; cbn in *; eauto.
+    replace (Z.to_nat v) with O in * by ZnWords; cbn in *; eauto.
   Qed.
 End WithParameters.

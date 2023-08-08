@@ -32,6 +32,7 @@ Local Open Scope word_scope.
 From bedrock2 Require Import Semantics BasicC64Semantics.
 
 Import HList List.
+Context {pick_sp: PickSp}. (* why do we need this here?  where is it supposed to be? *)
 #[export] Instance spec_of_bsearch : spec_of "bsearch"%string := fun functions =>
   forall left right target xs R t m,
     sep (array scalar (word.of_Z 8) left xs) R m ->
@@ -76,7 +77,7 @@ Proof.
     (* loop body *)
     rename H2 into length_rep. subst br.
     seprewrite @array_address_inbounds;
-       [ ..|(* if expression *) exact eq_refl|letexists; letexists; split; [repeat straightline|]]. (* determines element *)
+      [ ..|(* if expression *) exact eq_refl|letexists; letexists; split; [repeat straightline|]]. (* determines element *)
     { ZnWords. }
     { ZnWords. }
     (* split if cases *) split; repeat straightline. (* code is processed, loop-go-again goals left behind *)

@@ -22,6 +22,7 @@ Module Import IOMacros.
     locals :> map.map String.string word;
     env :> map.map String.string (list String.string * list String.string * cmd);
     ext_spec :> ExtSpec;
+    pick_sp :> PickSp;
 
     (* macros to be inlined to read or write a word
        TODO it's not so nice that we need to foresee the number of temp vars
@@ -31,10 +32,10 @@ Module Import IOMacros.
 
     (* means "this trace does nothing else than reading the given word", could require
        several events if we're polling until a word is available *)
-    read_word_trace: word -> trace -> Prop;
+    read_word_trace: word -> io_trace -> Prop;
     (* means "this trace does nothing else than outputting the given word", could require
        several events if we have to poll a "ready to accept next word" flag before writing *)
-    write_word_trace: word -> trace -> Prop;
+    write_word_trace: word -> io_trace -> Prop;
 
     (* the IOMacros module is allowed to reserve part of the address space,
        eg for MMIO, or to communicate with the kernel *)
@@ -43,13 +44,13 @@ Module Import IOMacros.
     read_word_correct: forall t m l mc x tmp,
         (forall a, is_reserved_addr a -> map.get m a = None) ->
         exec map.empty (read_word_code x tmp) t m l mc (fun t' m' l' mc' =>
-          m = m' /\ exists t'' v, t' = t ++ t'' /\ read_word_trace v t'' /\ l' = map.put l x v);
+          m = m' /\ exists t'' v, filterio t' = filterio t ++ t'' /\ read_word_trace v t'' /\ l' = map.put l x v);
 
     write_word_correct: forall t m l mc x tmp v,
         (forall a, is_reserved_addr a -> map.get m a = None) ->
         map.get l x = Some v ->
         exec map.empty (write_word_code x tmp) t m l mc (fun t' m' l' mc' =>
-          m = m' /\ exists t'', t' = t ++ t'' /\ write_word_trace v t'' /\ l' = l);
+          m = m' /\ exists t'', filterio t' = filterio t ++ t'' /\ write_word_trace v t'' /\ l' = l);
   }.
 
 End IOMacros.
@@ -58,14 +59,14 @@ Section Squarer.
 
   Context {ioLib: IOMacros.Interface}.
 
-  Definition squarer_trace: trace -> Prop :=
+  Definition squarer_trace: io_trace -> Prop :=
     kleene (existsl (fun inp => IOMacros.read_word_trace inp +++
                                 IOMacros.write_word_trace (word.mul inp inp))).
 
   Definition squarer: cmd. Admitted.
 
   Lemma squarer_correct: forall (m: mem) (l: locals) mc,
-      exec map.empty squarer nil m l mc (fun t' m' l' mc' => squarer_trace t').
+      exec map.empty squarer nil m l mc (fun t' m' l' mc' => squarer_trace (filterio t')).
   Admitted.
 
 End Squarer.
@@ -80,8 +81,8 @@ Module SpiEth.
 
   Section WithMem.
     Import Word.Interface.
-    Context {word: word.word 32} {mem: map.map word Byte.byte} {mem_ok: map.ok mem}.
-    Context {word_ok: word.ok word}.
+    Context {word: word.word 32} {mem: map.map word Byte.byte} {pick_sp: PickSp}.
+    Context {mem_ok: map.ok mem} {word_ok: word.ok word}.
 
     Definition Event: Type := (mem * String.string * list word) * (mem * list word).
 
@@ -216,8 +217,8 @@ Module Syscalls.
 
   Section WithMem.
     Import Word.Interface.
-    Context {word: word.word 32} {mem: map.map word Byte.byte} {mem_ok: map.ok mem}.
-    Context {word_ok: word.ok word}.
+    Context {word: word.word 32} {mem: map.map word Byte.byte} {pick_sp: PickSp}.
+    Context {word_ok: word.ok word} {mem_ok: map.ok mem}.
 
     Definition Event: Type := (mem * SyscallAction * list word) * (mem * list word).
 
@@ -274,7 +275,7 @@ Module Syscalls.
          (mKeep := m) (mGive := map.empty).
       + apply map.split_empty_r. reflexivity.
       + simpl. reflexivity.
-      + simpl. eauto.
+      + simpl. eauto 20.
       + intros.
         destruct_products.
         subst.
@@ -295,8 +296,8 @@ End Syscalls.
 
 Module MMIOUsage.
   Section WithParams.
-    Context {word: word.word 32} {mem: map.map word Byte.byte} {mem_ok: map.ok mem}.
-    Context {word_ok: word.ok word}.
+    Context {word: word.word 32} {mem: map.map word Byte.byte} {pick_sp: PickSp}.
+    Context {word_ok: word.ok word} {mem_ok: map.ok mem}.
     Context {locals: map.map String.string word}.
     Context {funname_env: forall T, map.map String.string T}.
 
@@ -308,8 +309,8 @@ End MMIOUsage.
 
 Module SyscallsUsage.
   Section WithParams.
-    Context {word: word.word 32} {mem: map.map word Byte.byte} {mem_ok: map.ok mem}.
-    Context {word_ok: word.ok word}.
+    Context {word: word.word 32} {mem: map.map word Byte.byte} {pick_sp: PickSp}.
+    Context {word_ok: word.ok word} {mem_ok: map.ok mem}.
     Context {locals: map.map String.string word}.
     Context {funname_env: forall T, map.map String.string T}.
 

@@ -30,7 +30,7 @@ Require Import coqutil.Word.Interface.
 Require Import coqutil.Tactics.rdelta.
 
 Section WithParameters.
-  Context {word: word.word 32} {mem: map.map word Byte.byte}.
+  Context {word: word.word 32} {mem: map.map word Byte.byte} {pick_sp: PickSp}.
   Context {word_ok: word.ok word} {mem_ok: map.ok mem}.
 
   Instance ct_spec_of_swap : spec_of "swap" :=
@@ -81,14 +81,7 @@ Instance ct_bad_swap : ct_spec_of "bad_swap" :=
 
   Lemma swap_swap_ok :
     let spec_of_swap := ct_spec_of_swap in program_logic_goal_for_function! swap_swap.
-  Proof. repeat (straightline || straightline_ct_call); eauto using eq_trans.
-         - Search (map.ok locals). apply locals_ok.
-         - Search (map.ok env). apply env_ok.
-         - apply ext_spec_ok.
-         - apply locals_ok.
-         - apply env_ok.
-         - apply ext_spec_ok. (* this garbage is here because I admitted Proper_call. *)
-  Qed.
+  Proof. repeat (straightline || straightline_ct_call); eauto using eq_trans. Qed.
 
   Lemma link_swap_swap_swap_swap : spec_of_swap_swap &[,swap_swap; swap].
   Proof. eauto using swap_swap_ok, swap_ct_and_ok. Qed.

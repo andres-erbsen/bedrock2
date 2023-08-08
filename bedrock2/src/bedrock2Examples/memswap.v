@@ -31,6 +31,7 @@ Local Notation "xs $@ a" := (Array.array ptsto (word.of_Z 1) a xs) (at level 10,
 Section WithParameters.
   Context {width} {BW: Bitwidth width}.
   Context {word: word.word width} {mem: map.map word byte} {locals: map.map string word}.
+  Context {pick_sp: PickSp}.
   Context {ext_spec: ExtSpec}.
   Import ProgramLogic.Coercions.
 
@@ -38,7 +39,7 @@ Section WithParameters.
     fnspec! "memswap" (x y n : word) / (xs ys : list byte) (R : mem -> Prop),
     { requires t m := m =* xs$@x * ys$@y * R /\
                       length xs = n :>Z /\ length ys = n :>Z;
-      ensures t' m := m =* ys$@x * xs$@y * R /\ t=t' }.
+      ensures t' m := m =* ys$@x * xs$@y * R /\ filterio t=filterio t' }.
 
   Context {word_ok: word.ok word} {mem_ok: map.ok mem} {locals_ok : map.ok locals}
     {env : map.map string (list string * list string * Syntax.cmd)} {env_ok : map.ok env}
@@ -60,7 +61,7 @@ Section WithParameters.
       ["x";"y";"n"])
       (fun (v:nat) xs ys R t m x y n => PrimitivePair.pair.mk (
         m =* xs$@x * ys$@y * R /\ length xs = n :>Z /\ length ys = n :>Z /\ v = n :>Z)
-      (fun                 T M (X Y N : word) => t = T /\ M =* ys$@x * xs$@y * R))
+      (fun                 T M (X Y N : word) => filterio t = filterio T /\ M =* ys$@x * xs$@y * R))
       lt
       _ _ _ _ _ _ _ _);
       (* TODO wrap this into a tactic with the previous refine *)
@@ -83,7 +84,7 @@ Section WithParameters.
       { intros ?v ?xs ?ys ?R ?t ?m ?x ?y ?n.
         repeat straightline.
         cbn in localsmap.
-        eexists n0; split; cbv [expr expr_body localsmap get].
+        eexists n0; eexists t0; split; cbv [dexpr expr expr_body localsmap get].
         { rewrite ?Properties.map.get_put_dec. exists n0; cbn. auto. }
         split; cycle 1.
         { intros Ht; rewrite Ht in *.

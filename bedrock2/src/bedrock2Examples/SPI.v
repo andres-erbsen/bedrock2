@@ -51,7 +51,7 @@ Import coqutil.Map.Interface.
 Import ReversedListNotations.
 
 Section WithParameters.
-  Context {word: word.word 32} {mem: map.map word Byte.byte}.
+  Context {word: word.word 32} {mem: map.map word Byte.byte} {pick_sp: PickSp}.
   Context {word_ok: word.ok word} {mem_ok: map.ok mem}.
 
   Definition mmio_event_abstraction_relation

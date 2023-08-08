@@ -24,8 +24,8 @@ Require Import bedrock2.ProgramLogic bedrock2.Scalars.
 Require Import coqutil.Word.Interface coqutil.Word.Properties coqutil.Word.Naive.
 Require Import coqutil.Tactics.eplace Coq.setoid_ring.Ring_tac.
 
-Section WithParameters.
-  Context {mem: map.map word32 Byte.byte} {mem_ok: map.ok mem}.
+Section WithParameters. Print PickSp.
+  Context {mem: map.map word32 Byte.byte} {mem_ok: map.ok mem} {pick_sp: PickSp (word := word32)}.
   Implicit Types (R : mem -> Prop).
 
   Instance spec_of_swap : spec_of "swap" :=

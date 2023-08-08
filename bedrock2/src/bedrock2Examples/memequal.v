@@ -27,6 +27,7 @@ Local Notation "xs $@ a" := (Array.array ptsto (word.of_Z 1) a xs) (at level 10,
 Section WithParameters.
   Context {width} {BW: Bitwidth width}.
   Context {word: word.word width} {mem: map.map word byte} {locals: map.map string word}.
+  Context {pick_sp: PickSp}.
   Context {ext_spec: ExtSpec}.
   Import ProgramLogic.Coercions. Locate "ctfunc!".
 
@@ -44,11 +45,11 @@ Section WithParameters.
   Import coqutil.Tactics.letexists coqutil.Tactics.Tactics coqutil.Tactics.autoforward.
   Import coqutil.Word.Properties coqutil.Map.Properties.
   Print Loops.tailrec. Check word.of_Z. Search (Z -> ?word).
-  Print word. Print word.word.
+  Print word. Print word.word. Print read.
   Fixpoint newtrace x y n :=
     match n with
     | S n' => newtrace (word.add x (word.of_Z 1)) (word.add y (word.of_Z 1)) n' ++
-                       [read_event access_size.one y; read_event access_size.one x; branch_event true] 
+                       [Semantics.read access_size.one y; Semantics.read access_size.one x; branch true] 
     | O => []
     end.
 
@@ -57,7 +58,7 @@ Section WithParameters.
   Proof.
     repeat straightline. Check (Loops.tailrec _).
 
-    refine ((Loops.tailrec _
+    refine ((Loops.tailrec
       (HList.polymorphic_list.cons _
       (HList.polymorphic_list.cons _
       (HList.polymorphic_list.cons _
@@ -68,7 +69,7 @@ Section WithParameters.
         m =* xs$@x * Rx /\  m =* ys$@y * Ry /\
         v=n :> Z /\ length xs = n :> Z /\ length ys = n :> Z
       )
-      (fun                     T M (X Y N R : word) => m = M /\ branch_event false :: newtrace x y (Z.to_nat (word.unsigned n)) ++ t = T /\
+      (fun                     T M (X Y N R : word) => m = M /\ branch false :: newtrace x y (Z.to_nat (word.unsigned n)) ++ t = T /\
         exists z, R = Z.lor r z :> Z /\ (z  = 0 :>Z <-> xs  = ys)
       )) 
       lt
@@ -182,7 +183,7 @@ Section WithParameters.
       setoid_rewrite word.unsigned_eqb; setoid_rewrite word.unsigned_of_Z_0.
       eexists; ssplit; eauto; try (destr Z.eqb; autoforward with typeclass_instances in E;
         rewrite ?word.unsigned_of_Z_1, ?word.unsigned_of_Z_0; eauto).
-      { instantiate (1 := fun t n y x => branch_event false :: newtrace x y (Z.to_nat n)). reflexivity. }
+      { instantiate (1 := fun t n y x => branch false :: newtrace x y (Z.to_nat n)). reflexivity. }
       { rewrite List.flat_map_app.
         replace (filterio t) with ([] ++ filterio t) by reflexivity.
         f_equal. clear. generalize dependent x. generalize dependent y.

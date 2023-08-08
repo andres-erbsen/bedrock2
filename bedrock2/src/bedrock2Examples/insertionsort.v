@@ -37,7 +37,7 @@ Require Import bedrock2.ZnWords.
 Require Import coqutil.Sorting.Permutation.
 
 Section WithParameters.
-  Context {word: word.word 32} {mem: map.map word Byte.byte}.
+  Context {word: word.word 32} {mem: map.map word Byte.byte} {pick_sp: PickSp}.
   Context {word_ok: word.ok word} {mem_ok: map.ok mem}.
 
   Definition nth(l: list word)(n: nat): word := List.nth n l (word.of_Z 0).

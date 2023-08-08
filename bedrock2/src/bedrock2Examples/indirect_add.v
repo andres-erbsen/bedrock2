@@ -23,7 +23,7 @@ Require Import bedrock2.ProgramLogic bedrock2.Scalars.
 Require Import bedrock2Examples.lightbulb_spec.
 
 Section WithParameters.
-  Context {word: word.word 32} {mem: map.map word Byte.byte}.
+  Context {word: word.word 32} {mem: map.map word Byte.byte} {pick_sp: PickSp}.
   Context {word_ok: word.ok word} {mem_ok: map.ok mem}.
 
   Definition f (a b : word) := word.add (word.add a b) b.
@@ -179,7 +179,7 @@ H9 : (scalar a0 (word.add va vb)
        a2
      *)
     rename m into m'.
-    rename a2 into m.
+    rename a1 into m.
     eapply sep_and_r_fwd in H9; destruct H9 as [? H9].
     eapply sep_and_r_fwd in H9; destruct H9 as [? H9].
     eapply sep_and_r_fwd in H9; destruct H9 as [? H9].
@@ -194,7 +194,7 @@ H9 : (scalar a0 (word.add va vb)
     repeat match goal with H : _ |- _ => rewrite !HList.tuple.to_list_of_list in H end.
     set ((LittleEndianList.le_split (bytes_per access_size.word) (word.unsigned (word.add va vb)))) as stackbytes in *.
     assert (Datatypes.length stackbytes = 4%nat) by exact eq_refl.
-    repeat straightline; try trace_alignment. eauto.
+    repeat straightline. split; try trace_alignment. eauto.
   Qed.
 
   (* let's see how this would look like with an alternate spec of [indirect_add] *)
@@ -241,7 +241,7 @@ H9 : (scalar a0 (word.add va vb)
     straightline_call.
     { split; [exact H1|split]; ecancel_assumption. }
     repeat straightline.
-    rename a2 into m.
+    rename a1 into m.
     (*
 H15 : forall (va0 : word) (Ra : mem -> Prop),
       (scalar a0 va0 ⋆ Ra)%sep m2 -> (scalar a0 (word.add va vb) ⋆ Ra)%sep m
@@ -255,7 +255,7 @@ H15 : forall (va0 : word) (Ra : mem -> Prop),
     straightline_call.
     { split; [>|split]; try ecancel_assumption. }
     repeat straightline.
-    rename a3 into m'.
+    rename a2 into m'.
     (*
 H15 : forall (va0 : word) (Ra : mem -> Prop),
       (scalar out va0 ⋆ Ra)%sep m ->

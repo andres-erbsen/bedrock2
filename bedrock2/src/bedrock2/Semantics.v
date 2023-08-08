@@ -25,7 +25,7 @@ Inductive event {width: Z}{BW: Bitwidth width}{word: word.word width}{mem: map.m
 Definition trace {width: Z}{BW: Bitwidth width}{word: word.word width}{mem: map.map word byte} : Type :=
   list event.
 
-Definition filterio {width: Z}{BW: Bitwidth width}{word: word.word width}{mem: map.map word byte}
+Definition filterio {width: Z}{BW: Bitwidth width}{word: word.word width}{mem: map.map word byte} 
   (t : trace) : io_trace :=
   flat_map (fun e =>
               match e with
@@ -40,11 +40,6 @@ Definition filterstack {width: Z}{BW: Bitwidth width}{word: word.word width}{mem
               | branch _ | salloc => cons e nil
               | _ => nil
               end) t.
-
-(* I hope i don't actually need this anywhere*)
-(*Lemma filterio_cons (t : trace) (e : event) :
-  filterio (e :: t) = ltac:(let val := eval cbn [filterio flat_map] in (filterio (e :: t)) in exact val).
-Proof. reflexivity. Qed.*)
                             
 Definition ExtSpec{width: Z}{BW: Bitwidth width}{word: word.word width}{mem: map.map word byte} :=
   (* Given a trace of what happened so far,

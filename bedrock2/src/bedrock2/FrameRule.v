@@ -18,9 +18,8 @@ Section semantics.
   Context {locals: map.map String.string word}.
   Context {env: map.map String.string (list String.string * list String.string * cmd)}.
   Context {ext_spec: ExtSpec}.
-  Context (stack_addr: Semantics.trace -> BinNums.Z -> word).
+  Context {pick_sp: PickSp}.
   Context {mem_ok: map.ok mem} {word_ok: word.ok word}.
-  Let exec := Semantics.exec stack_addr.
 
   Lemma frame_load: forall mSmall mBig mAdd a r (v: word),
       mmap.split mBig mSmall mAdd ->

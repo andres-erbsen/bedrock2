@@ -19,6 +19,7 @@ Section WithParameters.
   Context {width} {BW: Bitwidth width}.
   Context {word: word.word width} {mem: map.map word byte} {locals: map.map string word}.
   Context {ext_spec: ExtSpec}.
+  Context {pick_sp: PickSp}.
   Import ProgramLogic.Coercions.
 
 

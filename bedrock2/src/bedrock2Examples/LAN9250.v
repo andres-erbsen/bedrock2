@@ -133,12 +133,12 @@ Import lightbulb_spec.
 Import Loops.
 
 Section WithParameters.
-  Context {word: word.word 32} {mem: map.map word Byte.byte}.
+  Context {word: word.word 32} {mem: map.map word Byte.byte} {pick_sp: PickSp}.
   Context {word_ok: word.ok word} {mem_ok: map.ok mem}.
 
   Global Instance spec_of_lan9250_readword : ProgramLogic.spec_of "lan9250_readword" := fun functions => forall t m a,
     (0x0 <= Word.Interface.word.unsigned a < 0x400) ->
-    WeakestPrecondition.call functions "lan9250_readword" t m [a] (fun T M RETS =>
+    WeakestPrecondition.call (pick_sp := pick_sp) functions "lan9250_readword" t m [a] (fun T M RETS =>
       M = m /\
       exists ret err, RETS = [ret; err] /\
       exists iol, (filterio T) = iol ++ (filterio t) /\
@@ -149,7 +149,7 @@ Section WithParameters.
   Global Instance spec_of_lan9250_writeword : ProgramLogic.spec_of "lan9250_writeword" := fun functions =>
     forall t m a v,
       (0x0 <= Word.Interface.word.unsigned a < 0x400) ->
-    (((WeakestPrecondition.call functions "lan9250_writeword"))) t m [a; v]
+    (((WeakestPrecondition.call (pick_sp := pick_sp) functions "lan9250_writeword"))) t m [a; v]
       (fun T M RETS =>
       M = m /\
       exists err, RETS = [err] /\
@@ -163,7 +163,7 @@ Section WithParameters.
   Global Instance spec_of_lan9250_mac_write : ProgramLogic.spec_of "lan9250_mac_write" := fun functions =>
     forall t m a v,
       (0 <= Word.Interface.word.unsigned a < 2^31) ->
-    (((WeakestPrecondition.call functions "lan9250_mac_write"))) t m [a; v]
+    (((WeakestPrecondition.call (pick_sp := pick_sp) functions "lan9250_mac_write"))) t m [a; v]
       (fun T M RETS =>
       M = m /\
       exists err, RETS = [err] /\
@@ -766,9 +766,11 @@ Section WithParameters.
 
   Lemma lan9250_tx_ok : program_logic_goal_for_function! lan9250_tx.
   Proof.
-    Time repeat t. (*Print t.
+    Time repeat t. (*
     repeat (subst || straightline || straightline_call || ZnWords || intuition eauto || esplit).
     Time repeat t.*)
+    Print straightline_call.
+    repeat subst.
     straightline_call; [ZnWords|].
     repeat (intuition idtac; repeat straightline); [repeat t|].
     eexists. eexists. split; repeat (straightline; intuition eauto).

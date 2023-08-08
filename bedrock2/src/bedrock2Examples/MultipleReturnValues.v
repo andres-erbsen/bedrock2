@@ -14,6 +14,8 @@ Example addsub_test := func! () ~> ret {
 From bedrock2 Require Import WeakestPrecondition ProgramLogic BasicC64Semantics.
 Import coqutil.Word.Interface.
 
+Context {pick_sp: Semantics.PickSp}.
+
 Local Instance spec_of_addsub : spec_of "addsub" :=
   fnspec! "addsub" a b ~> x y,
   { requires m t := True; ensures M T := m=M /\ t=T /\

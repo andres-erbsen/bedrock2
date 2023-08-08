@@ -17,7 +17,7 @@ Local Open Scope Z_scope.
 
 Section WithParameters.
   Import Syntax BinInt String List.ListNotations ZArith.
-  Context {word: word.word 32} {mem: map.map word Byte.byte}.
+  Context {word: word.word 32} {mem: map.map word Byte.byte} {pick_sp: PickSp}.
   Context {word_ok: word.ok word} {mem_ok: map.ok mem}.
   Local Open Scope string_scope. Local Open Scope Z_scope. Local Open Scope list_scope.
 

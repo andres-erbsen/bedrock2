@@ -17,11 +17,10 @@ Section Loops.
   Context {locals_ok : map.ok locals}.
   Context {env_ok : map.ok env}.
   Context {ext_spec_ok : Semantics.ext_spec.ok ext_spec}.
-  Context (stack_addr : Semantics.trace -> BinNums.Z -> word).
+  Context {pick_sp : PickSp}.
 
-  Context {functions : list (String.string * (list String.string * list String.string * Syntax.cmd))}.
-  Let call := WeakestPrecondition.call stack_addr functions.
-  Let cmd := WeakestPrecondition.cmd stack_addr.
+  Context {functions : list (String.string * (list String.string * list String.string * Syntax.cmd))}. Check @WeakestPrecondition.call.
+  Let call := WeakestPrecondition.call functions.
   Lemma tailrec_localsmap_1ghost
     {e c t} {m: mem} {l} {post : trace -> mem -> locals -> Prop}
     {measure: Type} {Ghost: Type}

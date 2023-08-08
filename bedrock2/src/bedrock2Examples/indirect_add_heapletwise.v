@@ -26,7 +26,7 @@ From coqutil.Tactics Require Import letexists eabstract.
 Require Import bedrock2.ProgramLogic bedrock2.Scalars bedrock2.Array.
 
 Section WithParameters.
-  Context {word: word.word 32} {mem: map.map word Byte.byte}.
+  Context {word: word.word 32} {mem: map.map word Byte.byte} {pick_sp: PickSp}.
   Context {word_ok: word.ok word} {mem_ok: map.ok mem}.
 
   Definition f (a b : word) := word.add (word.add a b) b.
@@ -39,12 +39,12 @@ Section WithParameters.
         (* Note: the surviving frame needs to go last for heapletwise callers to work! *)
         m =* scalar a va * Ra;
       ensures t' m' :=
-        t = t' /\
+        filterio t = filterio t' /\
         m' =* scalar a (word.add vb vc) * Ra }.
   Instance spec_of_indirect_add_twice : spec_of "indirect_add_twice" :=
     fnspec! "indirect_add_twice" a b / va vb R,
     { requires t m := m =* scalar a va * scalar b vb * R;
-      ensures t' m' := t=t' /\ m' =* scalar a (f va vb) * scalar b vb * R }.
+      ensures t' m' := filterio t=filterio t' /\ m' =* scalar a (f va vb) * scalar b vb * R }.
 
   Lemma indirect_add_ok : program_logic_goal_for_function! indirect_add.
   Proof.
@@ -72,7 +72,7 @@ Section WithParameters.
     straightline_call.
     { split; [ecancel_assumption|]. split; ecancel_assumption. }
     repeat straightline.
-    { cbv [f]. ecancel_assumption. }
+    { cbv [f]. split; trace_alignment. ecancel_assumption. }
   Qed.
 
   Example link_both : spec_of_indirect_add_twice (("indirect_add_twice",indirect_add_twice)::("indirect_add",indirect_add)::nil).
@@ -92,7 +92,7 @@ Section WithParameters.
   Instance spec_of_indirect_add_three : spec_of "indirect_add_three" :=
     fnspec! "indirect_add_three" a b c / va vb vc Rb R,
     { requires t m := m =* scalar a va * scalar c vc * R /\ m =* scalar b vb * Rb;
-      ensures t' m' := t=t' /\ m' =* scalar a (g va vb vc) * scalar c vc * R }.
+      ensures t' m' := filterio t=filterio t' /\ m' =* scalar a (g va vb vc) * scalar c vc * R }.
 
   Lemma indirect_add_three_ok : program_logic_goal_for_function! indirect_add_three.
   Proof.
@@ -103,7 +103,7 @@ Section WithParameters.
     straightline_call.
     { split; [ecancel_assumption|]. split; ecancel_assumption. }
     repeat straightline.
-    { cbv [g]. ecancel_assumption. }
+    { cbv [g]. split; trace_alignment. ecancel_assumption. }
   Qed.
 
   Definition indirect_add_three' := func! (out, a, b, c) {
@@ -119,7 +119,7 @@ Section WithParameters.
         m =* scalar a va * Ra /\
         m =* scalar b vb * Rb /\
         m =* scalar c vc * Rc;
-      ensures t' m' := t=t' /\ m' =* scalar out (g va vb vc) * R }.
+      ensures t' m' := filterio t=filterio t' /\ m' =* scalar out (g va vb vc) * R }.
 
   Lemma indirect_add_three'_ok : program_logic_goal_for_function! indirect_add_three'.
   Proof.
@@ -259,6 +259,7 @@ but that rest can be split in 4 different ways:
     clear Di.
     repeat step.
     unfold g.
+    split; trace_alignment.
     repeat step.
   Qed.
 
@@ -268,7 +269,7 @@ but that rest can be split in 4 different ways:
   Instance spec_of_indirect_add_gen : spec_of "indirect_add" :=
     fnspec! "indirect_add" a b c / va Ra vb Rb vc Rc,
     { requires t m := m =* scalar a va * Ra /\ m =* scalar b vb * Rb /\ m =* scalar c vc * Rc;
-      ensures t' m' := t=t' /\
+      ensures t' m' := filterio t=filterio t' /\
         forall va Ra, m =* scalar a va * Ra -> m' =* scalar a (word.add vb vc) * Ra }.
 
   Lemma indirect_add_gen_ok : program_logic_goal_for_function! indirect_add.

@@ -19,6 +19,7 @@ Ltac seplog_use_array_load1 H i :=
     [exact iNat|exact (word.of_Z 0)|blia|];
   change ((word.unsigned (word.of_Z 1) * Z.of_nat iNat)%Z) with i in *.
 
+Context {pick_sp: PickSp}.
 
 Local Instance spec_of_arp : spec_of "arp" := fun functions =>
   forall t m packet ethbuf len R,
@@ -31,7 +32,8 @@ Local Hint Mode Word.Interface.word - : typeclass_instances.
 Goal program_logic_goal_for_function! arp.
   eexists; split; repeat straightline.
   1: exact eq_refl.
-  letexists; split; [solve[repeat straightline]|]; split; [|solve[repeat straightline]]; repeat straightline.
+  letexists; letexists; split; [solve[repeat straightline]|]; split; [|solve[repeat straightline]]; repeat straightline.
+  remember t as tt eqn:?e; assert (HT: tt ++ [] = t) by (subst; rewrite app_nil_r; reflexivity); clear e. (* a hacky way to keep straightline from removing t from the context; this is a problem for instantiating the existential variable which is the new trace. potentially we could change the definition of dexpr so that this hack wouldn't be necessary. *)
   eapply Properties.word.if_nonzero in H1.
   rewrite word.unsigned_ltu, word.unsigned_of_Z in H1. cbv [word.wrap] in H1.
   rewrite Z.mod_small in H1; cycle 1. { cbv. split; congruence. }
@@ -53,8 +55,7 @@ Goal program_logic_goal_for_function! arp.
   all:try tload.
   1: subst v0; exact eq_refl.
   split; [|solve[repeat straightline]]; repeat straightline.
-
-  letexists; split; [|split; [|solve[repeat straightline]]].
+  eexists. eexists. split; [|split; [|solve[repeat straightline]]].
   1: solve [repeat (split || letexists || straightline || tload)].
 
   repeat straightline.
