@@ -275,7 +275,7 @@ Module exec.
     Context {mem: map.map word byte} {locals: map.map varname word}
             {env: map.map String.string (list varname * list varname * stmt varname)}.
     Context {ext_spec: ExtSpec}.
-    Context (stack_addr : trace -> BinNums.Z -> word).
+    Context {pick_sp: PickSp}.
     Context {varname_eq_spec: EqDecider varname_eqb}
             {word_ok: word.ok word}
             {mem_ok: map.ok mem}
@@ -357,7 +357,7 @@ Module exec.
     | stackalloc: forall t mSmall l mc x n body post,
         n mod (bytes_per_word width) = 0 ->
         (forall mStack mCombined,
-            let a := stack_addr (filterstack t) n in
+            let a := pick_sp (filterstack t) n in
             anybytes a n mStack ->
             map.split mCombined mSmall mStack ->
             exec body (salloc :: t) mCombined (map.put l x a) (addMetricLoads 1 (addMetricInstructions 1 mc))
@@ -620,7 +620,7 @@ Section FlatImp2.
   Context {mem: map.map word byte} {locals: map.map varname word}
           {env: map.map String.string (list varname * list varname * stmt varname)}.
   Context {ext_spec: ExtSpec}.
-  Context (stack_addr : trace -> Z -> word).
+  Context {pick_sp: PickSp}.
   Context {varname_eq_spec: EqDecider varname_eqb}
           {word_ok: word.ok word}
           {mem_ok: map.ok mem}
@@ -631,11 +631,11 @@ Section FlatImp2.
   Definition SimState: Type := trace * mem * locals * MetricLog.
   Definition SimExec(e: env)(c: stmt varname): SimState -> (SimState -> Prop) -> Prop :=
     fun '(t, m, l, mc) post =>
-      exec stack_addr e c t m l mc (fun t' m' l' mc' => post (t', m', l', mc')).
+      exec e c t m l mc (fun t' m' l' mc' => post (t', m', l', mc')).
 
   Lemma modVarsSound: forall e s initialT (initialSt: locals) initialM (initialMc: MetricLog) post,
-      exec stack_addr e s initialT initialM initialSt initialMc post ->
-      exec stack_addr e s initialT initialM initialSt initialMc
+      exec e s initialT initialM initialSt initialMc post ->
+      exec e s initialT initialM initialSt initialMc
            (fun finalT finalM finalSt _ => map.only_differ initialSt (modVars s) finalSt).
   Proof.
     induction 1;

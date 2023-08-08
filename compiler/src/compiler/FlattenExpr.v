@@ -28,7 +28,7 @@ Section FlattenExpr1.
           {ExprImp_env: map.map string (list string * list string * cmd)}
           {FlatImp_env: map.map string (list string * list string * FlatImp.stmt string)}
           {ext_spec: ExtSpec}
-          (stack_addr: trace -> Z -> word)
+          {pick_sp: PickSp}
           {NGstate: Type}
           {NG: NameGen String.string NGstate}
           {locals_ok: map.ok locals}
@@ -346,13 +346,13 @@ Section FlattenExpr1.
     simpl (disjoint _ _) in *;
     map_solver locals_ok.
 
-  Lemma seq_with_modVars: forall env t m (l: locals) mc s1 s2 mid post,
-    FlatImp.exec stack_addr env s1 t m l mc mid ->
+  Lemma seq_with_modVars: forall env t (m : mem) (l: locals) mc s1 s2 mid post,
+    FlatImp.exec env s1 t m l mc mid ->
     (forall t' m' l' mc',
         mid t' m' l' mc' ->
         map.only_differ l (FlatImp.modVars s1) l' ->
-        FlatImp.exec stack_addr env s2 t' m' l' mc' post) ->
-    FlatImp.exec stack_addr env (FlatImp.SSeq s1 s2) t m l mc post.
+        FlatImp.exec env s2 t' m' l' mc' post) ->
+    FlatImp.exec env (FlatImp.SSeq s1 s2) t m l mc post.
   Proof.
     intros *. intros E1 E2. eapply @FlatImp.exec.seq.
     - eapply FlatImp.exec.intersect; try assumption.
@@ -374,7 +374,7 @@ Section FlattenExpr1.
     map.undef_on initialH (allFreshVars ngs1) ->
     disjoint (union (ExprImp.allVars_expr e) (of_option oResVar)) (allFreshVars ngs1) ->
     eval_expr initialM initialH e initialMcH t = Some (res, finalMcH, t') ->
-    FlatImp.exec stack_addr fenv s t initialM initialL initialMcL (fun t'2 finalM finalL finalMcL =>
+    FlatImp.exec fenv s t initialM initialL initialMcL (fun t'2 finalM finalL finalMcL =>
       t'2 = t' /\ finalM = initialM /\ map.get finalL resVar = Some res /\
       (finalMcL - initialMcL <= finalMcH - initialMcH)%metricsH).
   Proof.
@@ -507,7 +507,7 @@ Section FlattenExpr1.
     map.undef_on lH (allFreshVars ngs1) ->
     disjoint (union (ExprImp.allVars_expr e) (of_option oResVar)) (allFreshVars ngs1) ->
     eval_expr m lH e initialMcH t = Some (res, finalMcH, t') ->
-    FlatImp.exec stack_addr fenv s t m lL initialMcL (fun t'2 m' lL' finalMcL =>
+    FlatImp.exec fenv s t m lL initialMcL (fun t'2 m' lL' finalMcL =>
       map.only_differ lL (FlatImp.modVars s) lL' /\
       t'2 = t' /\ m' = m /\ map.get lL' resVar = Some res /\
       (finalMcL - initialMcL <= finalMcH - initialMcH)%metricsH).
@@ -526,7 +526,7 @@ Section FlattenExpr1.
     disjoint (ExprImp.allVars_exprs es) (allFreshVars ngs1) ->
     evaluate_call_args_log m lH es initialMcH t = Some (resVals, finalMcH, t') ->
     (* List.option_all (List.map (eval_expr m lH) es) = Some resVals -> *)
-    FlatImp.exec stack_addr fenv s t m lL initialMcL (fun t'2 m' lL' finalMcL =>
+    FlatImp.exec fenv s t m lL initialMcL (fun t'2 m' lL' finalMcL =>
       t'2 = t' /\ m' = m /\
       map.getmany_of_list lL' resVars = Some resVals /\
       map.only_differ lL (FlatImp.modVars s) lL' /\
@@ -599,7 +599,7 @@ Section FlattenExpr1.
     map.undef_on initialH (allFreshVars ngs1) ->
     disjoint (ExprImp.allVars_expr e) (allFreshVars ngs1) ->
     eval_expr initialM initialH e initialMcH t = Some (res, finalMcH, t') ->
-    FlatImp.exec stack_addr fenv s t initialM initialL initialMcL (fun t'2 finalM finalL finalMcL =>
+    FlatImp.exec fenv s t initialM initialL initialMcL (fun t'2 finalM finalL finalMcL =>
       t'2 = t' /\ finalM = initialM /\
       FlatImp.eval_bcond finalL resCond = Some (negb (word.eqb res (word.of_Z 0))) /\
       (finalMcL - initialMcL <= finalMcH - initialMcH)%metricsH).
@@ -636,7 +636,7 @@ Section FlattenExpr1.
     map.undef_on initialH (allFreshVars ngs1) ->
     disjoint (ExprImp.allVars_expr e) (allFreshVars ngs1) ->
     eval_expr initialM initialH e initialMcH t = Some (res, finalMcH, t') ->
-    FlatImp.exec stack_addr fenv s t initialM initialL initialMcL (fun t'2 finalM finalL finalMcL =>
+    FlatImp.exec fenv s t initialM initialL initialMcL (fun t'2 finalM finalL finalMcL =>
       (t'2 = t' /\ finalM = initialM /\
        FlatImp.eval_bcond finalL resCond = Some (negb (word.eqb res (word.of_Z 0))) /\
        (finalMcL - initialMcL <= finalMcH - initialMcH)%metricsH) /\
@@ -686,14 +686,14 @@ Section FlattenExpr1.
   Lemma flattenStmt_correct_aux: forall eH eL,
       flatten_functions eH = Success eL ->
       forall eH0 sH t m mcH lH post,
-      Semantics.exec stack_addr eH0 sH t m lH mcH post ->
+      Semantics.exec eH0 sH t m lH mcH post ->
       eH0 = eH ->
       forall ngs ngs' sL lL mcL,
       flattenStmt ngs sH = (sL, ngs') ->
       map.extends lL lH ->
       map.undef_on lH (allFreshVars ngs) ->
       disjoint (ExprImp.allVars_cmd sH) (allFreshVars ngs) ->
-      FlatImp.exec stack_addr eL sL t m lL mcL (fun t' m' lL' mcL' => exists lH' mcH',
+      FlatImp.exec eL sL t m lL mcL (fun t' m' lL' mcL' => exists lH' mcH',
         post t' m' lH' mcH' /\ (* <-- put first so that eassumption will instantiate lH' correctly *)
         map.extends lL' lH' /\
         (* this one is a property purely about ExprImp (it's the conclusion of
@@ -932,8 +932,8 @@ Section FlattenExpr1.
   Lemma flattenStmt_correct: forall eH eL sH sL lL t m mc post,
       flatten_functions eH = Success eL ->
       ExprImp2FlatImp sH = sL ->
-      Semantics.exec stack_addr eH sH t m map.empty mc post ->
-      FlatImp.exec stack_addr eL sL t m lL mc (fun t' m' lL' mcL' => exists lH' mcH',
+      Semantics.exec eH sH t m map.empty mc post ->
+      FlatImp.exec eL sL t m lL mc (fun t' m' lL' mcL' => exists lH' mcH',
         post t' m' lH' mcH' /\
         map.extends lL' lH' /\
         (mcL' - mc <= mcH' - mc)%metricsH).
