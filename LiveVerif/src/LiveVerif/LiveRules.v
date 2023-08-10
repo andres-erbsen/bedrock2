@@ -35,29 +35,30 @@ Section WithParams.
   Context {width: Z} {BW: Bitwidth width} {word: word.word width} {word_ok: word.ok word}
           {mem: map.map word byte} {mem_ok: map.ok mem}
           {locals: map.map string word} {locals_ok: map.ok locals}
-          {ext_spec: ExtSpec} {ext_spec_ok : ext_spec.ok ext_spec}.
+          {ext_spec: ExtSpec} {ext_spec_ok : ext_spec.ok ext_spec}
+          {pick_sp: PickSp}.
 
-  Lemma weaken_expr: forall m l e (post1 post2: word -> Prop),
-      WeakestPrecondition.expr m l e post1 ->
-      (forall v, post1 v -> post2 v) ->
-      WeakestPrecondition.expr m l e post2.
+  Lemma weaken_expr: forall m l t e (post1 post2: trace -> word -> Prop),
+      WeakestPrecondition.expr m l t e post1 ->
+      (forall t v, post1 t v -> post2 t v) ->
+      WeakestPrecondition.expr m l t e post2.
   Proof.
     intros. eapply WeakestPreconditionProperties.Proper_expr; eassumption.
   Qed.
 
   (* "sealed" behind an Inductive, only the defining lemmas below unfold this definition *)
-  Inductive dexpr{BW: Bitwidth width}(m: mem)(l: locals)(e: expr)(w: word): Prop :=
-    mk_dexpr(_: WeakestPrecondition.dexpr m l e w).
+  Inductive dexpr{BW: Bitwidth width}(m: mem)(l: locals)(t: trace) (e: expr)(w: word)(t': trace): Prop :=
+    mk_dexpr(_: WeakestPrecondition.dexpr m l t e w t').
 
-  Lemma dexpr_literal: forall (m: mem) (l: locals) z,
-      dexpr m l (expr.literal z) (word.of_Z z).
+  Lemma dexpr_literal: forall (m: mem) (l: locals) (t: trace) z,
+      dexpr m l t (expr.literal z) (word.of_Z z) t.
   Proof.
-    intros. econstructor. cbn. unfold literal, dlet.dlet. reflexivity.
+    intros. econstructor. cbn. unfold literal, dlet.dlet. split; reflexivity.
   Qed.
 
-  Lemma dexpr_var: forall m (l: locals) x v,
+  Lemma dexpr_var: forall m (l: locals) (t: trace) x v,
       map.get l x = Some v ->
-      dexpr m l (expr.var x) v.
+      dexpr m l t (expr.var x) v t.
   Proof.
     intros. econstructor. hnf. eauto.
   Qed.
@@ -73,15 +74,16 @@ Section WithParams.
     end.
 
   (* Note: no conversion needed between v in sepclause and v returned,
-     and sep already enforces bounds on v *)
-  Lemma dexpr_load_uintptr: forall m l e addr v R,
-      dexpr m l e addr ->
+     and sep already enforces bounds on v *) Print event. Print read.
+  Lemma dexpr_load_uintptr: forall m l t e addr v t' R,
+      dexpr m l t e addr t' ->
       sep (uintptr v addr) R m ->
-      dexpr m l (expr.load access_size.word e) v.
+      dexpr m l t (expr.load access_size.word e) v (cons (Semantics.read access_size.word addr) t').
   Proof.
     intros. constructor. hnf. inversion H; clear H. hnf in H1.
     eapply weaken_expr. 1: eassumption.
-    intros. subst v0. hnf. eexists. split; [ | reflexivity].
+    intros. simpl in H. destruct H as [H_1 H_2]. subst v0 t0. hnf. eexists.
+    split; [ | split; reflexivity].
     unfold uintptr, Scalars.scalar in *.
     rewrite Scalars.load_of_sep with (value := v) (R := R). 2: assumption.
     unfold Scalars.truncate_word, Scalars.truncate_Z.
@@ -95,14 +97,14 @@ Section WithParams.
 
   (* Note: no conversion needed between v in sepclause and v returned,
      and sep already enforces bounds on v *)
-  Lemma dexpr_load_uint: forall m l e addr sz v R,
-      dexpr m l e addr ->
+  Lemma dexpr_load_uint: forall m l t e addr sz v t' R,
+      dexpr m l t e addr t' ->
       sep (uint (access_size_to_nbits sz) v addr) R m ->
-      dexpr m l (expr.load sz e) (word.of_Z v).
+      dexpr m l t (expr.load sz e) (word.of_Z v) (cons (Semantics.read sz addr) t').
   Proof.
     intros. constructor. hnf. inversion H; clear H. hnf in H1.
     eapply weaken_expr. 1: eassumption.
-    intros. subst v0. hnf. eexists. split; [ | reflexivity].
+    intros. destruct H. subst t0 v0. hnf. eexists. split; [ | split; reflexivity].
     unfold uint in *. eapply sep_assoc in H0. eapply sep_emp_l in H0.
     destruct H0 as (B & M).
     rewrite Scalars.load_of_sep with (value := word.of_Z v) (R := R).
@@ -123,17 +125,17 @@ Section WithParams.
 
   (* TODO later: dexpr_inlinetable *)
 
-  Lemma dexpr_binop: forall m l op e1 e2 (v1 v2: word),
-      dexpr m l e1 v1 ->
-      dexpr m l e2 v2 ->
-      dexpr m l (expr.op op e1 e2) (interp_binop op v1 v2).
+  Lemma dexpr_binop: forall m l op t t' t'' e1 e2 (v1 v2: word),
+      dexpr m l t e1 v1 t' ->
+      dexpr m l t' e2 v2 t'' ->
+      dexpr m l t (expr.op op e1 e2) (interp_binop op v1 v2) t''.
   Proof.
     intros. inversion H; clear H. inversion H0; clear H0.
     constructor. hnf in H, H1|-*.
     eapply weaken_expr. 1: eassumption.
-    intros. subst.
+    intros. destruct H0. subst.
     eapply weaken_expr. 1: eassumption.
-    intros. subst. reflexivity.
+    intros. destruct H0. subst. split; reflexivity.
   Qed.
 
   Definition dexpr_binop_unf :=
@@ -141,32 +143,32 @@ Section WithParams.
           let Tu := eval unfold interp_binop in T in
           exact (dexpr_binop: Tu)).
 
-  Lemma dexpr_ite: forall m l e1 e2 e3 (b v: word),
-      dexpr m l e1 b ->
-      dexpr m l (if word.eqb b (word.of_Z 0) then e3 else e2) v ->
-      dexpr m l (expr.ite e1 e2 e3) v.
+  Lemma dexpr_ite: forall m l t t' t'' e1 e2 e3 (b v: word),
+      dexpr m l t e1 b t' ->
+      dexpr m l (cons (branch (negb (word.eqb b (word.of_Z 0)))) t') (if word.eqb b (word.of_Z 0) then e3 else e2) v t'' ->
+      dexpr m l t (expr.ite e1 e2 e3) v t''.
   Proof.
     intros. inversion H; clear H. inversion H0; clear H0. constructor.
     hnf in H1,H|-*. eapply weaken_expr. 1: eassumption.
-    intros. subst v0. assumption.
+    intros. destruct H0. subst v0 t0. destruct (word.eqb _ _); assumption.
   Qed.
 
   (* Like dexpr, but with an additional P that needs to hold. P tags along
      because it doesn't want to miss the updates to the symbolic state that
      evaluating e might make. *)
-  Inductive dexpr1(m: mem)(l: locals)(e: expr)(v: word)(P: Prop): Prop :=
-  | mk_dexpr1(Hde: dexpr m l e v)(Hp: P).
+  Inductive dexpr1(m: mem)(l: locals)(t: trace)(e: expr)(v: word)(t': trace)(P: Prop): Prop :=
+  | mk_dexpr1(Hde: dexpr m l t e v t')(Hp: P).
 
-  Lemma dexpr1_literal: forall (m: mem) (l: locals) z (P: Prop),
-      P -> dexpr1 m l (expr.literal z) (word.of_Z z) P.
+  Lemma dexpr1_literal: forall (m: mem) (l: locals) (t: trace) z (P: Prop),
+      P -> dexpr1 m l t (expr.literal z) (word.of_Z z) t P.
   Proof.
     intros. constructor. 2: assumption. eapply dexpr_literal.
   Qed.
 
-  Lemma dexpr1_var: forall m (l: locals) x v (P: Prop),
+  Lemma dexpr1_var: forall m (l: locals) (t: trace) x v (P: Prop),
       map.get l x = Some v ->
       P ->
-      dexpr1 m l (expr.var x) v P.
+      dexpr1 m l t (expr.var x) v t P.
   Proof.
     intros. constructor. 2: assumption. eapply dexpr_var; eassumption.
   Qed.
@@ -174,18 +176,18 @@ Section WithParams.
   (* Note: (fun _ => True) instead of a frame to make it really clear that
      no one cares about the value of this frame, so heapletwise will not waste
      any effort on collecting all the remaining facts *)
-  Lemma dexpr1_load_uintptr: forall m l e addr v (P: Prop),
-      dexpr1 m l e addr (sep (uintptr v addr) (fun _ => True) m /\ P) ->
-      dexpr1 m l (expr.load access_size.word e) v P.
+  Lemma dexpr1_load_uintptr: forall m l t e addr v t' (P: Prop),
+      dexpr1 m l t e addr t' (sep (uintptr v addr) (fun _ => True) m /\ P) ->
+      dexpr1 m l t (expr.load access_size.word e) v (cons (Semantics.read access_size.word addr) t') P.
   Proof.
     intros. inversion H; clear H. fwd. constructor. 2: assumption.
     eapply dexpr_load_uintptr; eassumption.
   Qed.
 
-  Lemma dexpr1_load_uint: forall m l e addr sz v (P: Prop),
-      dexpr1 m l e addr
+  Lemma dexpr1_load_uint: forall m l t e addr sz v t' (P: Prop),
+      dexpr1 m l t e addr t'
         (sep (uint (access_size_to_nbits sz) v addr) (fun _ => True) m /\ P) ->
-      dexpr1 m l (expr.load sz e) (word.of_Z v) P.
+      dexpr1 m l t (expr.load sz e) (word.of_Z v) (cons (Semantics.read sz addr) t') P.
   Proof.
     intros. inversion H; clear H. fwd. constructor. 2: assumption.
     eapply dexpr_load_uint; eassumption.
@@ -193,13 +195,13 @@ Section WithParams.
 
   (* TODO later: dexpr1_inlinetable *)
 
-  Lemma dexpr1_binop: forall m l op e1 e2 (v1 v2: word) P,
-      dexpr1 m l e1 v1 (dexpr1 m l e2 v2 P) ->
-      dexpr1 m l (expr.op op e1 e2) (interp_binop op v1 v2) P.
+  Lemma dexpr1_binop: forall m l t t' t'' op e1 e2 (v1 v2: word) P,
+      dexpr1 m l t e1 v1 t' (dexpr1 m l t' e2 v2 t'' P) ->
+      dexpr1 m l t (expr.op op e1 e2) (interp_binop op v1 v2) t'' P.
   Proof.
     intros.
     inversion H. clear H. inversion Hp. clear Hp.
-    constructor. 2: assumption. eapply dexpr_binop; assumption.
+    constructor. 2: assumption. eapply dexpr_binop; eassumption.
   Qed.
 
   Definition dexpr1_binop_unf :=
@@ -210,6 +212,41 @@ Section WithParams.
   Definition bool_expr_branches(b: bool)(Pt Pf Pa: Prop): Prop :=
     (if b then Pt else Pf) /\ Pa.
 
+  Lemma dexpr_trace_irrelevant (m: mem) (l: locals) (e : expr) :
+    forall t1 t2 post,
+    WeakestPrecondition.expr m l t1 e (fun t' v => post v) ->
+    WeakestPrecondition.expr m l t2 e (fun t' v => post v).
+  Proof.
+    induction e;
+      intros t1 t2 post H;
+      simpl in *; cbv [literal get dlet.dlet load] in *; eauto.
+    - eapply weaken_expr. 1: eapply IHe1. 1: eapply weaken_expr. 1: eapply H.
+      2: { intros. eapply IHe2. apply H0. }
+      intros. 
+      Unshelve. 2: { apply (fun v => WeakestPrecondition.expr m l t e2 (fun (_ : trace) (v2 : word) => post (interp_binop op v v2))). eapply H0. eapply IHe2. Search WeakestPrecondition.expr. simpl in H.
+      + intros. 
+      2: { intros. eapply H. eapply IHe2.
+      + eapply IHe1. eapply weaken_expr.
+        -- eapply IHe1. eapply weaken_expr.
+           ++ apply H.
+           ++ intros. apply H0.
+      + 1: eapply IHe1. 1: 
+
+      apply IHe.
+    - apply IHe.
+    - Check weaken_expr. eapply weaken_expr. rewrite IHE2. eapply IHe2 in H.
+    - reflexivity.
+    - reflexivity.
+    - eauto.
+    - eauto.
+    - erewrite IHe1. eapply IHe2. eauto. eapply IHe.  eauto. eexists. apply H. destruct H. eauto.
+    - do 3 destruct H as [? H]. eauto.
+    - Search WeakestPrecondition.expr. eapply IHe in H. eauto.
+      cbv [literal dlet.dlet] in *. auto.
+    - cbv [get dlet.dlet] in *. destruct H. eexists. repeat (split; eauto). assumption. eassumption. eauto. intros. eauto.
+    generalize dependent v. induction
+    intros H. destruct H. cbv [WeakestPrecondition.dexpr WeakestPrecondition.expr] in H. induction H.
+
   (* `dexpr_bool3 m l e c Ptrue Pfalse Palways` means "expression e evaluates to
      boolean c and if c is true, Ptrue holds, if c is false, Pfalse holds, and
      Palways always holds".
@@ -219,12 +256,12 @@ Section WithParams.
      They are split into three Props rather than one in order to propagate changes
      to the symbolic state made while evaluating the condition of an if into the
      then and else branches. *)
-  Inductive dexpr_bool3(m: mem)(l: locals)(e: expr): bool -> Prop -> Prop -> Prop -> Prop :=
-    mk_dexpr_bool3: forall (v: word) (c: bool) (Ptrue Pfalse Palways: Prop),
-      dexpr m l e v ->
+  Inductive dexpr_bool3(m: mem)(l: locals)(t: trace)(e: expr): bool -> Prop -> Prop -> Prop -> Prop :=
+    mk_dexpr_bool3: forall (v: word) (t': trace) (c: bool) (Ptrue Pfalse Palways: Prop),
+      dexpr m l t e v (app t' t) ->
       c = negb (word.eqb v (word.of_Z 0)) ->
       bool_expr_branches c Ptrue Pfalse Palways ->
-      dexpr_bool3 m l e c Ptrue Pfalse Palways.
+      dexpr_bool3 m l t e c Ptrue Pfalse Palways.
 
   Lemma dexpr_bool3_not: forall m l e b (Pt Pf Pa: Prop),
       dexpr_bool3 m l e b
@@ -247,7 +284,7 @@ Section WithParams.
 
   (* note how each of Pt, Pf, Pa is only mentioned once in the hyp, and that Pt is
      as deep down as possible, so that it can see all memory modifications once it
-     gets proven *)
+     gets proven *) Print expr.lazy_and.
   Lemma dexpr_bool3_lazy_and: forall m l e1 e2 (b1 b2: bool) (Pt Pf Pa: Prop),
       dexpr_bool3 m l e1 b1
         (dexpr_bool3 m l e2 b2 Pt True True)
@@ -265,7 +302,7 @@ Section WithParams.
       inversion H2p0. clear H2p0. unfold bool_expr_branches in *. subst.
       econstructor.
       1: eapply dexpr_ite. 1: eassumption. 1: rewrite E.
-      1: eapply dexpr_binop. 1: eapply dexpr_literal. 1: eassumption.
+      1: eapply dexpr_binop. 1: eapply dexpr_literal. 1: cbn [negb]. eassumption.
       { cbn. rewrite word.unsigned_ltu.
         destr (word.eqb v0 (word.of_Z 0));
           rewrite !word.unsigned_of_Z_nowrap by
