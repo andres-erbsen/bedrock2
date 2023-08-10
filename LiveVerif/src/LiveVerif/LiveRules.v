@@ -212,7 +212,7 @@ Section WithParams.
   Definition bool_expr_branches(b: bool)(Pt Pf Pa: Prop): Prop :=
     (if b then Pt else Pf) /\ Pa.
 
-  Lemma dexpr_trace_irrelevant (m: mem) (l: locals) (e : expr) :
+  Lemma dexpr_trace_irrelevant' (m: mem) (l: locals) (e : expr) :
     forall t1 t2 post,
     WeakestPrecondition.expr m l t1 e (fun t' v => post v) ->
     WeakestPrecondition.expr m l t2 e (fun t' v => post v).
@@ -222,30 +222,20 @@ Section WithParams.
       simpl in *; cbv [literal get dlet.dlet load] in *; eauto.
     - eapply weaken_expr. 1: eapply IHe1. 1: eapply weaken_expr. 1: eapply H.
       2: { intros. eapply IHe2. apply H0. }
-      intros. 
-      Unshelve. 2: { apply (fun v => WeakestPrecondition.expr m l t e2 (fun (_ : trace) (v2 : word) => post (interp_binop op v v2))). eapply H0. eapply IHe2. Search WeakestPrecondition.expr. simpl in H.
-      + intros. 
-      2: { intros. eapply H. eapply IHe2.
-      + eapply IHe1. eapply weaken_expr.
-        -- eapply IHe1. eapply weaken_expr.
-           ++ apply H.
-           ++ intros. apply H0.
-      + 1: eapply IHe1. 1: 
+      intros. simpl. simpl in H0. eapply IHe2. apply H0.
+    - eapply weaken_expr. 1: eapply IHe1. 1: eapply weaken_expr. 1: eapply H.
+      2: { intros. Unshelve. 3: { eapply (fun v0 : word =>
+                                            WeakestPrecondition.expr m l _ (if word.eqb v0 (word.of_Z 0) then e3 else e2) (fun (_ : trace) (v1 : word) => post v1)). }
+                           2: shelve.
+           simpl in H0.
+           destruct (word.eqb _ _); eauto.
+      }
+      intros. simpl. simpl in H0. destruct (word.eqb _ _); eauto.
+      Unshelve. all: apply nil.
+  Qed.
 
-      apply IHe.
-    - apply IHe.
-    - Check weaken_expr. eapply weaken_expr. rewrite IHE2. eapply IHe2 in H.
-    - reflexivity.
-    - reflexivity.
-    - eauto.
-    - eauto.
-    - erewrite IHe1. eapply IHe2. eauto. eapply IHe.  eauto. eexists. apply H. destruct H. eauto.
-    - do 3 destruct H as [? H]. eauto.
-    - Search WeakestPrecondition.expr. eapply IHe in H. eauto.
-      cbv [literal dlet.dlet] in *. auto.
-    - cbv [get dlet.dlet] in *. destruct H. eexists. repeat (split; eauto). assumption. eassumption. eauto. intros. eauto.
-    generalize dependent v. induction
-    intros H. destruct H. cbv [WeakestPrecondition.dexpr WeakestPrecondition.expr] in H. induction H.
+  Print WeakestPrecondition.dexpr.
+  Definition dexpr_no_trace
 
   (* `dexpr_bool3 m l e c Ptrue Pfalse Palways` means "expression e evaluates to
      boolean c and if c is true, Ptrue holds, if c is false, Pfalse holds, and
