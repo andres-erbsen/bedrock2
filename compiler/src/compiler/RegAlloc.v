@@ -887,6 +887,7 @@ Section CheckerCorrect.
   Context {srcEnv: map.map String.string (list srcvar * list srcvar * stmt)} {srcEnvOk: map.ok srcEnv}.
   Context {impEnv: map.map String.string (list impvar * list impvar * stmt')} {impEnvOk: map.ok impEnv}.
   Context {ext_spec: Semantics.ExtSpec}.
+  Context {pick_sp: Semantics.PickSp}.
 
   Definition states_compat(st: srcLocals)(corresp: list (srcvar * impvar))(st': impLocals) :=
     forall (x: srcvar) (x': impvar),
