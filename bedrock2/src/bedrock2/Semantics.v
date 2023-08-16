@@ -21,23 +21,19 @@ Inductive event {width: Z}{BW: Bitwidth width}{word: word.word width}{mem: map.m
 | branch : bool -> event
 | read : access_size -> word -> event
 | write : access_size -> word -> event
-| salloc : event.
+| salloc : word -> event.
 Definition trace {width: Z}{BW: Bitwidth width}{word: word.word width}{mem: map.map word byte} : Type :=
   list event.
+
+Inductive traces_same {width: Z}{BW: Bitwidth width}{word: word.word width}{mem: map.map word byte} : trace -> trace -> Prop :=
+| eq_same t1 t2 : t1 = t2 -> traces_same t1 t2
+| nondet_same t1 t2 a1 a2 : (a1 = a2 -> traces_same t1 t2) -> traces_same (app t1 (cons (salloc a1) nil)) (app t2 (cons (salloc a2) nil)).
 
 Definition filterio {width: Z}{BW: Bitwidth width}{word: word.word width}{mem: map.map word byte} 
   (t : trace) : io_trace :=
   flat_map (fun e =>
               match e with
               | IO i => cons i nil
-              | _ => nil
-              end) t.
-
-Definition filterstack {width: Z}{BW: Bitwidth width}{word: word.word width}{mem: map.map word byte}
-  (t : trace) : trace :=
-  flat_map (fun e =>
-              match e with
-              | branch _ | salloc => cons e nil
               | _ => nil
               end) t.
                             
@@ -79,11 +75,6 @@ Module ext_spec.
   }.
 End ext_spec.
 Arguments ext_spec.ok {_ _ _ _} _.
-
-Definition PickSp {width: Z}{BW: Bitwidth width}{word: word.word width}{mem: map.map word byte} : Type :=
-  trace -> Z -> word.
-
-Existing Class PickSp.
 
 Section binops.
   Context {width : Z} {word : Word.Interface.word width}.
@@ -204,7 +195,6 @@ Module exec. Section WithEnv.
   Context {locals: map.map String.string word}.
   Context {env: map.map String.string (list String.string * list String.string * cmd)}.
   Context {ext_spec: ExtSpec}.
-  Context {pick_sp: PickSp}.
   Context (e: env).
 
   Local Notation metrics := MetricLog.
@@ -240,11 +230,10 @@ Module exec. Section WithEnv.
   | stackalloc x n body
     t mSmall l mc post
     (_ : Z.modulo n (bytes_per_word width) = 0)
-    (_ : forall mStack mCombined,
-        let a := pick_sp (filterstack t) n in
+    (_ : forall a mStack mCombined,
         anybytes a n mStack ->
         map.split mCombined mSmall mStack ->
-        exec body (salloc :: t) mCombined (map.put l x a) (addMetricInstructions 1 (addMetricLoads 1 mc))
+        exec body (salloc a :: t) mCombined (map.put l x a) (addMetricInstructions 1 (addMetricLoads 1 mc))
           (fun t' mCombined' l' mc' =>
              exists mSmall' mStack',
               anybytes a n mStack' /\

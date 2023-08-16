@@ -7,7 +7,6 @@ Section WeakestPrecondition.
   Context {locals: map.map String.string word}.
   Context {env: map.map String.string (list String.string * list String.string * cmd)}.
   Context {ext_spec: ExtSpec}.
-  Context {pick_sp: PickSp}.
   Implicit Types (t : trace) (m : mem) (l : locals).
 
   Definition literal v (post : word -> Prop) : Prop :=
@@ -111,11 +110,10 @@ Section WeakestPrecondition.
         post (cons (write sz a) t'') m l)
       | cmd.stackalloc x n c =>
         Z.modulo n (bytes_per_word width) = 0 /\
-        forall mStack mCombined,
-          let a := pick_sp (filterstack t) n in
+        forall a mStack mCombined,
           anybytes a n mStack -> map.split mCombined m mStack ->
           dlet! l := map.put l x a in
-          rec c (cons salloc t) mCombined l (fun t' mCombined' l' =>
+          rec c (cons (salloc a) t) mCombined l (fun t' mCombined' l' =>
           exists m' mStack',
           anybytes a n mStack' /\ map.split mCombined' m' mStack' /\
           post t' m' l')
@@ -173,10 +171,10 @@ End WeakestPrecondition.
 Check @cmd_body.
 Ltac unfold1_cmd e :=
   lazymatch e with
-    @cmd ?width ?BW ?word ?mem ?locals ?ext_spec ?pick_sp ?CA ?c ?t ?m ?l ?post =>
+    @cmd ?width ?BW ?word ?mem ?locals ?ext_spec ?CA ?c ?t ?m ?l ?post =>
     let c := eval hnf in c in
-    constr:(@cmd_body width BW word mem locals ext_spec pick_sp CA
-                      (@cmd width BW word mem locals ext_spec pick_sp CA) c t m l post)
+    constr:(@cmd_body width BW word mem locals ext_spec CA
+                      (@cmd width BW word mem locals ext_spec CA) c t m l post)
   end.
 Ltac unfold1_cmd_goal :=
   let G := lazymatch goal with |- ?G => G end in
@@ -219,10 +217,10 @@ Ltac unfold1_list_map'_goal :=
 Check @call. Check @call_body.
 Ltac unfold1_call e :=
   lazymatch e with
-    @call ?width ?BW ?word ?mem ?locals ?ext_spec ?pick_sp ?fs ?fname ?t ?m ?l ?post =>
+    @call ?width ?BW ?word ?mem ?locals ?ext_spec ?fs ?fname ?t ?m ?l ?post =>
     let fs := eval hnf in fs in
-    constr:(@call_body width BW word mem locals ext_spec pick_sp
-                       (@call width BW word mem locals ext_spec pick_sp) fs fname t m l post)
+    constr:(@call_body width BW word mem locals ext_spec
+                       (@call width BW word mem locals ext_spec) fs fname t m l post)
   end.
 Ltac unfold1_call_goal :=
   let G := lazymatch goal with |- ?G => G end in
@@ -276,7 +274,7 @@ Notation "'ctfunc!' name a0 .. an '|' b0 .. bn '/' g0 .. gn '|' h0 .. hn '~>' r0
                                                        (fun tr' mem' rets =>
                                                           (exists r0,
                                                               .. (exists rn,
-                                                                    tr' = (((appl a0 .. (appl an (appl g0 .. (appl gn (appl tr f)) ..)) ..)) ++ tr)%list /\
+                                                                    traces_same tr' (((appl a0 .. (appl an (appl g0 .. (appl gn (appl tr f)) ..)) ..)) ++ tr)%list /\
                                                                       rets = (cons r0 .. (cons rn nil) ..) /\
                                                                       post) ..))) ..)) ..)) ..)) ..))))
     (at level 200,
@@ -303,7 +301,7 @@ Notation "'ctfunc!' name a0 .. an '|' '/' '|' h0 .. hn ',' '{' 'requires' tr mem
                                  WeakestPrecondition.call
                                    functions name tr mem (cons a0 .. (cons an nil) ..)
                                    (fun tr' mem' rets =>
-                                      tr' = ((appl a0 .. (appl an (appl tr f)) ..) ++ tr)%list /\
+                                      traces_same tr' ((appl a0 .. (appl an (appl tr f)) ..) ++ tr)%list /\
                                         rets = nil /\
                                         post)) ..)) ..))))
     (at level 200,
@@ -329,7 +327,7 @@ Notation "'ctfunc!' name a0 .. an '|' '/' '|' h0 .. hn '~>' r0 .. rn ',' '{' 're
                                    (fun tr' mem' rets =>
                                       (exists r0,
                                           .. (exists rn,
-                                                tr' = ((appl a0 .. (appl an (appl tr f)) ..) ++ tr)%list /\
+                                                traces_same tr' ((appl a0 .. (appl an (appl tr f)) ..) ++ tr)%list /\
                                                   rets = (cons r0 .. (cons rn nil) ..) /\
                                                   post) ..))) ..)) ..))))
     (at level 200,
@@ -352,7 +350,7 @@ Notation "'ctfunc!' name '|' b0 .. bn '/' '|' '~>' r0 .. rn ',' '{' 'requires' t
                        WeakestPrecondition.call
                          functions name tr mem (cons b0 .. (cons bn nil) ..)
                          (fun tr' mem' rets =>
-                            tr' = (f tr ++ tr)%list /\
+                            traces_same tr' (f tr ++ tr)%list /\
                               (exists r0,
                                   .. (exists rn,
                                         rets = (cons r0 .. (cons rn nil) ..) /\

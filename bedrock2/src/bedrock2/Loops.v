@@ -17,7 +17,6 @@ Section Loops.
   Context {locals_ok : map.ok locals}.
   Context {env_ok : map.ok env}.
   Context {ext_spec_ok : Semantics.ext_spec.ok ext_spec}.
-  Context {pick_sp : PickSp}.
 
   Context {functions : list (String.string * (list String.string * list String.string * Syntax.cmd))}. Check @WeakestPrecondition.call.
   Let call := WeakestPrecondition.call functions.

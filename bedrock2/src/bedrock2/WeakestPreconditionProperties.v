@@ -80,7 +80,6 @@ Section WeakestPrecondition.
   Context {ext_spec_ok : Semantics.ext_spec.ok ext_spec}. Check @WeakestPrecondition.cmd.
   
   Global Instance Proper_cmd :
-    forall pick_sp,
     Proper (
         (pointwise_relation _ (pointwise_relation _ (pointwise_relation _ (pointwise_relation _ (pointwise_relation _ ((pointwise_relation _ (pointwise_relation _ Basics.impl))) ==> Basics.impl)))) ==>
      pointwise_relation _ (
@@ -88,7 +87,7 @@ Section WeakestPrecondition.
      pointwise_relation _ (
      pointwise_relation _ (
      (pointwise_relation _ (pointwise_relation _ (pointwise_relation _ Basics.impl))) ==>
-     Basics.impl)))))) (@WeakestPrecondition.cmd _ _ _ _ _ _ pick_sp).
+     Basics.impl)))))) WeakestPrecondition.cmd.
   Proof using env_ok ext_spec_ok locals_ok mem_ok word_ok.
     cbv [Proper respectful pointwise_relation Basics.flip Basics.impl]; ind_on Syntax.cmd.cmd;
       cbn in *; cbv [dlet.dlet] in *; intuition eauto.
@@ -143,7 +142,6 @@ Section WeakestPrecondition.
   Qed.
 
   Global Instance Proper_func :
-    forall pick_sp,
     Proper (
      (pointwise_relation _ (pointwise_relation _ (pointwise_relation _ (pointwise_relation _ (pointwise_relation _ ((pointwise_relation _ (pointwise_relation _ Basics.impl))) ==> Basics.impl)))) ==>
      pointwise_relation _ (
@@ -151,7 +149,7 @@ Section WeakestPrecondition.
      pointwise_relation _ (
      pointwise_relation _ (
      (pointwise_relation _ (pointwise_relation _ (pointwise_relation _ Basics.impl))) ==>
-     Basics.impl)))))) (@WeakestPrecondition.func _ _ _ _ _ _ pick_sp).
+     Basics.impl)))))) WeakestPrecondition.func.
   Proof using word_ok mem_ok locals_ok ext_spec_ok env_ok.
     cbv [Proper respectful pointwise_relation Basics.flip Basics.impl  WeakestPrecondition.func]; intros.
     destruct a. destruct p.
@@ -171,10 +169,6 @@ Section WeakestPrecondition.
         eauto.
     - eauto.
   Qed.
-
-  Context {pick_sp: Semantics.PickSp}.
-  (* If I put this before Proper_func (and remove the 'forall stack_addr' from Proper_func),
-     then Qed fails in Proper_call. *)
   
   Global Instance Proper_call :
     Proper (
