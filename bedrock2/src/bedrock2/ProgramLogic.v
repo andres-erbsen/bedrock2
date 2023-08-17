@@ -18,8 +18,8 @@ Lemma align_trace_app {T} x xs cont t (H : xs = app cont t) : @app T x xs = app 
 Proof. intros. cbn. subst. rewrite List.app_assoc; trivial. Qed.
 Check filterio. Print filterio.
 Lemma filterio_cons {width: BinNums.Z}{BW: Bitwidth.Bitwidth width}{word: Interface.word.word width}{mem: Interface.map.map Interface.word.rep Init.Byte.byte} (t : trace) (e : event) :
-  filterio (cons e t) = match e with | IO i => cons i (filterio t) | _ => filterio t end.
-Proof. destruct e; reflexivity. Qed.
+  filterio (cons e t) = match e with | det (IO_event i) => cons i (filterio t) | _ => filterio t end.
+Proof. destruct e; try reflexivity. destruct d; reflexivity. Qed.
 
 Ltac trace_alignment :=
     repeat match goal with

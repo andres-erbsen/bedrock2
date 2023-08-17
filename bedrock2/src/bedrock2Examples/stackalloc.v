@@ -69,7 +69,7 @@ Section aLemmaThatDoesntBelongHere.
 End aLemmaThatDoesntBelongHere.
                                                            
 Section WithParameters.
-  Context {word: word.word 32} {mem: map.map word Byte.byte} {pick_sp: PickSp}.
+  Context {word: word.word 32} {mem: map.map word Byte.byte}.
   Context {word_ok: word.ok word} {mem_ok: map.ok mem}.
 
   Instance spec_of_stacktrivial : spec_of "stacktrivial" := fun functions => forall m t,
@@ -129,7 +129,27 @@ Section WithParameters.
     straightline_stackdealloc.
     seprewrite_in_by (symmetry! @scalar_of_bytes) H8 reflexivity.
     straightline_stackdealloc.
-    repeat straightline. split; try trace_alignment. repeat straightline.
+    repeat straightline. Print trace_alignment.
+    Print traces_same.
+    Ltac new_trace_alignment :=
+      repeat match goal with
+        | t:=_ :: _:_ |- _ => subst t
+        end;
+      repeat match goal with
+        | |- traces_same (salloc _ :: _) _ => idtac "1"; apply nondet_same
+        | |- traces_same (_ :: _) _ => apply eq_same
+        end; 
+      repeat
+        match goal with
+        | H1:filterio _ = _ |- context [ filterio _ ] =>
+            repeat rewrite filterio_cons; repeat rewrite filterio_cons in H1; rewrite H1
+        end;
+      repeat eapply align_trace_app || eapply align_trace_cons || exact eq_refl.
+    new_trace_alignment. Unshelve. 2: {
+    inversion H6.
+    split;
+      new_trace_alignment.
+    try trace_alignment. repeat straightline.
   Qed.
   
   Instance spec_of_stacknondet : spec_of "stacknondet" := fun functions => forall m t,

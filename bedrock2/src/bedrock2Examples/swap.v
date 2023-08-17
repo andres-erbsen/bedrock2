@@ -30,26 +30,22 @@ Require Import coqutil.Word.Interface.
 Require Import coqutil.Tactics.rdelta.
 
 Section WithParameters.
-  Context {word: word.word 32} {mem: map.map word Byte.byte} {pick_sp: PickSp}.
+  Context {word: word.word 32} {mem: map.map word Byte.byte}.
   Context {word_ok: word.ok word} {mem_ok: map.ok mem}.
 
   Instance ct_spec_of_swap : spec_of "swap" :=
     ctfunc! "swap" a_addr b_addr | / | a b R,
     { requires t m := m =* scalar a_addr a * scalar b_addr b * R;
       ensures T M :=  M =* scalar a_addr b * scalar b_addr a * R /\ (filterio T) = (filterio t) }.
-  
-  (*Instance ct_swap : ct_spec_of "swap" :=
-    ctfunc! "swap" a_addr b_addr | / (dummy : nat) | a b R,
-    { requires t m := m =* scalar a_addr a * scalar b_addr b * R }.*)
-  Locate "ctfunc!".
-  
+
   (* I should make this work again.
 Instance ct_bad_swap : ct_spec_of "bad_swap" :=
     ctfunc! "bad_swap" | a_addr b_addr / | a b R,
     { requires t m := m =* scalar a_addr a * scalar b_addr b * R }.*)
   
-  Lemma swap_ct_and_ok : program_logic_goal_for_function! swap.
-  Proof. repeat straightline; auto. split; [trace_alignment|]. repeat straightline; eauto. Qed.
+  Lemma swap_ok : program_logic_goal_for_function! swap.
+  Proof. repeat straightline. split; repeat straightline. 2: split; trace_alignment; repeat straightline; auto.
+         eexists. split. 2: trace_alignment. repeat constructor. Qed.
 
   (*Lemma swap_ct : program_logic_ct_goal_for_function! swap.
   Proof. repeat straightline. trace_alignment. Qed.*)
@@ -84,7 +80,7 @@ Instance ct_bad_swap : ct_spec_of "bad_swap" :=
   Proof. repeat (straightline || straightline_ct_call); eauto using eq_trans. Qed.
 
   Lemma link_swap_swap_swap_swap : spec_of_swap_swap &[,swap_swap; swap].
-  Proof. eauto using swap_swap_ok, swap_ct_and_ok. Qed.
+  Proof. eauto using swap_swap_ok, swap_ok. Qed.
 
   (* Print Assumptions link_swap_swap_swap_swap. *)
   (*

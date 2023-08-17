@@ -272,11 +272,12 @@ Notation "'ctfunc!' name a0 .. an '|' b0 .. bn '/' g0 .. gn '|' h0 .. hn '~>' r0
                                                      WeakestPrecondition.call
                                                        functions name tr mem (cons a0 .. (cons an (cons b0 .. (cons bn nil) ..)) ..)
                                                        (fun tr' mem' rets =>
-                                                          (exists r0,
-                                                              .. (exists rn,
-                                                                    traces_same tr' (((appl a0 .. (appl an (appl g0 .. (appl gn (appl tr f)) ..)) ..)) ++ tr)%list /\
+                                                          (exists tr'', generates ((appl a0 .. (appl an (appl g0 .. (appl gn f) ..)) ..)) tr'' /\
+                                                                          tr' = (tr'' ++ tr)%list) /\
+                                                            (exists r0,
+                                                                .. (exists rn,
                                                                       rets = (cons r0 .. (cons rn nil) ..) /\
-                                                                      post) ..))) ..)) ..)) ..)) ..))))
+                                                                        post) ..))) ..)) ..)) ..)) ..))))
     (at level 200,
       name at level 0,
       a0 binder, an binder,
@@ -301,9 +302,11 @@ Notation "'ctfunc!' name a0 .. an '|' '/' '|' h0 .. hn ',' '{' 'requires' tr mem
                                  WeakestPrecondition.call
                                    functions name tr mem (cons a0 .. (cons an nil) ..)
                                    (fun tr' mem' rets =>
-                                      traces_same tr' ((appl a0 .. (appl an (appl tr f)) ..) ++ tr)%list /\
-                                        rets = nil /\
-                                        post)) ..)) ..))))
+                                      (exists tr'',
+                                          generates (appl a0 .. (appl an f) ..) tr'' /\
+                                            tr' = (tr'' ++ tr)%list) /\
+                                            rets = nil /\
+                                            post)) ..)) ..))))
     (at level 200,
       name at level 0,
       a0 binder, an binder,
@@ -325,11 +328,13 @@ Notation "'ctfunc!' name a0 .. an '|' '/' '|' h0 .. hn '~>' r0 .. rn ',' '{' 're
                                  WeakestPrecondition.call
                                    functions name tr mem (cons a0 .. (cons an nil) ..)
                                    (fun tr' mem' rets =>
-                                      (exists r0,
-                                          .. (exists rn,
-                                                traces_same tr' ((appl a0 .. (appl an (appl tr f)) ..) ++ tr)%list /\
+                                      (exists tr'',
+                                          generates (appl a0 .. (appl an f) ..) tr'' /\
+                                            tr' = (tr'' ++ tr)%list) /\
+                                        (exists r0,
+                                            .. (exists rn,     
                                                   rets = (cons r0 .. (cons rn nil) ..) /\
-                                                  post) ..))) ..)) ..))))
+                                                    post) ..))) ..)) ..))))
     (at level 200,
       name at level 0,
       a0 binder, an binder,
@@ -350,7 +355,9 @@ Notation "'ctfunc!' name '|' b0 .. bn '/' '|' '~>' r0 .. rn ',' '{' 'requires' t
                        WeakestPrecondition.call
                          functions name tr mem (cons b0 .. (cons bn nil) ..)
                          (fun tr' mem' rets =>
-                            traces_same tr' (f tr ++ tr)%list /\
+                            (exists tr'',
+                                generates f tr'' /\
+                                  tr' = (tr'' ++ tr)%list) /\
                               (exists r0,
                                   .. (exists rn,
                                         rets = (cons r0 .. (cons rn nil) ..) /\

@@ -16,24 +16,43 @@ Definition io_event {width: Z}{BW: Bitwidth width}{word: word.word width}{mem: m
 Definition io_trace {width: Z}{BW: Bitwidth width}{word: word.word width}{mem: map.map word byte} : Type :=
   list io_event.
 
+Inductive det_event {width: Z}{BW: Bitwidth width}{word: word.word width}{mem: map.map word byte} : Type :=
+| IO_event : io_event -> det_event (* obviously this does not belong here *)
+| branch_event : bool -> det_event
+| read_event : access_size -> word -> det_event
+| write_event : access_size -> word -> det_event.
+
 Inductive event {width: Z}{BW: Bitwidth width}{word: word.word width}{mem: map.map word byte} : Type :=
-| IO : io_event -> event
-| branch : bool -> event
-| read : access_size -> word -> event
-| write : access_size -> word -> event
+| det : det_event -> event
 | salloc : word -> event.
+
+Definition IO {width: Z}{BW: Bitwidth width}{word: word.word width}{mem: map.map word byte} x := det (IO_event x).
+Definition branch {width: Z}{BW: Bitwidth width}{word: word.word width}{mem: map.map word byte} x := det (branch_event x).
+Definition read {width: Z}{BW: Bitwidth width}{word: word.word width}{mem: map.map word byte} x y := det (read_event x y).
+Definition write {width: Z}{BW: Bitwidth width}{word: word.word width}{mem: map.map word byte} x y := det (write_event x y).
+
 Definition trace {width: Z}{BW: Bitwidth width}{word: word.word width}{mem: map.map word byte} : Type :=
   list event.
 
-Inductive traces_same {width: Z}{BW: Bitwidth width}{word: word.word width}{mem: map.map word byte} : trace -> trace -> Prop :=
+Inductive abstract_trace {width: Z}{BW: Bitwidth width}{word: word.word width}{mem: map.map word byte} : Type :=
+| empty : abstract_trace
+| cons_det : det_event -> abstract_trace -> abstract_trace
+| cons_salloc : (word -> abstract_trace) -> abstract_trace -> abstract_trace.
+
+Inductive generates {width: Z}{BW: Bitwidth width}{word: word.word width}{mem: map.map word byte} : abstract_trace -> trace -> Prop :=
+| empty_gen : generates empty nil
+| det_gen : forall t abst e, generates abst t -> generates (cons_det e abst) (cons (det e) t)
+| salloc_gen : forall t t' abst f e, generates (f e) t' -> generates (cons_salloc f abst) (t' ++ salloc e :: t).
+
+(*Inductive traces_same {width: Z}{BW: Bitwidth width}{word: word.word width}{mem: map.map word byte} : trace -> trace -> Prop :=
 | eq_same t1 t2 : t1 = t2 -> traces_same t1 t2
-| nondet_same t1 t2 a1 a2 : (a1 = a2 -> traces_same t1 t2) -> traces_same (app t1 (cons (salloc a1) nil)) (app t2 (cons (salloc a2) nil)).
+| nondet_same t1 t2 a1 a2 : (a1 = a2 -> traces_same t1 t2) -> traces_same (app t1 (cons (salloc a1) nil)) (app t2 (cons (salloc a2) nil)).*)
 
 Definition filterio {width: Z}{BW: Bitwidth width}{word: word.word width}{mem: map.map word byte} 
   (t : trace) : io_trace :=
   flat_map (fun e =>
               match e with
-              | IO i => cons i nil
+              | det (IO_event i) => cons i nil
               | _ => nil
               end) t.
                             

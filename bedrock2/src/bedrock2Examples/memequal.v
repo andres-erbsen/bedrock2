@@ -27,7 +27,6 @@ Local Notation "xs $@ a" := (Array.array ptsto (word.of_Z 1) a xs) (at level 10,
 Section WithParameters.
   Context {width} {BW: Bitwidth width}.
   Context {word: word.word width} {mem: map.map word byte} {locals: map.map string word}.
-  Context {pick_sp: PickSp}.
   Context {ext_spec: ExtSpec}.
   Import ProgramLogic.Coercions. Locate "ctfunc!".
 
@@ -183,7 +182,11 @@ Section WithParameters.
       setoid_rewrite word.unsigned_eqb; setoid_rewrite word.unsigned_of_Z_0.
       eexists; ssplit; eauto; try (destr Z.eqb; autoforward with typeclass_instances in E;
         rewrite ?word.unsigned_of_Z_1, ?word.unsigned_of_Z_0; eauto).
-      { instantiate (1 := fun t n y x => branch false :: newtrace x y (Z.to_nat n)). reflexivity. }
+      { instantiate (1 := fun t n y x => branch false :: newtrace x y (Z.to_nat n)).
+        repeat match goal with
+                  | |- traces_same (salloc _ :: _) _ => idtac "1"; apply nondet_same
+                  | |- traces_same (_ :: _) _ => apply eq_same
+                  end; trace_alignment. }
       { rewrite List.flat_map_app.
         replace (filterio t) with ([] ++ filterio t) by reflexivity.
         f_equal. clear. generalize dependent x. generalize dependent y.
