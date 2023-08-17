@@ -44,6 +44,17 @@ Inductive generates {width: Z}{BW: Bitwidth width}{word: word.word width}{mem: m
 | det_gen : forall t abst e, generates abst t -> generates (cons_det e abst) (cons (det e) t)
 | salloc_gen : forall t t' abst f e, generates (f e) t' -> generates (cons_salloc f abst) (t' ++ salloc e :: t).
 
+Fixpoint app_abst {width: Z}{BW: Bitwidth width}{word: word.word width}{mem: map.map word byte} (at1 at2 : abstract_trace) :=
+  match at1 with
+  | empty => at2
+  | cons_det e at1' => app_abst at1' 
+  | 
+
+Fixpoint generator' {width: Z}{BW: Bitwidth width}{word: word.word width}{mem: map.map word byte} (t_rev : trace) (abst_so_far : abstract_trace) : abstract_trace :=
+  match t_rev with
+  | det e :: t_rev' => cons_det e t_rev'
+  | salloc _ :: t' => 
+
 (*Inductive traces_same {width: Z}{BW: Bitwidth width}{word: word.word width}{mem: map.map word byte} : trace -> trace -> Prop :=
 | eq_same t1 t2 : t1 = t2 -> traces_same t1 t2
 | nondet_same t1 t2 a1 a2 : (a1 = a2 -> traces_same t1 t2) -> traces_same (app t1 (cons (salloc a1) nil)) (app t2 (cons (salloc a2) nil)).*)
