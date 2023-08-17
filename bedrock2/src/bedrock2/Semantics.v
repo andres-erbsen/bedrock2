@@ -16,54 +16,76 @@ Definition io_event {width: Z}{BW: Bitwidth width}{word: word.word width}{mem: m
 Definition io_trace {width: Z}{BW: Bitwidth width}{word: word.word width}{mem: map.map word byte} : Type :=
   list io_event.
 
-Inductive det_event {width: Z}{BW: Bitwidth width}{word: word.word width}{mem: map.map word byte} : Type :=
-| IO_event : io_event -> det_event (* obviously this does not belong here *)
-| branch_event : bool -> det_event
-| read_event : access_size -> word -> det_event
-| write_event : access_size -> word -> det_event.
-
 Inductive event {width: Z}{BW: Bitwidth width}{word: word.word width}{mem: map.map word byte} : Type :=
-| det : det_event -> event
+| IO : io_event -> event
+| branch : bool -> event
+| read : access_size -> word -> event
+| write : access_size -> word -> event
 | salloc : word -> event.
-
-Definition IO {width: Z}{BW: Bitwidth width}{word: word.word width}{mem: map.map word byte} x := det (IO_event x).
-Definition branch {width: Z}{BW: Bitwidth width}{word: word.word width}{mem: map.map word byte} x := det (branch_event x).
-Definition read {width: Z}{BW: Bitwidth width}{word: word.word width}{mem: map.map word byte} x y := det (read_event x y).
-Definition write {width: Z}{BW: Bitwidth width}{word: word.word width}{mem: map.map word byte} x y := det (write_event x y).
-
 Definition trace {width: Z}{BW: Bitwidth width}{word: word.word width}{mem: map.map word byte} : Type :=
   list event.
 
 Inductive abstract_trace {width: Z}{BW: Bitwidth width}{word: word.word width}{mem: map.map word byte} : Type :=
-| empty : abstract_trace
-| cons_det : det_event -> abstract_trace -> abstract_trace
-| cons_salloc : (word -> abstract_trace) -> abstract_trace -> abstract_trace.
-
+| empty
+| cons_IO (e: io_event) (after : abstract_trace)
+| cons_branch (b : bool) (after : abstract_trace)
+| cons_read (sz : access_size) (a : word) (after : abstract_trace)
+| cons_write (sz : access_size) (a : word) (after : abstract_trace)
+| cons_salloc (after : word -> abstract_trace).
+Import ListNotations.
 Inductive generates {width: Z}{BW: Bitwidth width}{word: word.word width}{mem: map.map word byte} : abstract_trace -> trace -> Prop :=
 | empty_gen : generates empty nil
-| det_gen : forall t abst e, generates abst t -> generates (cons_det e abst) (cons (det e) t)
-| salloc_gen : forall t t' abst f e, generates (f e) t' -> generates (cons_salloc f abst) (t' ++ salloc e :: t).
+| IO_gen : forall x a t_rev, generates a t_rev -> generates (cons_IO x a) (IO x :: t_rev)
+| branch_gen : forall x a t_rev, generates a t_rev -> generates (cons_branch x a) (branch x :: t_rev)
+| read_gen : forall x1 x2 a t_rev, generates a t_rev -> generates (cons_read x1 x2 a) (read x1 x2 :: t_rev)
+| write_gen : forall x1 x2 a t_rev, generates a t_rev -> generates (cons_write x1 x2 a) (write x1 x2 :: t_rev)
+| salloc_gen : forall f x t_rev, generates (f x) t_rev -> generates (cons_salloc f) (salloc x :: t_rev). Print app.
 
-Fixpoint app_abst {width: Z}{BW: Bitwidth width}{word: word.word width}{mem: map.map word byte} (at1 at2 : abstract_trace) :=
-  match at1 with
-  | empty => at2
-  | cons_det e at1' => app_abst at1' 
-  | 
+Fixpoint abstract_app {width: Z}{BW: Bitwidth width}{word: word.word width}{mem: map.map word byte} (a1 a2 : abstract_trace) : abstract_trace :=
+  match a1 with
+  | empty => a2
+  | cons_IO e a1' => cons_IO e (abstract_app a1' a2)
+  | cons_branch b a1' => cons_branch b (abstract_app a1' a2)
+  | cons_read sz a a1' => cons_read sz a (abstract_app a1' a2)
+  | cons_write sz a a1' => cons_write sz a (abstract_app a1' a2)
+  | cons_salloc a1' => cons_salloc (fun w => abstract_app (a1' w) a2)
+  end.
 
-Fixpoint generator' {width: Z}{BW: Bitwidth width}{word: word.word width}{mem: map.map word byte} (t_rev : trace) (abst_so_far : abstract_trace) : abstract_trace :=
+Lemma generates_app {width: Z}{BW: Bitwidth width}{word: word.word width}{mem: map.map word byte} :
+  forall a1 a2 t1 t2,
+  generates a1 t1 -> generates a2 t2 -> generates (abstract_app a1 a2) (t1 ++ t2).
+Proof.
+  intros a1. induction a1; intros a2 t1 t2 H1 H2; inversion H1; subst.
+  - simpl. assumption.
+  - simpl. constructor. auto.
+  - simpl. constructor. auto.
+  - simpl. constructor. auto.
+  - simpl. constructor. auto.
+  - simpl. constructor. auto.
+Qed. 
+
+Fixpoint generator {width: Z}{BW: Bitwidth width}{word: word.word width}{mem: map.map word byte} (t_rev : trace) : abstract_trace :=
   match t_rev with
-  | det e :: t_rev' => cons_det e t_rev'
-  | salloc _ :: t' => 
+  | nil => empty
+  | IO x :: t_rev' => cons_IO x (generator t_rev')
+  | branch x :: t_rev' => cons_branch x (generator t_rev')
+  | read x1 x2 :: t_rev' => cons_read x1 x2 (generator t_rev')
+  | write x1 x2 :: t_rev' => cons_write x1 x2 (generator t_rev')
+  | salloc x :: t_rev' => cons_salloc (fun _ => generator t_rev')
+  end.
 
-(*Inductive traces_same {width: Z}{BW: Bitwidth width}{word: word.word width}{mem: map.map word byte} : trace -> trace -> Prop :=
-| eq_same t1 t2 : t1 = t2 -> traces_same t1 t2
-| nondet_same t1 t2 a1 a2 : (a1 = a2 -> traces_same t1 t2) -> traces_same (app t1 (cons (salloc a1) nil)) (app t2 (cons (salloc a2) nil)).*)
+Lemma generator_generates {width: Z}{BW: Bitwidth width}{word: word.word width}{mem: map.map word byte} (t: trace) :
+  generates (generator t) t.
+Proof.
+  induction t; try constructor. destruct a; cbn [generator]; constructor; assumption. Qed.
+
+
 
 Definition filterio {width: Z}{BW: Bitwidth width}{word: word.word width}{mem: map.map word byte} 
   (t : trace) : io_trace :=
   flat_map (fun e =>
               match e with
-              | det (IO_event i) => cons i nil
+              | IO i => cons i nil
               | _ => nil
               end) t.
                             

@@ -129,27 +129,10 @@ Section WithParameters.
     straightline_stackdealloc.
     seprewrite_in_by (symmetry! @scalar_of_bytes) H8 reflexivity.
     straightline_stackdealloc.
-    repeat straightline. Print trace_alignment.
-    Print traces_same.
-    Ltac new_trace_alignment :=
-      repeat match goal with
-        | t:=_ :: _:_ |- _ => subst t
-        end;
-      repeat match goal with
-        | |- traces_same (salloc _ :: _) _ => idtac "1"; apply nondet_same
-        | |- traces_same (_ :: _) _ => apply eq_same
-        end; 
-      repeat
-        match goal with
-        | H1:filterio _ = _ |- context [ filterio _ ] =>
-            repeat rewrite filterio_cons; repeat rewrite filterio_cons in H1; rewrite H1
-        end;
-      repeat eapply align_trace_app || eapply align_trace_cons || exact eq_refl.
-    new_trace_alignment. Unshelve. 2: {
-    inversion H6.
-    split;
-      new_trace_alignment.
-    try trace_alignment. repeat straightline.
+    repeat straightline. split.
+    - eexists. split. 2: trace_alignment. simpl. rewrite List.rev_app_distr. simpl. repeat constructor. Search generates. rewrite <- List.app_assoc. apply generates_app.
+      1: apply H6. simpl. repeat constructor.
+    - repeat straightline.
   Qed.
   
   Instance spec_of_stacknondet : spec_of "stacknondet" := fun functions => forall m t,
@@ -186,7 +169,6 @@ Section WithParameters.
     repeat straightline.
     set [Byte.byte.of_Z (word.unsigned v0); b0; b1; b2] as ss in *.
     assert (length ss = Z.to_nat 4) by reflexivity.
-    Print straightline_stackdealloc. subst a.
     repeat straightline.
     Tactics.ssplit; eauto.
 

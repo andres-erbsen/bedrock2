@@ -180,13 +180,11 @@ Section WithParameters.
 
       rewrite word.unsigned_of_Z_0, Z.lor_0_l in H5; subst x4 v.
       setoid_rewrite word.unsigned_eqb; setoid_rewrite word.unsigned_of_Z_0.
+      split.
+      { eexists. split; trace_alignment. eapply generator_generates. }
       eexists; ssplit; eauto; try (destr Z.eqb; autoforward with typeclass_instances in E;
         rewrite ?word.unsigned_of_Z_1, ?word.unsigned_of_Z_0; eauto).
-      { instantiate (1 := fun t n y x => branch false :: newtrace x y (Z.to_nat n)).
-        repeat match goal with
-                  | |- traces_same (salloc _ :: _) _ => idtac "1"; apply nondet_same
-                  | |- traces_same (_ :: _) _ => apply eq_same
-                  end; trace_alignment. }
+      
       { rewrite List.flat_map_app.
         replace (filterio t) with ([] ++ filterio t) by reflexivity.
         f_equal. clear. generalize dependent x. generalize dependent y.

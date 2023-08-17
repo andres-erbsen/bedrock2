@@ -272,7 +272,7 @@ Notation "'ctfunc!' name a0 .. an '|' b0 .. bn '/' g0 .. gn '|' h0 .. hn '~>' r0
                                                      WeakestPrecondition.call
                                                        functions name tr mem (cons a0 .. (cons an (cons b0 .. (cons bn nil) ..)) ..)
                                                        (fun tr' mem' rets =>
-                                                          (exists tr'', generates ((appl a0 .. (appl an (appl g0 .. (appl gn f) ..)) ..)) tr'' /\
+                                                          (exists tr'', generates ((appl a0 .. (appl an (appl g0 .. (appl gn f) ..)) ..)) (List.rev tr'') /\
                                                                           tr' = (tr'' ++ tr)%list) /\
                                                             (exists r0,
                                                                 .. (exists rn,
@@ -303,7 +303,7 @@ Notation "'ctfunc!' name a0 .. an '|' '/' '|' h0 .. hn ',' '{' 'requires' tr mem
                                    functions name tr mem (cons a0 .. (cons an nil) ..)
                                    (fun tr' mem' rets =>
                                       (exists tr'',
-                                          generates (appl a0 .. (appl an f) ..) tr'' /\
+                                          generates (appl a0 .. (appl an f) ..) (List.rev tr'') /\
                                             tr' = (tr'' ++ tr)%list) /\
                                             rets = nil /\
                                             post)) ..)) ..))))
@@ -329,7 +329,7 @@ Notation "'ctfunc!' name a0 .. an '|' '/' '|' h0 .. hn '~>' r0 .. rn ',' '{' 're
                                    functions name tr mem (cons a0 .. (cons an nil) ..)
                                    (fun tr' mem' rets =>
                                       (exists tr'',
-                                          generates (appl a0 .. (appl an f) ..) tr'' /\
+                                          generates (appl a0 .. (appl an f) ..) (List.rev tr'') /\
                                             tr' = (tr'' ++ tr)%list) /\
                                         (exists r0,
                                             .. (exists rn,     
@@ -356,7 +356,7 @@ Notation "'ctfunc!' name '|' b0 .. bn '/' '|' '~>' r0 .. rn ',' '{' 'requires' t
                          functions name tr mem (cons b0 .. (cons bn nil) ..)
                          (fun tr' mem' rets =>
                             (exists tr'',
-                                generates f tr'' /\
+                                generates f (List.rev tr'') /\
                                   tr' = (tr'' ++ tr)%list) /\
                               (exists r0,
                                   .. (exists rn,
