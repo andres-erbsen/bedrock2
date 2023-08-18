@@ -87,6 +87,21 @@ Section FlatToRiscv1.
     | access_size.word => if bitwidth iset =? 32 then Lw else Ld
     end.
 
+  Definition leak_Lbu x := ILeakage (Lbu_leakage x).
+  Definition leak_Lhu x := ILeakage (Lhu_leakage x).
+  Definition leak_Lw x := ILeakage (Lw_leakage x).
+  Definition leak_Lwu x := I64Leakage (Lwu_leakage x).
+  Definition leak_Ld x := I64Leakage (Ld_leakage x).
+
+  Definition leak_load(sz: access_size) :
+    Z -> LeakageEvent :=
+    match sz with
+    | access_size.one => leak_Lbu
+    | access_size.two => leak_Lhu
+    | access_size.four => if bitwidth iset =? 32 then leak_Lw else leak_Lwu
+    | access_size.word => if bitwidth iset =? 32 then leak_Lw else leak_Ld
+    end.
+
   Definition compile_store(sz: access_size):
     Z -> Z -> Z -> Instruction :=
     match sz with
@@ -94,6 +109,20 @@ Section FlatToRiscv1.
     | access_size.two => Sh
     | access_size.four => Sw
     | access_size.word => if bitwidth iset =? 32 then Sw else Sd
+    end.
+
+  Definition leak_Sb x := ILeakage (Sb_leakage x).
+  Definition leak_Sh x := ILeakage (Sh_leakage x).
+  Definition leak_Sw x := ILeakage (Sw_leakage x).
+  Definition leak_Sd x := I64Leakage (Sd_leakage x).
+
+  Definition leak_store(sz: access_size) :
+    Z -> LeakageEvent :=
+    match sz with
+    | access_size.one => leak_Sb
+    | access_size.two => leak_Sh
+    | access_size.four => leak_Sw
+    | access_size.word => if bitwidth iset =? 32 then leak_Sw else leak_Sd
     end.
 
   Definition compile_op_imm(rd: Z)(op: Syntax.bopname)(rs1: Z)(c2: Z): list Instruction :=
@@ -108,6 +137,30 @@ Section FlatToRiscv1.
     | Syntax.bopname.lts => [[Slti rd rs1 c2]]
     | Syntax.bopname.ltu => [[Sltiu rd rs1 c2]]
     | _ => [InvalidInstruction (-1)]
+    end.
+
+  Definition leak_Addi := ILeakage Addi_leakage.
+  Definition leak_Andi := ILeakage Andi_leakage.
+  Definition leak_Ori := ILeakage Ori_leakage.
+  Definition leak_Xori := ILeakage Xori_leakage.
+  Definition leak_Srli := ILeakage Srli_leakage.
+  Definition leak_Slli := ILeakage Slli_leakage.
+  Definition leak_Srai := ILeakage Srai_leakage.
+  Definition leak_Slti := ILeakage Slti_leakage.
+  Definition leak_Sltiu := ILeakage Sltiu_leakage.
+
+  Definition leak_op_imm(op: Syntax.bopname) : option LeakageEvent :=
+    match op with
+    | Syntax.bopname.add => Some leak_Addi
+    | Syntax.bopname.and => Some leak_Andi
+    | Syntax.bopname.or  => Some leak_Ori
+    | Syntax.bopname.xor => Some leak_Xori
+    | Syntax.bopname.sru => Some leak_Srli
+    | Syntax.bopname.slu => Some leak_Slli
+    | Syntax.bopname.srs => Some leak_Srai
+    | Syntax.bopname.lts => Some leak_Slti
+    | Syntax.bopname.ltu => Some leak_Sltiu
+    | _ => None (* ?? why are there invalid instructions again - doesn't compilation just fail? *)
     end.
 
   Definition compile_op_register(rd: Z)(op: Syntax.bopname)(rs1 rs2: Z): list Instruction :=
@@ -128,14 +181,60 @@ Section FlatToRiscv1.
     | Syntax.bopname.ltu => [[Sltu rd rs1 rs2]]
     | Syntax.bopname.eq  => [[Sub rd rs1 rs2; Seqz rd rd]]
     end.
+
+  Definition leak_Add := ILeakage Add_leakage.
+  Definition leak_Sub := ILeakage Sub_leakage.
+  Definition leak_Mul := MLeakage Mul_leakage.
+  Definition leak_Mulhu := MLeakage Mulhu_leakage.
+  Definition leak_Divu := MLeakage Divu_leakage.
+  Definition leak_Remu := MLeakage Remu_leakage.
+  Definition leak_And := ILeakage And_leakage.
+  Definition leak_Or := ILeakage Or_leakage.
+  Definition leak_Xor := ILeakage Xor_leakage.
+  Definition leak_Srl := ILeakage Srl_leakage.
+  Definition leak_Sll := ILeakage Sll_leakage.
+  Definition leak_Sra := ILeakage Sra_leakage.
+  Definition leak_Slt := ILeakage Slt_leakage.
+  Definition leak_Sltu := ILeakage Sltu_leakage.
+  Print Seqz. (* Seqz = fun rd rs : Z => Sltiu rd rs 1 : Z -> Z -> InstructionI *)
+  Definition leak_Seqz := ILeakage Sltiu_leakage.
+  
+  Definition leak_op_register (op: Syntax.bopname) : list LeakageEvent :=
+    match op with
+    | Syntax.bopname.add => [ leak_Add ]
+    | Syntax.bopname.sub => [ leak_Sub ]
+    | Syntax.bopname.mul => [ leak_Mul ]
+    | Syntax.bopname.mulhuu => [ leak_Mulhu ]
+    | Syntax.bopname.divu => [ leak_Divu ] 
+    | Syntax.bopname.remu => [ leak_Remu ]
+    | Syntax.bopname.and => [ leak_And ]
+    | Syntax.bopname.or  => [ leak_Or ]
+    | Syntax.bopname.xor => [ leak_Xor ]
+    | Syntax.bopname.sru => [ leak_Srl ]
+    | Syntax.bopname.slu => [ leak_Sll ]
+    | Syntax.bopname.srs => [ leak_Sra ]
+    | Syntax.bopname.lts => [ leak_Slt ]
+    | Syntax.bopname.ltu => [ leak_Sltu ]
+    | Syntax.bopname.eq  => [ leak_Sub ; leak_Seqz ]
+    end.
+  
   Definition compile_op(rd: Z)(op: Syntax.bopname)(op1 : Z)(op2: operand): list Instruction :=
     match  op2 with
     | Var v2 => compile_op_register rd op op1 v2
     | Const c2 => compile_op_imm rd op op1 c2
     end.
 
+  Definition leak_op (op : Syntax.bopname) (op2: @operand Z) : option (list LeakageEvent) :=
+    match op2 with
+    | Var _ => Some (leak_op_register op)
+    | Const _ => option_map (fun x => [x]) (leak_op_imm op)
+    end.
+
   Definition compile_lit_12bit(rd: Z)(v: Z): list Instruction :=
     [[ Addi rd Register0 (signExtend 12 v) ]].
+
+  Definition leak_lit_12bit : list LeakageEvent :=
+    [ leak_Addi ].
 
   (* On a 64bit machine, loading a constant -2^31 <= v < 2^31 is not always possible with
      a Lui followed by an Addi:
@@ -160,6 +259,11 @@ Section FlatToRiscv1.
     let hi := Z.lxor (signExtend 32 v) lo in
     [[ Lui rd hi ; Xori rd rd lo ]].
 
+  Definition leak_Lui := ILeakage Lui_leakage.
+
+  Definition leak_lit_32bit : list LeakageEvent :=
+    [ leak_Lui ; leak_Xori ].
+
   Definition compile_lit_64bit(rd: Z)(v: Z): list Instruction :=
     let v0 := bitSlice v  0 11 in
     let v1 := bitSlice v 11 22 in
@@ -173,12 +277,28 @@ Section FlatToRiscv1.
        Slli rd rd 11 ;
        Xori rd rd v0 ]].
 
+  Definition leak_lit_64bit : list LeakageEvent :=
+    leak_lit_32bit ++
+      [ leak_Slli ;
+        leak_Xori ;
+        leak_Slli ;
+        leak_Xori ;
+        leak_Slli ;
+        leak_Xori ].
+
   Definition compile_lit(rd: Z)(v: Z): list Instruction :=
     if ((-2^11 <=? v)%Z && (v <? 2^11)%Z)%bool then
       compile_lit_12bit rd v
     else if ((bitwidth iset =? 32)%Z || (- 2 ^ 31 <=? v)%Z && (v <? 2 ^ 31)%Z)%bool then
       compile_lit_32bit rd v
     else compile_lit_64bit rd v.
+
+  Definition leak_lit(v: Z) : list LeakageEvent :=
+    if ((-2^11 <=? v)%Z && (v <? 2^11)%Z)%bool then
+      leak_lit_12bit
+    else if ((bitwidth iset =? 32)%Z || (- 2 ^ 31 <=? v)%Z && (v <? 2 ^ 31)%Z)%bool then
+      leak_lit_32bit
+    else leak_lit_64bit.
 
   (* Inverts the branch condition. *)
   Definition compile_bcond_by_inverting
@@ -195,6 +315,29 @@ Section FlatToRiscv1.
         end
     | CondNez x =>
         Beq x Register0 amt
+    end.
+
+  Definition leak_Bne x := ILeakage (Bne_leakage x).
+  Definition leak_Beq x := ILeakage (Beq_leakage x).
+  Definition leak_Bge x := ILeakage (Bge_leakage x).
+  Definition leak_Blt x := ILeakage (Blt_leakage x).
+  Definition leak_Bgeu x := ILeakage (Bgeu_leakage x).
+  Definition leak_Bltu x := ILeakage (Bltu_leakage x).
+
+  Definition leak_bcond_by_inverting
+    (cond: bcond Z) : bool -> LeakageEvent :=
+    match cond with
+    | CondBinary op _ _ =>
+        match op with
+        | BEq  => leak_Bne
+        | BNe  => leak_Beq
+        | BLt  => leak_Bge
+        | BGe  => leak_Blt
+        | BLtu => leak_Bgeu
+        | BGeu => leak_Bltu
+        end
+    | CondNez _ =>
+        leak_Beq
     end.
 
   Local Notation bytes_per_word := (Memory.bytes_per_word (bitwidth iset)).
@@ -245,6 +388,66 @@ Section FlatToRiscv1.
   Context {env: map.map String.string (list Z * list Z * stmt Z)}.
   Context {pos_map: map.map String.string Z}.
   Context (compile_ext_call: pos_map -> Z -> Z -> stmt Z -> list Instruction).
+
+  Section WithOtherEnv.
+    Variable e: env. Print LeakageEvent.
+
+    Definition leak_Jal := ILeakage Jal_leakage.
+
+    Fixpoint transform_trace
+      (* maps a source-level abstract trace to a target-level trace.
+         executes s, guided by t, popping events off of t and adding events to l as it goes.
+         returns the final leakage l, along with the part of t that remains after we finish
+                 executing s.
+         may (but will not necessarily) return None if input is garbage.
+         *)
+      (magicFuel : nat) (s : stmt Z) (sp : Z) (stackoffset : Z) (t : Semantics.abstract_trace) (l : list LeakageEvent) :
+      option (Semantics.abstract_trace * list LeakageEvent) :=
+      
+      match magicFuel with
+      | O => None
+      | S magicFuel' => let transform_trace := transform_trace magicFuel' in
+                        match s with
+                        | SLoad _ _ _ _ =>
+                            match t with
+                            | cons_read sz a t' => Some (t', leak_load sz a :: l)
+                            | _ => None
+                            end
+                        | SStore _ _ _ _ =>
+                            match t with
+                            | cons_write sz a t' => Some (t', leak_store sz a :: l)
+                            | _ => None
+                            end
+                        | SInlinetable sz x t i =>
+                            None (* TODO: what is this?  why are there invalid instructions? *)
+                        | SStackalloc _ n body =>
+                            match t with
+                            | cons_salloc f =>
+                                let t' := f (sp + stackoffset - n) in
+                                let l' := leak_Addi :: l in
+                                transform_trace body sp (stackoffset - n) t' l'
+                            | _ => None
+                            end
+                        | SLit _ v => Some (t, leak_lit v ++ l)
+                        | SOp _ op _ operand2 =>
+                            match leak_op op operand2 with
+                            | Some l' => Some (t, l' ++ l)
+                            | None => None
+                            end
+                        | SSet _ _ => Some (t, leak_Add :: l)
+                        | SIf cond bThen bElse =>
+                            match t with
+                            | cons_branch b t' =>
+                                let l' := leak_bcond_by_inverting cond (negb b) in
+                                match b with
+                                | true =>
+                                    match transform_trace bThen sp stackoffset t' l' with
+                                    | Some (t'', l'') => Some (t'', leak_Jal :: l'')
+                                    | None => None
+                                    end
+                                | false => transform_trace bElse sp stackoffset t' l'
+                                end
+                            | _ => None
 
   Section WithEnv.
     Variable e: pos_map.

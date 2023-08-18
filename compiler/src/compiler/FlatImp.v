@@ -275,7 +275,6 @@ Module exec.
     Context {mem: map.map word byte} {locals: map.map varname word}
             {env: map.map String.string (list varname * list varname * stmt varname)}.
     Context {ext_spec: ExtSpec}.
-    Context {pick_sp: PickSp}.
     Context {varname_eq_spec: EqDecider varname_eqb}
             {word_ok: word.ok word}
             {mem_ok: map.ok mem}
@@ -356,11 +355,10 @@ Module exec.
         exec (SInlinetable sz x table i) t m l mc post
     | stackalloc: forall t mSmall l mc x n body post,
         n mod (bytes_per_word width) = 0 ->
-        (forall mStack mCombined,
-            let a := pick_sp (filterstack t) n in
+        (forall a mStack mCombined,
             anybytes a n mStack ->
             map.split mCombined mSmall mStack ->
-            exec body (salloc :: t) mCombined (map.put l x a) (addMetricLoads 1 (addMetricInstructions 1 mc))
+            exec body (salloc a :: t) mCombined (map.put l x a) (addMetricLoads 1 (addMetricInstructions 1 mc))
              (fun t' mCombined' l' mc' =>
               exists mSmall' mStack',
                 anybytes a n mStack' /\
@@ -620,7 +618,6 @@ Section FlatImp2.
   Context {mem: map.map word byte} {locals: map.map varname word}
           {env: map.map String.string (list varname * list varname * stmt varname)}.
   Context {ext_spec: ExtSpec}.
-  Context {pick_sp: PickSp}.
   Context {varname_eq_spec: EqDecider varname_eqb}
           {word_ok: word.ok word}
           {mem_ok: map.ok mem}
