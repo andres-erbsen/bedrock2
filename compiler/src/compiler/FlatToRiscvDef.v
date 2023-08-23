@@ -412,13 +412,6 @@ Section FlatToRiscv1.
     Definition leak_Jal := ILeakage Jal_leakage.
     Definition leak_Jalr := ILeakage Jalr_leakage. Check @map.get.
 
-    Definition thing (magicFuel : nat) (s : stmt Z) (sp_val : Z) (stackoffset : Z) (t : Semantics.abstract_trace) fname :=
-    match map.get e fname with
-    | Some (params, rets, fbody) => 5
-    | None => 5
-    end. Check SCall.
-    Variable e': pos_map.
-
     Fixpoint transform_trace
       (* maps a source-level abstract trace to a target-level trace.
          executes s, guided by t, popping events off of t and adding events to l as it goes.
