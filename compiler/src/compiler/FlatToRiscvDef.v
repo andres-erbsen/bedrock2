@@ -347,6 +347,13 @@ Section FlatToRiscv1.
     | nil => nil
     | r :: regs => compile_store access_size.word sp r offset
                    :: (save_regs regs (offset + bytes_per_word))
+    end. Print leak_store. Print compile_store.
+
+  Fixpoint leak_save_regs(sp_val: Z)(regs: list Z)(offset: Z): list LeakageEvent :=
+    match regs with
+    | nil => nil
+    | r :: regs' => leak_store access_size.word (sp_val + offset)
+                      :: leak_save_regs sp_val regs' (offset + bytes_per_word)
     end.
 
   Fixpoint load_regs(regs: list Z)(offset: Z): list Instruction :=
@@ -354,6 +361,13 @@ Section FlatToRiscv1.
     | nil => nil
     | r :: regs => compile_load access_size.word r sp offset
                    :: (load_regs regs (offset + bytes_per_word))
+    end.
+
+  Fixpoint leak_load_regs(sp_val: Z)(regs: list Z)(offset: Z): list LeakageEvent :=
+    match regs with
+    | nil => nil
+    | r :: regs' => leak_load access_size.word (sp_val + offset)
+                      :: leak_load_regs sp_val regs' (offset + bytes_per_word)
     end.
 
   (* number of words of stack allocation space needed within current frame *)
@@ -386,13 +400,24 @@ Section FlatToRiscv1.
      position independent code. *)
 
   Context {env: map.map String.string (list Z * list Z * stmt Z)}.
+  Check Semantics.abstract_trace.
+  Context {width: Z}{BW: Bitwidth width}{word: word.word width}{mem: map.map word byte}.
   Context {pos_map: map.map String.string Z}.
   Context (compile_ext_call: pos_map -> Z -> Z -> stmt Z -> list Instruction).
+  Context (leak_ext_call: env -> Z (*sp_val*) -> Z (*stackoffset*) -> stmt Z -> list LeakageEvent).
 
   Section WithOtherEnv.
     Variable e: env. Print LeakageEvent.
 
     Definition leak_Jal := ILeakage Jal_leakage.
+    Definition leak_Jalr := ILeakage Jalr_leakage. Check @map.get.
+
+    Definition thing (magicFuel : nat) (s : stmt Z) (sp_val : Z) (stackoffset : Z) (t : Semantics.abstract_trace) fname :=
+    match map.get e fname with
+    | Some (params, rets, fbody) => 5
+    | None => 5
+    end. Check SCall.
+    Variable e': pos_map.
 
     Fixpoint transform_trace
       (* maps a source-level abstract trace to a target-level trace.
@@ -401,7 +426,7 @@ Section FlatToRiscv1.
                  executing s.
          may (but will not necessarily) return None if input is garbage.
          *)
-      (magicFuel : nat) (s : stmt Z) (sp : Z) (stackoffset : Z) (t : Semantics.abstract_trace) (l : list LeakageEvent) :
+      (magicFuel : nat) (s : stmt Z) (sp_val : Z) (stackoffset : Z) (t : Semantics.abstract_trace) :
       option (Semantics.abstract_trace * list LeakageEvent) :=
       
       match magicFuel with
@@ -410,44 +435,116 @@ Section FlatToRiscv1.
                         match s with
                         | SLoad _ _ _ _ =>
                             match t with
-                            | cons_read sz a t' => Some (t', leak_load sz a :: l)
+                            | Semantics.cons_read sz a t' => Some (t', [ leak_load sz (word.unsigned a) ])
                             | _ => None
                             end
                         | SStore _ _ _ _ =>
                             match t with
-                            | cons_write sz a t' => Some (t', leak_store sz a :: l)
+                            | Semantics.cons_write sz a t' => Some (t', [ leak_store sz (word.unsigned a) ])
                             | _ => None
                             end
                         | SInlinetable sz x t i =>
                             None (* TODO: what is this?  why are there invalid instructions? *)
                         | SStackalloc _ n body =>
                             match t with
-                            | cons_salloc f =>
-                                let t' := f (sp + stackoffset - n) in
-                                let l' := leak_Addi :: l in
-                                transform_trace body sp (stackoffset - n) t' l'
-                            | _ => None
-                            end
-                        | SLit _ v => Some (t, leak_lit v ++ l)
-                        | SOp _ op _ operand2 =>
-                            match leak_op op operand2 with
-                            | Some l' => Some (t, l' ++ l)
-                            | None => None
-                            end
-                        | SSet _ _ => Some (t, leak_Add :: l)
-                        | SIf cond bThen bElse =>
-                            match t with
-                            | cons_branch b t' =>
-                                let l' := leak_bcond_by_inverting cond (negb b) in
-                                match b with
-                                | true =>
-                                    match transform_trace bThen sp stackoffset t' l' with
-                                    | Some (t'', l'') => Some (t'', leak_Jal :: l'')
-                                    | None => None
-                                    end
-                                | false => transform_trace bElse sp stackoffset t' l'
+                            | Semantics.cons_salloc f =>
+                                let t' := f (word.of_Z (sp_val + stackoffset - n)) in
+                                match transform_trace body sp_val (stackoffset - n) t' with
+                                | Some (t'', l) => Some (t'', l ++ [ leak_Addi ])
+                                | None => None
                                 end
                             | _ => None
+                            end
+                        | SLit _ v => Some (t, leak_lit v)
+                        | SOp _ op _ operand2 =>
+                            match leak_op op operand2 with
+                            | Some l' => Some (t, l')
+                            | None => None
+                            end
+                        | SSet _ _ => Some (t, [ leak_Add ])
+                        | SIf cond bThen bElse =>
+                            match t with
+                            | Semantics.cons_branch b t' =>
+                                let lCond := [ leak_bcond_by_inverting cond (negb b) ] in
+                                match b with
+                                | true =>
+                                    match transform_trace bThen sp_val stackoffset t' with
+                                    | Some (t'', lThen) => Some (t'', lCond ++ lThen ++ [ leak_Jal ])
+                                    | None => None
+                                    end
+                                | false =>
+                                    match transform_trace bElse sp_val stackoffset t' with
+                                    | Some (t'', lElse) => Some (t'', lCond ++ lElse)
+                                    | None => None
+                                    end
+                                end
+                            | _ => None
+                            end
+                        | SLoop body1 cond body2 =>
+                            match transform_trace body1 sp_val stackoffset t with
+                            | Some (t', lBody1) =>
+                                match t' with
+                                | Semantics.cons_branch b t'' =>
+                                    let lCond := [ leak_bcond_by_inverting cond (negb b) ] in
+                                    match b with
+                                    | true =>
+                                        match transform_trace body2 sp_val stackoffset t'' with
+                                        | Some (t''', lBody2) =>
+                                            match transform_trace s sp_val stackoffset t''' with
+                                            | Some (t'''', lLoop) => Some (t''', lBody1 ++ lCond ++ lBody2 ++ [ leak_Jal ])
+                                            | None => None
+                                            end
+                                        | None => None
+                                        end
+                                    | false => Some (t'', lBody1 ++ lCond)
+                                    end
+                                | _ => None
+                                end
+                            | None => None
+                            end
+                        | SSeq s1 s2 =>
+                            match transform_trace s1 sp_val stackoffset t with
+                            | Some (t', l1) =>
+                                match transform_trace s2 sp_val stackoffset t' with
+                                | Some (t'', l2) => Some (t'', l1 ++ l2)
+                                | None => None
+                                end
+                            | None => None
+                            end
+                        | SSkip => Some (t, nil)
+                        | SCall resvars fname argvars =>
+                            match @map.get _ _ env e fname with
+                            | Some (params, rets, fbody) =>
+                                let need_to_save := list_diff Z.eqb (modVars_as_list Z.eqb fbody) resvars in
+                                let scratchwords := stackalloc_words fbody in
+                                let framesize := bytes_per_word *
+                                                   (Z.of_nat (1 + length need_to_save) + scratchwords) in
+                                let sp_val' := sp - framesize in
+                                let l' :=
+                                  [ leak_Jal ] ++ (* jump to compiled function *)
+                                    [ leak_Addi ] ++ (* Addi sp sp (-framesize) *)
+                                    [ leak_store access_size.word
+                                        (sp_val' + bytes_per_word * (Z.of_nat (length need_to_save) + scratchwords)) ] ++
+                                    leak_save_regs sp_val' need_to_save (bytes_per_word * scratchwords) in
+                                match transform_trace fbody sp_val' (bytes_per_word * scratchwords) t
+                                (*    ^nonterminating :( *) with
+                                | Some (t'', lBody) =>
+                                    let l'' :=
+                                      l' ++
+                                        leak_load_regs sp_val' need_to_save (bytes_per_word * scratchwords) ++
+                                        [ leak_load access_size.word
+                                            (sp_val' + bytes_per_word * (Z.of_nat (length need_to_save) + scratchwords)) ] ++
+                                        [ leak_Addi ] ++ (* Addi sp sp framesize *)
+                                        [ leak_Jalr ] in
+                                    Some (t'', l'')
+                                | None => None
+                                end
+                            | None => None
+                            end
+                        | SInteract _ _ _ => Some (t, leak_ext_call e sp_val stackoffset s)
+                        end
+      end.
+  End WithOtherEnv.
 
   Section WithEnv.
     Variable e: pos_map.
