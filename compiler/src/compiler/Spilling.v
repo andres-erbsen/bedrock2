@@ -171,41 +171,54 @@ Section Spilling.
   Fixpoint transform_trace
       (* maps the abstract trace of an unspilled program to the abstract trace of the spilled program.
          executes s, guided by t, popping events off of t and adding events to st as it goes.
-         returns the final abstract trace st, along with the part of t that remains after we finish
-                 executing s.
-         may (but will not necessarily) return None if input is garbage.
+         returns the final abstract trace st.
+         may (but will not necessarily) return empty if input is garbage.
          *)
-      (magicFuel : nat) (fpval: word) (sstack : list stmt) (t : Semantics.abstract_trace) (st : Semantics.abstract_trace) :
-      option (Semantics.abstract_trace * Semantics.abstract_trace) :=
+      (magicFuel : nat) (fpval: word) (sstack : list stmt) (t : Semantics.abstract_trace) :
+      Semantics.abstract_trace :=
       match magicFuel with
-      | O => None
+      | O => empty
       | S magicFuel' => let transform_trace := transform_trace magicFuel' fpval in
-                        match s with
-                        | SLoad sz x y o =>
-                            match t with
-                            | cons_read _(*sz*) a t' =>
-                                let st' := abstract_app st (generator (leak_save_ires_reg fpval x ++ [read sz a] ++ leak_load_iarg_reg fpval y)) in
-                                match sstack with
-                                | nil => Some (t', st')
-                                | next :: sstack' => transform_trace sstack' t' st'
+                        match sstack with
+                        | nil => empty (*this is not garbage*)
+                        | s :: sstack' =>
+                            match s with
+                            | SLoad sz x y o =>
+                                match t with
+                                | cons_read _(*sz*) a t' =>
+                                    abstract_app
+                                      (generator (leak_save_ires_reg fpval x ++ [read sz a] ++ leak_load_iarg_reg fpval y))
+                                      (transform_trace sstack' t')
+                                | _ => empty
                                 end
-                            | _ => None
-                            end
-                        | SStore sz x y 0 =>
-                            match t with
-                            | cons_write _(*sz*) a t' =>
-                                Some (t', generator ([write sz a] ++ leak_load_iarg_reg fpval y ++ leak_load_iarg_reg fpval x))
-                            | _ => None
-                            end
-                        | SInlinetable _ x _ i =>
-                            Some (t, generator (leak_save_ires_reg fpval x ++ leak_load_iarg_reg fpval i))
-                        | SStackalloc x _ body =>
-                            match t with
-                            | cons_salloc f =>
-                                cons_salloc (fun a =>
-                            Some (t, cons_salloc (fun a => abstract_app
-                                                             (generator (leak_save_ires_reg fpval x))
-                                                             (transform_trace
+                            | SStore sz x y o =>
+                                match t with
+                                | cons_write _(*sz*) a t' =>
+                                    abstract_app
+                                      (generator ([write sz a] ++ leak_load_iarg_reg fpval y ++ leak_load_iarg_reg fpval x))
+                                      (transform_trace sstack' t')
+                                | _ => empty
+                                end
+                            | SInlinetable _ x _ i =>
+                                abstract_app
+                                  (generator (leak_save_ires_reg fpval x ++ leak_load_iarg_reg fpval i))
+                                  (transform_trace sstack' t)
+                            | SStackalloc x _ body =>
+                                match t with
+                                | cons_salloc f =>
+                                    cons_salloc (fun a =>
+                                                   let t' := f a in
+                                                   abstract_app
+                                                     (generator (leak_save_ires_reg fpval x))
+                                                     (transform_trace (body :: sstack') t'))
+                                | _ => empty
+                                end
+                            | SLit x _ =>
+                                abstract_app
+                                  (generator (leak_save_ires_reg fpval x))
+                                  (transform_trace sstack' t)
+                            | _ => empty
+                            end    
                         end
       end.
 
