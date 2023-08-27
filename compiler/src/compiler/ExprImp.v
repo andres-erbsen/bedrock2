@@ -22,7 +22,6 @@ Section ExprImp1.
   Context {locals: map.map String.string word}.
   Context {env: map.map String.string (list String.string * list String.string * cmd)}.
   Context {ext_spec: ExtSpec}.
-  Context {pick_sp: PickSp}.
 
   Notation var := String.string (only parsing).
   Notation func := String.string (only parsing).
@@ -392,7 +391,6 @@ Section ExprImp2.
   Context {locals_ok: map.ok locals}.
   Context {mem_ok: map.ok mem}.
   Context {ext_spec_ok: ext_spec.ok ext_spec}.
-  Context {pick_sp: PickSp}.
 
   Ltac state_calc := map_solver locals_ok.
   Ltac set_solver := set_solver_generic String.string.

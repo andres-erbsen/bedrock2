@@ -28,7 +28,6 @@ Section FlattenExpr1.
           {ExprImp_env: map.map string (list string * list string * cmd)}
           {FlatImp_env: map.map string (list string * list string * FlatImp.stmt string)}
           {ext_spec: ExtSpec}
-          {pick_sp: PickSp}
           {NGstate: Type}
           {NG: NameGen String.string NGstate}
           {locals_ok: map.ok locals}
@@ -392,7 +391,7 @@ Section FlattenExpr1.
       eapply @FlatImp.exec.seq.
       + eapply IHe; try eassumption. maps.
       + intros. simpl in *. simp.
-        eapply @FlatImp.exec.load; t_safe; rewrite ?word.add_0_r; try eassumption; solve_MetricLog.
+        eapply @FlatImp.exec.load; t_safe; rewrite ?word.add_0_r; try eassumption; try reflexivity; solve_MetricLog.
 
     - (* expr.inlinetable *)
       repeat match goal with
@@ -747,7 +746,7 @@ Section FlattenExpr1.
       eapply @FlatImp.exec.stackalloc. 1: eassumption.
       intros. rename H2 into IHexec.
       eapply @FlatImp.exec.weaken.
-      { eapply IHexec; try reflexivity; try eassumption; try maps. subst a. maps. }
+      { eapply IHexec; try reflexivity; try eassumption; maps. }
       { intros. simpl in *. simp. do 2 eexists. ssplit; try eassumption.
         do 2 eexists. ssplit; try eassumption; try solve_MetricLog. maps. }
 
