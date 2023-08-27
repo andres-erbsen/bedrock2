@@ -118,7 +118,13 @@ Section Spilling.
     match dests with
     | nil => SSkip
     | x :: xs => set_var_to_reg x range_start;; set_vars_to_reg_range xs (range_start+1)
-    end. Print Semantics.abstract_app.
+    end.
+
+  Fixpoint leak_set_vars_to_reg_range(fpval: word) (dests: list Z): Semantics.trace :=
+    match dests with
+    | nil => nil
+    | x :: xs => leak_set_vars_to_reg_range fpval xs ++ leak_set_var_to_reg fpval x
+    end.
 
   Fixpoint set_vars_to_reg_range_tailrec(do_first: stmt)(dests: list Z)(range_start: Z): stmt :=
     match dests with
@@ -127,10 +133,26 @@ Section Spilling.
                    (do_first;; set_var_to_reg x range_start) xs (range_start+1)
     end.
 
+  (*very unlikely that this is good for anything*)
+  Fixpoint leak_set_vars_to_reg_range_tailrec(do_first: Semantics.trace)(fpval: word)(dests: list Z) : Semantics.trace :=
+    match dests with
+    | nil => do_first
+    | x :: xs => leak_set_vars_to_reg_range_tailrec
+                   (do_first ++ leak_set_var_to_reg fpval x) fpval xs
+    end.
+
   Definition prepare_bcond(c: bcond Z): stmt :=
     match c with
     | CondBinary _ x y => load_iarg_reg 1 x;; load_iarg_reg 2 y
     | CondNez x => load_iarg_reg 1 x
+    end.
+  Print load_iarg_reg. (* fun i r : Z => ... *)
+  Print leak_load_iarg_reg. (* fun (fpval : word) (r : Z) => ... *)
+
+  Definition leak_prepare_bcond(fpval: word) (c: bcond Z): Semantics.trace :=
+    match c with
+    | CondBinary _ x y => leak_load_iarg_reg fpval y ++ leak_load_iarg_reg fpval x
+    | CondNez x => leak_load_iarg_reg fpval x
     end.
 
   Definition spill_bcond(c: bcond Z): bcond Z :=
@@ -139,7 +161,53 @@ Section Spilling.
     | CondNez x => CondNez (iarg_reg 1 x)
     end.
 
-  Print load_iarg_reg.
+  Definition leak_spill_bcond: Semantics.trace :=
+    nil.
+  Import Semantics. Check cons_read.
+
+  (*TODO: remove sz from source-level read/writes. it's useless, we already know it from branching 
+    information. similarly, we could replace separate read/writes with just one rw constructor. 
+    maybe that's too much though. we could be sillier yet and say that every element of the trace is an integer (1,0 for branches)*) Print save_ires_reg. Print leak_load_iarg_reg. Print load_iarg_reg. Print ires_reg. Print abstract_app.
+  Fixpoint transform_trace
+      (* maps the abstract trace of an unspilled program to the abstract trace of the spilled program.
+         executes s, guided by t, popping events off of t and adding events to st as it goes.
+         returns the final abstract trace st, along with the part of t that remains after we finish
+                 executing s.
+         may (but will not necessarily) return None if input is garbage.
+         *)
+      (magicFuel : nat) (fpval: word) (sstack : list stmt) (t : Semantics.abstract_trace) (st : Semantics.abstract_trace) :
+      option (Semantics.abstract_trace * Semantics.abstract_trace) :=
+      match magicFuel with
+      | O => None
+      | S magicFuel' => let transform_trace := transform_trace magicFuel' fpval in
+                        match s with
+                        | SLoad sz x y o =>
+                            match t with
+                            | cons_read _(*sz*) a t' =>
+                                let st' := abstract_app st (generator (leak_save_ires_reg fpval x ++ [read sz a] ++ leak_load_iarg_reg fpval y)) in
+                                match sstack with
+                                | nil => Some (t', st')
+                                | next :: sstack' => transform_trace sstack' t' st'
+                                end
+                            | _ => None
+                            end
+                        | SStore sz x y 0 =>
+                            match t with
+                            | cons_write _(*sz*) a t' =>
+                                Some (t', generator ([write sz a] ++ leak_load_iarg_reg fpval y ++ leak_load_iarg_reg fpval x))
+                            | _ => None
+                            end
+                        | SInlinetable _ x _ i =>
+                            Some (t, generator (leak_save_ires_reg fpval x ++ leak_load_iarg_reg fpval i))
+                        | SStackalloc x _ body =>
+                            match t with
+                            | cons_salloc f =>
+                                cons_salloc (fun a =>
+                            Some (t, cons_salloc (fun a => abstract_app
+                                                             (generator (leak_save_ires_reg fpval x))
+                                                             (transform_trace
+                        end
+      end.
 
   Fixpoint spill_stmt(s: stmt): stmt :=
     match s with
@@ -536,7 +604,7 @@ Section Spilling.
       related maxvar frame fpval t1 m1 l1 t2 m2 l2 ->
       fp < r <= maxvar /\ (r < a0 \/ a7 < r) ->
       map.get l1 r = Some v ->
-      post (if 32 <=? r then Semantics.read Syntax.access_size.word fpval :: t1 else t1) m1 l1 mc1 ->
+      post t1 m1 l1 mc1 ->
       exec e2 (load_iarg_reg i r) t2 m2 l2 mc2
            (fun t2' m2' l2' mc2' => exists t1' m1' l1' mc1',
                 related maxvar frame fpval t1' m1' l1' t2' m2' l2' /\ post t1' m1' l1' mc1').
@@ -587,8 +655,9 @@ Section Spilling.
       fp < r <= maxvar /\ (r < a0 \/ a7 < r) ->
       map.get l1 r = Some v ->
       exec e2 (load_iarg_reg i r) t2 m2 l2 mc2 (fun t2' m2' l2' mc2' =>
-        t2' = (if 32 <=? r then Semantics.read Syntax.access_size.word fpval :: t2 else t2) /\ m2' = m2 /\ l2' = map.put l2 (iarg_reg i r) v /\
-        related maxvar frame fpval (if 32 <=? r then Semantics.read Syntax.access_size.word fpval :: t1 else t1) m1 l1 t2' m2' l2').
+      t2' = (if 32 <=? r then Semantics.read Syntax.access_size.word fpval :: t2 else t2)
+      /\ m2' = m2 /\ l2' = map.put l2 (iarg_reg i r) v /\
+        related maxvar frame fpval t1 m1 l1 t2' m2' l2').
   Proof.
     intros.
     unfold load_iarg_reg, stack_loc, iarg_reg, related in *. fwd.
@@ -629,7 +698,7 @@ Section Spilling.
      So we request the `related` that held *before* SOp, i.e. the one where the result is not
      yet in l1 and l2. *)
   Lemma save_ires_reg_correct: forall e t1 t2 m1 m2 l1 l2 mc1 mc2 x v maxvar frame post fpval,
-      post (if 32 <=? x then Semantics.write Syntax.access_size.word fpval :: t1 else t1) m1 (map.put l1 x v) mc1 ->
+      post t1 m1 (map.put l1 x v) mc1 ->
       related maxvar frame fpval t1 m1 l1 t2 m2 l2 ->
       fp < x <= maxvar /\ (x < a0 \/ a7 < x) ->
       exec e (save_ires_reg x) t2 m2 (map.put l2 (ires_reg x) v) mc2
