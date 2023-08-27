@@ -165,30 +165,45 @@ Section Spilling.
     nil.
   Import Semantics. Check cons_read.
 
+  Section WithOtherEnv.
+    Context {env: map.map String.string (list Z * list Z * stmt)}.
+    Variable e: env.
   (*TODO: remove sz from source-level read/writes. it's useless, we already know it from branching 
     information. similarly, we could replace separate read/writes with just one rw constructor. 
     maybe that's too much though. we could be sillier yet and say that every element of the trace is an integer (1,0 for branches)*) Print save_ires_reg. Print leak_load_iarg_reg. Print load_iarg_reg. Print ires_reg. Print abstract_app.
+  Inductive todo_stack_elt :=
+  | do_stmt (s : stmt)
+  | append_trace (t : abstract_trace)
+  | do_elts (get_elts : bool -> list todo_stack_elt).
   Fixpoint transform_trace
       (* maps the abstract trace of an unspilled program to the abstract trace of the spilled program.
          executes s, guided by t, popping events off of t and adding events to st as it goes.
          returns the final abstract trace st.
          may (but will not necessarily) return empty if input is garbage.
          *)
-      (magicFuel : nat) (fpval: word) (sstack : list stmt) (t : Semantics.abstract_trace) :
+      (magicFuel : nat) (fpval: word) (todo_stack : list todo_stack_elt) (t : Semantics.abstract_trace) :
       Semantics.abstract_trace :=
       match magicFuel with
       | O => empty
       | S magicFuel' => let transform_trace := transform_trace magicFuel' fpval in
-                        match sstack with
+                        match todo_stack with
                         | nil => empty (*this is not garbage*)
-                        | s :: sstack' =>
+                        | append_trace st :: todo_stack' =>
+                            abstract_app st (transform_trace todo_stack' t)
+                        | do_elts get_elts :: todo_stack' =>
+                            match t with
+                            | cons_branch b t' =>
+                                transform_trace (get_elts b ++ todo_stack') t'
+                            | _ => empty (* this is garbage, like all the other empties *)
+                            end
+                        | do_stmt s :: todo_stack' =>
                             match s with
                             | SLoad sz x y o =>
                                 match t with
                                 | cons_read _(*sz*) a t' =>
                                     abstract_app
                                       (generator (leak_save_ires_reg fpval x ++ [read sz a] ++ leak_load_iarg_reg fpval y))
-                                      (transform_trace sstack' t')
+                                      (transform_trace todo_stack' t')
                                 | _ => empty
                                 end
                             | SStore sz x y o =>
@@ -196,13 +211,13 @@ Section Spilling.
                                 | cons_write _(*sz*) a t' =>
                                     abstract_app
                                       (generator ([write sz a] ++ leak_load_iarg_reg fpval y ++ leak_load_iarg_reg fpval x))
-                                      (transform_trace sstack' t')
+                                      (transform_trace todo_stack' t')
                                 | _ => empty
                                 end
                             | SInlinetable _ x _ i =>
                                 abstract_app
                                   (generator (leak_save_ires_reg fpval x ++ leak_load_iarg_reg fpval i))
-                                  (transform_trace sstack' t)
+                                  (transform_trace todo_stack' t)
                             | SStackalloc x _ body =>
                                 match t with
                                 | cons_salloc f =>
@@ -210,15 +225,68 @@ Section Spilling.
                                                    let t' := f a in
                                                    abstract_app
                                                      (generator (leak_save_ires_reg fpval x))
-                                                     (transform_trace (body :: sstack') t'))
+                                                     (transform_trace (do_stmt body :: todo_stack') t'))
                                 | _ => empty
                                 end
                             | SLit x _ =>
                                 abstract_app
                                   (generator (leak_save_ires_reg fpval x))
-                                  (transform_trace sstack' t)
-                            | _ => empty
-                            end    
+                                  (transform_trace todo_stack' t)
+                            | SOp x op y oz =>
+                                let spilled_t :=
+                                  leak_save_ires_reg fpval x ++
+                                    match oz with
+                                    | Var z => leak_load_iarg_reg fpval z
+                                    | Const _ => nil
+                                    end ++
+                                    leak_load_iarg_reg fpval y in
+                                abstract_app
+                                  (generator spilled_t)
+                                  (transform_trace todo_stack' t)
+                            | SSet x y =>
+                                abstract_app
+                                  (generator (leak_save_ires_reg fpval x ++ leak_load_iarg_reg fpval y))
+                                  (transform_trace todo_stack' t)
+                            | SIf c thn els =>
+                                transform_trace (do_elts (fun b => if b then [do_stmt thn] else [do_stmt els]) :: todo_stack') t
+                                (*match t with
+                                | cons_branch b t' =>
+                                    abstract_app
+                                      (generator (leak_spill_bcond ++ leak_prepare_bcond fpval c))
+                                      (transform_trace (do_stmt (if b then thn else els) :: todo_stack') t')
+                                | _ => empty
+                                end*)
+                            | SLoop s1 c s2 =>
+                                transform_trace
+                                  ([do_stmt s1;
+                                    append_trace (generator (leak_prepare_bcond fpval c));
+                                    append_trace (generator (leak_spill_bcond));
+                                    do_elts (fun b => if b then [do_stmt s2; do_stmt s] else [])] ++
+                                     todo_stack')
+                                  t
+                            | SSeq s1 s2 => transform_trace ([do_stmt s1; do_stmt s2] ++ todo_stack') t
+                            | SSkip => transform_trace todo_stack' t
+                            | SCall resvars fname argvars =>
+                                match @map.get _ _ env e fname with
+                                | Some (params, rets, fbody) =>
+                                    transform_trace ([append_trace (generator (leak_set_reg_range_to_vars fpval argvars));
+                                                      do_stmt fbody;
+                                                      append_trace (generator (leak_set_vars_to_reg_range fpval resvars))] ++
+                                                       todo_stack')
+                                      t
+                                | _ => empty
+                                end
+                            | SInteract resvars _ argvars =>
+                                match t with
+                                | cons_IO i t' =>
+                                    transform_trace ([append_trace (generator (leak_set_reg_range_to_vars fpval argvars));
+                                                      append_trace (cons_IO i empty);
+                                                      append_trace (generator (leak_set_vars_to_reg_range fpval resvars))] ++
+                                                       todo_stack')
+                                      t'
+                                | _ => empty
+                                end
+                            end
                         end
       end.
 
