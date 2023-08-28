@@ -14,6 +14,7 @@ Require Import bedrock2.MetricLogging.
 Require Import compiler.FlatImpConstraints.
 Require Import coqutil.Tactics.autoforward.
 Require Import coqutil.Tactics.fwd.
+Require bedrock2.ProgramLogic.
 
 Open Scope Z_scope.
 
@@ -163,74 +164,70 @@ Section Spilling.
 
   Definition leak_spill_bcond: Semantics.trace :=
     nil.
-  Import Semantics. Check cons_read.
-
-  Section WithOtherEnv.
-    Context {env: map.map String.string (list Z * list Z * stmt)}.
-    Variable e: env.
+   Check bytes_per_word.
   (*TODO: remove sz from source-level read/writes. it's useless, we already know it from branching 
     information. similarly, we could replace separate read/writes with just one rw constructor. 
-    maybe that's too much though. we could be sillier yet and say that every element of the trace is an integer (1,0 for branches)*) Print save_ires_reg. Print leak_load_iarg_reg. Print load_iarg_reg. Print ires_reg. Print abstract_app.
+    maybe that's too much though. we could be sillier yet and say that every element of the trace is an integer (1,0 for branches)*) Print save_ires_reg. Print leak_load_iarg_reg. Print load_iarg_reg. Print ires_reg.
   Inductive todo_stack_elt :=
   | do_stmt (s : stmt)
-  | append_trace (t : abstract_trace)
+  | append_trace (t : Semantics.abstract_trace)
   | do_elts (get_elts : bool -> list todo_stack_elt).
-  Fixpoint transform_trace
+  Fixpoint transform_trace {env: map.map String.string (list Z * list Z * stmt)}
       (* maps the abstract trace of an unspilled program to the abstract trace of the spilled program.
          executes s, guided by t, popping events off of t and adding events to st as it goes.
          returns the final abstract trace st.
          may (but will not necessarily) return empty if input is garbage.
          *)
-      (magicFuel : nat) (fpval: word) (todo_stack : list todo_stack_elt) (t : Semantics.abstract_trace) :
+      (magicFuel : nat) (e: env) (fpval: word) (todo_stack : list todo_stack_elt) (t : Semantics.abstract_trace) :
       Semantics.abstract_trace :=
       match magicFuel with
-      | O => empty
-      | S magicFuel' => let transform_trace := transform_trace magicFuel' fpval in
+      | O => Semantics.empty
+      | S magicFuel' => let transform_trace := transform_trace magicFuel' e fpval in
                         match todo_stack with
-                        | nil => empty (*this is not garbage*)
+                        | nil => Semantics.empty (*this is not garbage*)
                         | append_trace st :: todo_stack' =>
-                            abstract_app st (transform_trace todo_stack' t)
+                            Semantics.abstract_app st (transform_trace todo_stack' t)
                         | do_elts get_elts :: todo_stack' =>
                             match t with
-                            | cons_branch b t' =>
+                            | Semantics.cons_branch b t' =>
                                 transform_trace (get_elts b ++ todo_stack') t'
-                            | _ => empty (* this is garbage, like all the other empties *)
+                            | _ => Semantics.empty (* this is garbage, like all the other empties *)
                             end
                         | do_stmt s :: todo_stack' =>
                             match s with
                             | SLoad sz x y o =>
                                 match t with
-                                | cons_read _(*sz*) a t' =>
-                                    abstract_app
-                                      (generator (leak_save_ires_reg fpval x ++ [read sz a] ++ leak_load_iarg_reg fpval y))
+                                | Semantics.cons_read _(*sz*) a t' =>
+                                    Semantics.abstract_app
+                                      (Semantics.generator (leak_save_ires_reg fpval x ++ [Semantics.read sz a] ++ leak_load_iarg_reg fpval y))
                                       (transform_trace todo_stack' t')
-                                | _ => empty
+                                | _ => Semantics.empty
                                 end
                             | SStore sz x y o =>
                                 match t with
-                                | cons_write _(*sz*) a t' =>
-                                    abstract_app
-                                      (generator ([write sz a] ++ leak_load_iarg_reg fpval y ++ leak_load_iarg_reg fpval x))
+                                | Semantics.cons_write _(*sz*) a t' =>
+                                    Semantics.abstract_app
+                                      (Semantics.generator ([Semantics.write sz a] ++ leak_load_iarg_reg fpval y ++ leak_load_iarg_reg fpval x))
                                       (transform_trace todo_stack' t')
-                                | _ => empty
+                                | _ => Semantics.empty
                                 end
                             | SInlinetable _ x _ i =>
-                                abstract_app
-                                  (generator (leak_save_ires_reg fpval x ++ leak_load_iarg_reg fpval i))
+                                Semantics.abstract_app
+                                  (Semantics.generator (leak_save_ires_reg fpval x ++ leak_load_iarg_reg fpval i))
                                   (transform_trace todo_stack' t)
                             | SStackalloc x _ body =>
                                 match t with
-                                | cons_salloc f =>
-                                    cons_salloc (fun a =>
+                                | Semantics.cons_salloc f =>
+                                    Semantics.cons_salloc (fun a =>
                                                    let t' := f a in
-                                                   abstract_app
-                                                     (generator (leak_save_ires_reg fpval x))
+                                                   Semantics.abstract_app
+                                                     (Semantics.generator (leak_save_ires_reg fpval x))
                                                      (transform_trace (do_stmt body :: todo_stack') t'))
-                                | _ => empty
+                                | _ => Semantics.empty
                                 end
                             | SLit x _ =>
-                                abstract_app
-                                  (generator (leak_save_ires_reg fpval x))
+                                Semantics.abstract_app
+                                  (Semantics.generator (leak_save_ires_reg fpval x))
                                   (transform_trace todo_stack' t)
                             | SOp x op y oz =>
                                 let spilled_t :=
@@ -240,12 +237,12 @@ Section Spilling.
                                     | Const _ => nil
                                     end ++
                                     leak_load_iarg_reg fpval y in
-                                abstract_app
-                                  (generator spilled_t)
+                                Semantics.abstract_app
+                                  (Semantics.generator spilled_t)
                                   (transform_trace todo_stack' t)
                             | SSet x y =>
-                                abstract_app
-                                  (generator (leak_save_ires_reg fpval x ++ leak_load_iarg_reg fpval y))
+                                Semantics.abstract_app
+                                  (Semantics.generator (leak_save_ires_reg fpval x ++ leak_load_iarg_reg fpval y))
                                   (transform_trace todo_stack' t)
                             | SIf c thn els =>
                                 transform_trace (do_elts (fun b => if b then [do_stmt thn] else [do_stmt els]) :: todo_stack') t
@@ -259,8 +256,8 @@ Section Spilling.
                             | SLoop s1 c s2 =>
                                 transform_trace
                                   ([do_stmt s1;
-                                    append_trace (generator (leak_prepare_bcond fpval c));
-                                    append_trace (generator (leak_spill_bcond));
+                                    append_trace (Semantics.generator (leak_prepare_bcond fpval c));
+                                    append_trace (Semantics.generator (leak_spill_bcond));
                                     do_elts (fun b => if b then [do_stmt s2; do_stmt s] else [])] ++
                                      todo_stack')
                                   t
@@ -269,22 +266,22 @@ Section Spilling.
                             | SCall resvars fname argvars =>
                                 match @map.get _ _ env e fname with
                                 | Some (params, rets, fbody) =>
-                                    transform_trace ([append_trace (generator (leak_set_reg_range_to_vars fpval argvars));
+                                    transform_trace ([append_trace (Semantics.generator (leak_set_reg_range_to_vars fpval argvars));
                                                       do_stmt fbody;
-                                                      append_trace (generator (leak_set_vars_to_reg_range fpval resvars))] ++
+                                                      append_trace (Semantics.generator (leak_set_vars_to_reg_range fpval resvars))] ++
                                                        todo_stack')
                                       t
-                                | _ => empty
+                                | _ => Semantics.empty
                                 end
                             | SInteract resvars _ argvars =>
                                 match t with
-                                | cons_IO i t' =>
-                                    transform_trace ([append_trace (generator (leak_set_reg_range_to_vars fpval argvars));
-                                                      append_trace (cons_IO i empty);
-                                                      append_trace (generator (leak_set_vars_to_reg_range fpval resvars))] ++
+                                | Semantics.cons_IO i t' =>
+                                    transform_trace ([append_trace (Semantics.generator (leak_set_reg_range_to_vars fpval argvars));
+                                                      append_trace (Semantics.cons_IO i Semantics.empty);
+                                                      append_trace (Semantics.generator (leak_set_vars_to_reg_range fpval resvars))] ++
                                                        todo_stack')
                                       t'
-                                | _ => empty
+                                | _ => Semantics.empty
                                 end
                             end
                         end
@@ -338,7 +335,7 @@ Section Spilling.
                 (List.firstn (length argvars) (reg_class.all reg_class.arg));;
       set_vars_to_reg_range resvars a0
     end.
-
+Check bytes_per_word.
   Definition max_var_bcond(c: bcond Z): Z :=
     match c with
     | CondBinary _ x y => Z.max x y
@@ -425,7 +422,7 @@ Section Spilling.
 
   Open Scope bool_scope.
 
-  Definition is_valid_src_var(x: Z): bool := Z.ltb fp x && (Z.ltb x a0 || Z.ltb a7 x).
+  Definition is_valid_src_var(x: Z): bool := Z.ltb fp x && (Z.ltb x a0 || Z.ltb a7 x). Check bytes_per_word.
 
   Definition spill_fun: list Z * list Z * stmt -> result (list Z * list Z * stmt) :=
     fun '(argnames, resnames, body) =>
@@ -571,10 +568,10 @@ Section Spilling.
     forall k v, map.get l k = Some v -> 10 <= k < 18.
 
   Definition related(maxvar: Z)(frame: mem -> Prop)(fpval: word)
-             (t1: Semantics.trace)(m1: mem)(l1: locals)
-             (t2: Semantics.trace)(m2: mem)(l2: locals): Prop :=
+             (t1: Semantics.io_trace)(m1: mem)(l1: locals)
+             (t2: Semantics.io_trace)(m2: mem)(l2: locals): Prop :=
       exists lStack lRegs stackwords,
-        Semantics.filterio t1 = Semantics.filterio t2 /\
+        t1 = t2 /\
         (eq m1 * word_array fpval stackwords * frame)%sep m2 /\
         (forall x v, map.get lRegs x = Some v -> fp < x < 32 /\ (x < a0 \/ a7 < x)) /\
         (forall x v, map.get lStack x = Some v -> 32 <= x <= maxvar) /\
@@ -632,16 +629,16 @@ Section Spilling.
     unfold spill_tmp. eapply put_arg_reg; eassumption.
   Qed.
 
-  Print related.
+  Notation fio := Semantics.filterio.
 
   Lemma load_iarg_reg_correct(i: Z): forall r e2 t1 t2 m1 m2 l1 l2 mc2 fpval post frame maxvar v,
       i = 1 \/ i = 2 ->
-      related maxvar frame fpval t1 m1 l1 t2 m2 l2 ->
+      related maxvar frame fpval (fio t1) m1 l1 (fio t2) m2 l2 ->
       fp < r <= maxvar /\ (r < a0 \/ a7 < r) ->
       map.get l1 r = Some v ->
-      (forall mc2,
-          related maxvar frame fpval t1 m1 l1 t2 m2 (map.put l2 (iarg_reg i r) v) ->
-          post (if 32 <=? r then Semantics.read Syntax.access_size.word fpval :: t2 else t2) m2 (map.put l2 (iarg_reg i r) v) mc2) ->
+      (forall t2' mc2,
+          related maxvar frame fpval (fio t1) m1 l1 (fio t2') m2 (map.put l2 (iarg_reg i r) v) ->
+          post t2' m2 (map.put l2 (iarg_reg i r) v) mc2) ->
       exec e2 (load_iarg_reg i r) t2 m2 l2 mc2 post.
   Proof.
     intros.
@@ -682,16 +679,16 @@ Section Spilling.
 
   Lemma load_iarg_reg_correct'(i: Z): forall r e2 t1 t2 m1 m2 l1 l2 mc1 mc2 post frame maxvar v fpval,
       i = 1 \/ i = 2 ->
-      related maxvar frame fpval t1 m1 l1 t2 m2 l2 ->
+      related maxvar frame fpval (fio t1) m1 l1 (fio t2) m2 l2 ->
       fp < r <= maxvar /\ (r < a0 \/ a7 < r) ->
       map.get l1 r = Some v ->
       post t1 m1 l1 mc1 ->
       exec e2 (load_iarg_reg i r) t2 m2 l2 mc2
-           (fun t2' m2' l2' mc2' => exists t1' m1' l1' mc1',
-                related maxvar frame fpval t1' m1' l1' t2' m2' l2' /\ post t1' m1' l1' mc1').
+        (fun t2' m2' l2' mc2' => exists t1' m1' l1' mc1',
+             related maxvar frame fpval (fio t1') m1' l1' (fio t2') m2' l2' /\ post t1' m1' l1' mc1').
   Proof.
     intros.
-    unfold load_iarg_reg, stack_loc, iarg_reg, related in *. fwd.
+    unfold load_iarg_reg, leak_load_iarg_reg, stack_loc, iarg_reg, related in *. fwd.
     destr (32 <=? r).
     - eapply exec.load.
       + eapply get_sep. ecancel_assumption.
@@ -732,16 +729,16 @@ Section Spilling.
      is created (i.e. after exec.loop is applied), so they are not in the scope of "?mid1". *)
   Lemma load_iarg_reg_correct''(i: Z): forall r e2 t1 t2 m1 m2 l1 l2 mc2 frame maxvar v fpval,
       i = 1 \/ i = 2 ->
-      related maxvar frame fpval t1 m1 l1 t2 m2 l2 ->
+      related maxvar frame fpval (fio t1) m1 l1 (fio t2) m2 l2 ->
       fp < r <= maxvar /\ (r < a0 \/ a7 < r) ->
       map.get l1 r = Some v ->
       exec e2 (load_iarg_reg i r) t2 m2 l2 mc2 (fun t2' m2' l2' mc2' =>
-      t2' = (if 32 <=? r then Semantics.read Syntax.access_size.word fpval :: t2 else t2)
+      t2' = leak_load_iarg_reg fpval r ++ t2
       /\ m2' = m2 /\ l2' = map.put l2 (iarg_reg i r) v /\
-        related maxvar frame fpval t1 m1 l1 t2' m2' l2').
+        related maxvar frame fpval (fio t1) m1 l1 (fio t2') m2' l2').
   Proof.
     intros.
-    unfold load_iarg_reg, stack_loc, iarg_reg, related in *. fwd.
+    unfold load_iarg_reg, leak_load_iarg_reg, stack_loc, iarg_reg, related in *. fwd.
     destr (32 <=? r).
     - eapply exec.load.
       + eapply get_sep. ecancel_assumption.
@@ -780,11 +777,11 @@ Section Spilling.
      yet in l1 and l2. *)
   Lemma save_ires_reg_correct: forall e t1 t2 m1 m2 l1 l2 mc1 mc2 x v maxvar frame post fpval,
       post t1 m1 (map.put l1 x v) mc1 ->
-      related maxvar frame fpval t1 m1 l1 t2 m2 l2 ->
+      related maxvar frame fpval (fio t1) m1 l1 (fio t2) m2 l2 ->
       fp < x <= maxvar /\ (x < a0 \/ a7 < x) ->
       exec e (save_ires_reg x) t2 m2 (map.put l2 (ires_reg x) v) mc2
-           (fun t2' m2' l2' mc2' => exists t1' m1' l1' mc1',
-                related maxvar frame fpval t1' m1' l1' t2' m2' l2' /\ post t1' m1' l1' mc1').
+        (fun t2' m2' l2' mc2' => exists t1' m1' l1' mc1',
+                related maxvar frame fpval (fio t1') m1' l1' (fio t2') m2' l2' /\ post t1' m1' l1' mc1').
   Proof.
     intros.
     unfold save_ires_reg, stack_loc, ires_reg, related in *. fwd.
@@ -801,8 +798,8 @@ Section Spilling.
                  | |- exists _, _ => eexists
                  | |- _ /\ _ => split
                  end.
-          1: reflexivity.
-          8: eassumption.
+          9: eassumption.
+          1: assumption.
           1: ecancel_assumption.
           3: {
             unfold sep, map.split in H0p3|-*.
@@ -839,8 +836,8 @@ Section Spilling.
              | |- exists _, _ => eexists
              | |- _ /\ _ => split
              end.
-      1: reflexivity.
-      8: eassumption.
+      9: eassumption.
+      1: assumption.
       1: ecancel_assumption.
       3: {
         apply sep_comm. apply sep_comm in H0p4.
@@ -867,7 +864,7 @@ Section Spilling.
         unfold ptsto, map.disjoint in *. subst.
         rewrite ?map.get_putmany_dec, ?map.get_put_dec, ?map.get_empty in H1.
         repeat destruct_one_match_hyp; subst; fwd; try congruence; try blia.
-        specialize H0p8 with (1 := H1). blia.
+        specialize H0p9 with (1 := H1). blia.
       }
       all: try eassumption.
   Qed.
@@ -877,10 +874,10 @@ Section Spilling.
      So we request the `related` that held *before* SOp, i.e. the one where the result is not
      yet in l1 and l2. *)
   Lemma save_ires_reg_correct'': forall e t1 t2 m1 m2 l1 l2 mc2 x v maxvar frame post fpval,
-      related maxvar frame fpval t1 m1 l1 t2 m2 l2 ->
+      related maxvar frame fpval (fio t1) m1 l1 (fio t2) m2 l2 ->
       fp < x <= maxvar /\ (x < a0 \/ a7 < x) ->
       (forall t2' m2' l2' mc2',
-          related maxvar frame fpval (if 32 <=? x then Semantics.write Syntax.access_size.word fpval :: t1 else t1) m1 (map.put l1 x v) t2' m2' l2' ->
+          related maxvar frame fpval (fio t1) m1 (map.put l1 x v) (fio t2') m2' l2' ->
           post t2' m2' l2' mc2') ->
       exec e (save_ires_reg x) t2 m2 (map.put l2 (ires_reg x) v) mc2 post.
   Proof.
@@ -900,7 +897,7 @@ Section Spilling.
                  | |- exists _, _ => eexists
                  | |- _ /\ _ => split
                  end.
-          1: reflexivity.
+          1: { rewrite ProgramLogic.filterio_cons. assumption. }
           1: ecancel_assumption.
           3: {
             unfold sep, map.split in Hp3|-*.
@@ -938,7 +935,7 @@ Section Spilling.
              | |- exists _, _ => eexists
              | |- _ /\ _ => split
              end.
-      1: reflexivity.
+      1: assumption.
       1: ecancel_assumption.
       3: {
         apply sep_comm. apply sep_comm in Hp4.
@@ -965,7 +962,7 @@ Section Spilling.
         unfold ptsto, map.disjoint in *. subst.
         rewrite ?map.get_putmany_dec, ?map.get_put_dec, ?map.get_empty in H0.
         repeat destruct_one_match_hyp; subst; fwd; try congruence; try blia.
-        specialize Hp8 with (1 := H0). blia.
+        specialize Hp9 with (1 := H0). blia.
       }
       all: try eassumption.
   Qed.
@@ -1015,27 +1012,18 @@ Section Spilling.
     intros. apply H. eapply hide_ll_arg_reg_ptsto_core; eassumption.
   Qed.
 
-  Fixpoint leakage_of_writing_args fpval args :=
-    match args with
-    | nil => nil
-    | arg :: args' => if 32 <=? arg then
-                        leakage_of_writing_args fpval args' ++ [Semantics.write Syntax.access_size.word fpval]
-                      else
-                        leakage_of_writing_args fpval args'
-    end.
-
   Lemma set_vars_to_reg_range_correct:
     forall args start argvs e t1 t2 m1 m2 l1 l1' l2 mc2 maxvar frame post fpval,
-      related maxvar frame fpval t1 m1 l1 t2 m2 l2 ->
+      related maxvar frame fpval (fio t1) m1 l1 (fio t2) m2 l2 ->
       map.putmany_of_list_zip args argvs l1 = Some l1' ->
       map.getmany_of_list l2 (List.unfoldn (Z.add 1) (List.length args) start) = Some argvs ->
       (List.length args <= 8)%nat ->
       a0 <= start ->
       start + Z.of_nat (List.length args) <= a7 + 1 ->
       Forall (fun x => fp < x <= maxvar /\ (x < a0 \/ a7 < x)) args ->
-      (forall m2' l2' mc2',
-          related maxvar frame fpval (leakage_of_writing_args fpval args ++ t1) m1 l1' (leakage_of_writing_args fpval args ++ t2) m2' l2' ->
-          post (leakage_of_writing_args fpval args ++ t2) m2' l2' mc2') ->
+      (forall t2' m2' l2' mc2',
+          related maxvar frame fpval (fio t1) m1 l1' (fio t2') m2' l2' ->
+          post t2' m2' l2' mc2') ->
       exec e (set_vars_to_reg_range args start) t2 m2 l2 mc2 post.
   Proof.
     induction args; intros.
@@ -1044,7 +1032,6 @@ Section Spilling.
       unfold related in H. fwd.
       eapply exec.seq_cps.
       rewrite (Z.add_comm 1 start) in *.
-      cbn [leakage_of_writing_args] in H6.
       destr (32 <=? a).
       + edestruct store_to_word_array with (i := a - 32).
         1: ecancel_assumption. 1: blia.
@@ -1052,15 +1039,13 @@ Section Spilling.
         eapply exec.store.
         { eapply get_sep. ecancel_assumption. }
         { eassumption. }
-        { eassumption. } Check List.repeat_cons.
-        Search repeat.
-        cbn [repeat] in H6. cbn [List.app] in H6.
+        { eassumption. }
         eapply IHargs; try eassumption; try blia.
         (* establish related for IH: *)
         unfold related.
         eexists (map.put lStack a v), lRegs, _.
         ssplit.
-        { reflexivity. }
+        { cbn [List.app]. rewrite ProgramLogic.filterio_cons. assumption. }
         { ecancel_assumption. }
         { eassumption. }
         { intros. rewrite map.get_put_dec in H. destr (a =? x0). 1: blia. eauto. }
@@ -1083,7 +1068,7 @@ Section Spilling.
         }
         unfold related. eexists lStack, (map.put lRegs a v), _.
         ssplit.
-        { reflexivity. }
+        { cbn [List.app]. assumption. }
         { ecancel_assumption. }
         { intros. rewrite map.get_put_dec in H. destr (a =? x). 1: blia. eauto. }
         { eassumption. }
@@ -1100,47 +1085,44 @@ Section Spilling.
         { assumption. }
         { assumption. }
   Qed.
-
-  Fixpoint leakage_of_reading_args fpval args :=
-    match args with
-    | nil => nil
-    | arg :: args' => if 32 <=? arg then
-                        Semantics.read Syntax.access_size.word fpval :: leakage_of_reading_args fpval args'
-                      else
-                        leakage_of_reading_args fpval args'
-  end.
     
+  Definition nill : Semantics.trace := nil.
 
-
+  Fixpoint stupid (n : nat) :=
+    match n with
+    | S n' => stupid n' ++ [0]
+    | O => nil
+    end.
+        
   Lemma set_reg_range_to_vars_correct:
     forall args argvs start e t1 t2 m1 m2 l1 l2 mc2 maxvar frame post fpval,
-      related maxvar frame fpval t1 m1 l1 t2 m2 l2 ->
+      related maxvar frame fpval (fio t1) m1 l1 (fio t2) m2 l2 ->
       (List.length args <= 8)%nat ->
       a0 <= start ->
       start + Z.of_nat (List.length args) <= a7 + 1 ->
       Forall (fun x => fp < x <= maxvar /\ (x < a0 \/ a7 < x)) args ->
       map.getmany_of_list l1 args = Some argvs ->
-      (forall l2' mc2',
-          related maxvar frame fpval (leakage_of_reading_args fpval args ++ t1) m1 l1 (leakage_of_reading_args fpval args ++ t2) m2 l2' ->
+      (forall t2' l2' mc2',
+          related maxvar frame fpval (fio t1) m1 l1 (fio t2') m2 l2' ->
           map.getmany_of_list l2' (List.unfoldn (Z.add 1) (List.length args) start) = Some argvs ->
-          post (leakage_of_reading_args fpval args ++ t2) m2 l2' mc2') ->
+          post t2' m2 l2' mc2') ->
       exec e (set_reg_range_to_vars start args) t2 m2 l2 mc2 post.
   Proof.
     induction args; intros.
     - simpl. eapply exec.skip. eapply H5. 1: eassumption. simpl.
       destruct argvs. 1: reflexivity. discriminate.
-    - simpl. unfold set_reg_to_var, stack_loc.
+    - simpl. unfold set_reg_to_var, leak_set_reg_to_var, stack_loc.
       destruct argvs as [|v vs]. {
         unfold map.getmany_of_list in H4. cbn in H4. simp.
         destr (List.option_all (map (map.get l1) args)); discriminate.
       }
       eapply map.invert_getmany_of_list_cons in H4. destruct H4 as [G GM].
       cbn [List.length] in *.
-      cbn [leakage_of_reading_args] in H5.
       simp.
       destr (32 <=? a).
       + eapply exec.seq_cps.
         eapply IHargs; try eassumption; try blia.
+
         intros.
         unfold related in H3. simp.
         eapply exec.load.
@@ -1363,20 +1345,26 @@ Section Spilling.
         forall (frame : mem -> Prop) (maxvar : Z),
           valid_vars_src maxvar s1 ->
           forall (t2 : Semantics.trace) (m2 : mem) (l2 : locals) (mc2 : MetricLog) (fpval : word),
-            related maxvar frame fpval t1 m1 l1 t2 m2 l2 ->
+            related maxvar frame fpval (fio t1) m1 l1 (fio t2) m2 l2 ->
             exec e2 (spill_stmt s1) t2 m2 l2 mc2
                  (fun (t2' : Semantics.trace) (m2' : mem) (l2' : locals) (mc2' : MetricLog) =>
                     exists t1' m1' l1' mc1',
-                      related maxvar frame fpval t1' m1' l1' t2' m2' l2' /\
+                      related maxvar frame fpval (fio t1') m1' l1' (fio t2') m2' l2' /\
                       post t1' m1' l1' mc1').
 
   Definition call_spec(e: env) '(argnames, retnames, fbody)
              (t: Semantics.trace)(m: mem)(argvals: list word)
-             (post: Semantics.trace -> mem -> list word -> Prop): Prop :=
+             (post: Semantics.io_trace -> mem -> list word -> Prop): Prop :=
     forall l mc, map.of_list_zip argnames argvals = Some l ->
                  exec e fbody t m l mc (fun t' m' l' mc' =>
                    exists retvals, map.getmany_of_list l' retnames = Some retvals /\
-                                   post t' m' retvals).
+                                     post (Semantics.filterio t') m' retvals). Check spill_fun.
+  Print transform_trace. Check exec. Check spill_stmt.
+
+  (*Lemma transform_trace_correct e1 e2 s1 m1 l1 mc1 :
+    spill_functions e1 = Success e2 ->
+    exec e1 s1 nil m1 l1 mc1 (fun t1' m1' l1' mc1' => generates a1 t1') ->
+    exec e2 (spill_stmt s1) m1 l1 mc1*)
 
   (* In exec.call, there are many maps of locals involved:
 
@@ -1404,13 +1392,12 @@ Section Spilling.
      what happens in the callee. TODO: actually use that lemma in case exec.call.
      Moreover, this lemma will also be used in the pipeline, where phases
      are composed based on the semantics of function calls. *)
-  Definition transform_trace : Semantics.abstract_trace -> Semantics.abstract_trace. Admitted.
   Lemma spill_fun_correct_aux: forall e1 e2 argnames1 retnames1 body1 argnames2 retnames2 body2,
       spill_fun (argnames1, retnames1, body1) = Success (argnames2, retnames2, body2) ->
       spilling_correct_for e1 e2 body1 ->
-      forall argvals t m abst (post: Semantics.io_trace -> mem -> list word -> Prop),
-        call_spec e1 (argnames1, retnames1, body1) t m argvals (fun t' m' rets => post (Semantics.filterio t') m' rets /\ Semantics.generates abst t') ->
-        call_spec e2 (argnames2, retnames2, body2) t m argvals (fun t' m' rets => post (Semantics.filterio t') m' rets /\ Semantics.generates (transform_trace abst) t').
+      forall argvals t m (post: Semantics.io_trace -> mem -> list word -> Prop),
+        call_spec e1 (argnames1, retnames1, body1) t m argvals post ->
+        call_spec e2 (argnames2, retnames2, body2) t m argvals post.
   Proof.
     unfold call_spec, spilling_correct_for. intros * Sp IHexec * Ex lFL3 mc OL2.
     unfold spill_fun in Sp. fwd.
@@ -1481,7 +1468,7 @@ Section Spilling.
       2: eapply Forall_le_max.
       cbv beta.
       subst maxvar'. clear. blia. }
-    intros mL4 lFL4 mcL4 R.
+    intros tL4 mL4 lFL4 mcL4 R.
     eapply exec.seq_cps.
     eapply exec.weaken. {
       eapply IHexec. 1: apply Ex. Print related. 2: exact R.
@@ -1517,7 +1504,7 @@ Section Spilling.
       subst maxvar'. clear. blia. }
     { eassumption. }
     rename R into R0.
-    intros lFL6 mcL6 R GM.
+    intros tL6 lFL6 mcL6 R GM.
     (* prove that if we remove the additional stack provided by exec.stackalloc
        and store the result vars back into the arg registers, the postcondition holds *)
     unfold related in R. fwd. rename lStack into lStack5, lRegs into lRegs5.
@@ -1531,7 +1518,7 @@ Section Spilling.
            | |- exists _, _ => eexists
            | |- _ /\ _ => split
            end.
-    4: eassumption.
+    4: { rewrite <- Rp0. eassumption. }
     2: {
       unfold map.split. eauto.
     }
@@ -1562,11 +1549,11 @@ Section Spilling.
     forall (frame : mem -> Prop) (maxvar : Z),
       valid_vars_src maxvar s1 ->
       forall (t2 : Semantics.trace) (m2 : mem) (l2 : locals) (mc2 : MetricLog) (fpval : word),
-        related maxvar frame fpval t1 m1 l1 t2 m2 l2 ->
+        related maxvar frame fpval (fio t1) m1 l1 (fio t2) m2 l2 ->
         exec e2 (spill_stmt s1) t2 m2 l2 mc2
              (fun (t2' : Semantics.trace) (m2' : mem) (l2' : locals) (mc2' : MetricLog) =>
                 exists t1' m1' l1' mc1',
-                  related maxvar frame fpval t1' m1' l1' t2' m2' l2' /\
+                  related maxvar frame fpval (fio t1') m1' l1' (fio t2') m2' l2' /\
                   post t1' m1' l1' mc1').
   Proof.
     induction 1; intros; cbn [spill_stmt valid_vars_src Forall_vars_stmt] in *; fwd.
@@ -1584,7 +1571,7 @@ Section Spilling.
       eapply @exec.interact with (mGive := mGive).
       + eapply map.split_comm. exact B.
       + rewrite arg_regs_alt by blia. 1: eassumption.
-      + eassumption.
+      + rewrite <- Rp0. eassumption.
       + intros.
         match goal with
         | H: context[outcome], A: context[outcome] |- _ =>
@@ -1620,7 +1607,7 @@ Section Spilling.
         (* related for set_vars_to_reg_range_correct: *)
         unfold related.
         eexists _, _, _. ssplit.
-        * reflexivity.
+        * simpl. f_equal. assumption.
         * eenough ((eq _ * (word_array fpval stackwords * frame))%sep m') as En.
           1: ecancel_assumption.
           move C at bottom.
@@ -1662,7 +1649,7 @@ Section Spilling.
       apply_in_hyps @map.getmany_of_list_length.
       apply_in_hyps @map.putmany_of_list_zip_sameLength.
       eapply set_reg_range_to_vars_correct; try eassumption || (unfold a0, a7 in *; blia).
-      intros lCL2 ? ? ?.
+      intros tL2 lCL2 ? ? ?.
       assert (bytes_per_word = 4 \/ bytes_per_word = 8) as B48. {
         unfold bytes_per_word. destruct width_cases as [E' | E']; rewrite E'; cbv; auto.
       }
@@ -1731,10 +1718,11 @@ Section Spilling.
         2: eapply Forall_le_max.
         cbv beta.
         subst maxvar'. clear. blia. }
-      intros mL4 lFL4 mcL4 R.
+      intros tL4 mL4 lFL4 mcL4 R.
       eapply exec.seq_cps.
       eapply exec.weaken. {
-        eapply IHexec. 2: exact R.
+        eapply IHexec.
+        2: { Search (fio t). rewrite H4p0. exact R. }
         unfold valid_vars_src.
         eapply Forall_vars_stmt_impl.
         2: eapply max_var_sound.
@@ -1771,7 +1759,7 @@ Section Spilling.
         subst maxvar'. clear. blia. }
       { eassumption. }
       rename R into R0.
-      intros lFL6 mcL6 R GM.
+      intros tL6 lFL6 mcL6 R GM.
       (* prove that if we remove the additional stack provided by exec.stackalloc
          and store the result vars back into the caller's registers,
          states are still related and postcondition holds *)
@@ -1810,7 +1798,7 @@ Section Spilling.
       { exact PM67. }
       eapply set_vars_to_reg_range_correct.
       { unfold related. eexists lStack1, lRegs1, _. ssplit.
-        { reflexivity. }
+        { rewrite Rp0. (*maybe there's a way to do this with less looking-ahead?*)reflexivity. }
         { eassumption. }
         { eassumption. }
         { eassumption. }
@@ -1830,7 +1818,7 @@ Section Spilling.
       { reflexivity. }
       { unfold a0, a7. blia. }
       { eassumption. }
-      { intros m22 l22 mc22 R22. do 4 eexists. split. 1: eassumption.
+      { intros t22 m22 l22 mc22 R22. do 4 eexists. split. 1: eassumption.
         eassumption. }
 
     - (* exec.load *)
@@ -1990,8 +1978,8 @@ Section Spilling.
         rewrite map.get_put_same. eexists. split; [reflexivity|].
         split; intros.
         * do 4 eexists. split.
-          -- exact H3p6.
-          -- eapply H1. 1: eassumption. cbn. rewrite E, E0. congruence.
+          2: { eapply H1. 1: eassumption. cbn. rewrite E, E0. congruence. }
+          { exact H3p6. }
         * eapply exec.weaken. 1: eapply IH2.
           -- eassumption.
           -- cbn. rewrite E, E0. congruence.
@@ -2006,8 +1994,8 @@ Section Spilling.
         rewrite map.get_put_same. eexists. split; [reflexivity|].
         split; intros.
         * do 4 eexists. split.
-          -- exact H3p5.
-          -- eapply H1. 1: eassumption. cbn. rewrite E. congruence.
+          2: { eapply H1. 1: eassumption. cbn. rewrite E. congruence. }
+          { exact H3p5. }
         * eapply exec.weaken. 1: eapply IH2.
           -- eassumption.
           -- cbn. rewrite E. congruence.
@@ -2027,7 +2015,7 @@ Section Spilling.
   Lemma spill_fun_correct: forall e1 e2 argnames1 retnames1 body1 argnames2 retnames2 body2,
       spill_functions e1 = Success e2 ->
       spill_fun (argnames1, retnames1, body1) = Success (argnames2, retnames2, body2) ->
-      forall argvals t m (post: Semantics.trace -> mem -> list word -> Prop),
+      forall argvals t m (post: Semantics.io_trace -> mem -> list word -> Prop),
         call_spec e1 (argnames1, retnames1, body1) t m argvals post ->
         call_spec e2 (argnames2, retnames2, body2) t m argvals post.
   Proof.
