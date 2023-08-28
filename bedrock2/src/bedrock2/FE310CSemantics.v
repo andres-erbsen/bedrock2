@@ -28,7 +28,7 @@ Section WithParameters.
     n = 4%nat /\ word.unsigned addr mod 4 = 0.
 
   Global Instance ext_spec: ExtSpec :=
-    fun (t : trace) (mGive : mem) a (args: list word) (post: mem -> list word -> Prop) =>
+    fun (t : io_trace) (mGive : mem) a (args: list word) (post: mem -> list word -> Prop) =>
     if String.eqb "MMIOWRITE" a then
       exists addr val,
         args = [addr; val] /\

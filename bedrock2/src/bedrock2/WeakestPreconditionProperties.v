@@ -375,7 +375,7 @@ Section WeakestPrecondition.
   Import bedrock2.Syntax bedrock2.Semantics bedrock2.WeakestPrecondition.
   Lemma interact_nomem call action binds arges t m l post t'
         args (Hargs : dexprs m l t arges args t')
-        (Hext : ext_spec t' map.empty binds args (fun mReceive (rets : list word) =>
+        (Hext : ext_spec (filterio t') map.empty binds args (fun mReceive (rets : list word) =>
            mReceive = map.empty /\
            exists l0 : locals, map.putmany_of_list_zip action rets l = Some l0 /\
            post (cons (IO (map.empty, binds, args, (map.empty, rets))) t') m l0))

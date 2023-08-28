@@ -140,7 +140,7 @@ Section WeakestPrecondition.
       | cmd.interact binds action arges =>
         exists args t', dexprs m l t arges args t' /\
         exists mKeep mGive, map.split m mKeep mGive /\
-        ext_spec t' mGive action args (fun mReceive rets =>
+        ext_spec (filterio t') mGive action args (fun mReceive rets =>
           exists l', map.putmany_of_list_zip binds rets l = Some l' /\
           forall m', map.split m' mKeep mReceive ->
           post (cons (IO ((mGive, action, args), (mReceive, rets))) t') m' l')

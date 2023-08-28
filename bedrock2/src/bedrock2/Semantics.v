@@ -92,7 +92,7 @@ Definition filterio {width: Z}{BW: Bitwidth width}{word: word.word width}{mem: m
 Definition ExtSpec{width: Z}{BW: Bitwidth width}{word: word.word width}{mem: map.map word byte} :=
   (* Given a trace of what happened so far,
      the given-away memory, an action label and a list of function call arguments, *)
-  trace -> mem -> String.string -> list word ->
+  io_trace -> mem -> String.string -> list word ->
   (* and a postcondition on the received memory and function call results, *)
   (mem -> list word -> Prop) ->
   (* tells if this postcondition will hold *)
@@ -345,7 +345,7 @@ Module exec. Section WithEnv.
       t m l mc post
       mKeep mGive (_: map.split m mKeep mGive)
       args mc' t' (_ :  evaluate_call_args_log m l arges mc t = Some (args, mc', t'))
-      mid (_ : ext_spec t' mGive action args mid)
+      mid (_ : ext_spec (filterio t') mGive action args mid)
       (_ : forall mReceive resvals, mid mReceive resvals ->
           exists l', map.putmany_of_list_zip binds resvals l = Some l' /\
           forall m', map.split m' mKeep mReceive ->
