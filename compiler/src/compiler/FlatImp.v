@@ -304,7 +304,7 @@ Module exec.
     | interact: forall t m mKeep mGive l mc action argvars argvals resvars outcome post,
         map.split m mKeep mGive ->
         map.getmany_of_list l argvars = Some argvals ->
-        ext_spec t mGive action argvals outcome ->
+        ext_spec (filterio t) mGive action argvals outcome ->
         (forall mReceive resvals,
             outcome mReceive resvals ->
             exists l', map.putmany_of_list_zip resvars resvals l = Some l' /\
