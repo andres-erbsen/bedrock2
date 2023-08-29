@@ -172,7 +172,7 @@ Section Spilling.
   | do_stmt (s : stmt)
   | append_trace (t : Semantics.abstract_trace)
   | do_elts (get_elts : bool -> list todo_stack_elt).
-  Fixpoint transform_trace {env: map.map String.string (list Z * list Z * stmt)}
+  Fixpoint transform_stmt_trace {env: map.map String.string (list Z * list Z * stmt)}
       (* maps the abstract trace of an unspilled program to the abstract trace of the spilled program.
          executes s, guided by t, popping events off of t and adding events to st as it goes.
          returns the final abstract trace st.
@@ -182,15 +182,15 @@ Section Spilling.
       Semantics.abstract_trace :=
       match magicFuel with
       | O => Semantics.empty
-      | S magicFuel' => let transform_trace := transform_trace magicFuel' e fpval in
+      | S magicFuel' => let transform_stmt_trace := transform_stmt_trace magicFuel' e fpval in
                         match todo_stack with
                         | nil => Semantics.empty (*this is not garbage*)
                         | append_trace st :: todo_stack' =>
-                            Semantics.abstract_app st (transform_trace todo_stack' t)
+                            Semantics.abstract_app st (transform_stmt_trace todo_stack' t)
                         | do_elts get_elts :: todo_stack' =>
                             match t with
                             | Semantics.cons_branch b t' =>
-                                transform_trace (get_elts b ++ todo_stack') t'
+                                transform_stmt_trace (get_elts b ++ todo_stack') t'
                             | _ => Semantics.empty (* this is garbage, like all the other empties *)
                             end
                         | do_stmt s :: todo_stack' =>
@@ -200,7 +200,7 @@ Section Spilling.
                                 | Semantics.cons_read _(*sz*) a t' =>
                                     Semantics.abstract_app
                                       (Semantics.generator (leak_save_ires_reg fpval x ++ [Semantics.read sz a] ++ leak_load_iarg_reg fpval y))
-                                      (transform_trace todo_stack' t')
+                                      (transform_stmt_trace todo_stack' t')
                                 | _ => Semantics.empty
                                 end
                             | SStore sz x y o =>
@@ -208,13 +208,13 @@ Section Spilling.
                                 | Semantics.cons_write _(*sz*) a t' =>
                                     Semantics.abstract_app
                                       (Semantics.generator ([Semantics.write sz a] ++ leak_load_iarg_reg fpval y ++ leak_load_iarg_reg fpval x))
-                                      (transform_trace todo_stack' t')
+                                      (transform_stmt_trace todo_stack' t')
                                 | _ => Semantics.empty
                                 end
                             | SInlinetable _ x _ i =>
                                 Semantics.abstract_app
                                   (Semantics.generator (leak_save_ires_reg fpval x ++ leak_load_iarg_reg fpval i))
-                                  (transform_trace todo_stack' t)
+                                  (transform_stmt_trace todo_stack' t)
                             | SStackalloc x _ body =>
                                 match t with
                                 | Semantics.cons_salloc f =>
@@ -222,13 +222,13 @@ Section Spilling.
                                                    let t' := f a in
                                                    Semantics.abstract_app
                                                      (Semantics.generator (leak_save_ires_reg fpval x))
-                                                     (transform_trace (do_stmt body :: todo_stack') t'))
+                                                     (transform_stmt_trace (do_stmt body :: todo_stack') t'))
                                 | _ => Semantics.empty
                                 end
                             | SLit x _ =>
                                 Semantics.abstract_app
                                   (Semantics.generator (leak_save_ires_reg fpval x))
-                                  (transform_trace todo_stack' t)
+                                  (transform_stmt_trace todo_stack' t)
                             | SOp x op y oz =>
                                 let spilled_t :=
                                   leak_save_ires_reg fpval x ++
@@ -239,13 +239,13 @@ Section Spilling.
                                     leak_load_iarg_reg fpval y in
                                 Semantics.abstract_app
                                   (Semantics.generator spilled_t)
-                                  (transform_trace todo_stack' t)
+                                  (transform_stmt_trace todo_stack' t)
                             | SSet x y =>
                                 Semantics.abstract_app
                                   (Semantics.generator (leak_save_ires_reg fpval x ++ leak_load_iarg_reg fpval y))
-                                  (transform_trace todo_stack' t)
+                                  (transform_stmt_trace todo_stack' t)
                             | SIf c thn els =>
-                                transform_trace (do_elts (fun b => if b then [do_stmt thn] else [do_stmt els]) :: todo_stack') t
+                                transform_stmt_trace (do_elts (fun b => if b then [do_stmt thn] else [do_stmt els]) :: todo_stack') t
                                 (*match t with
                                 | cons_branch b t' =>
                                     abstract_app
@@ -254,19 +254,19 @@ Section Spilling.
                                 | _ => empty
                                 end*)
                             | SLoop s1 c s2 =>
-                                transform_trace
+                                transform_stmt_trace
                                   ([do_stmt s1;
                                     append_trace (Semantics.generator (leak_prepare_bcond fpval c));
                                     append_trace (Semantics.generator (leak_spill_bcond));
                                     do_elts (fun b => if b then [do_stmt s2; do_stmt s] else [])] ++
                                      todo_stack')
                                   t
-                            | SSeq s1 s2 => transform_trace ([do_stmt s1; do_stmt s2] ++ todo_stack') t
-                            | SSkip => transform_trace todo_stack' t
+                            | SSeq s1 s2 => transform_stmt_trace ([do_stmt s1; do_stmt s2] ++ todo_stack') t
+                            | SSkip => transform_stmt_trace todo_stack' t
                             | SCall resvars fname argvars =>
                                 match @map.get _ _ env e fname with
                                 | Some (params, rets, fbody) =>
-                                    transform_trace ([append_trace (Semantics.generator (leak_set_reg_range_to_vars fpval argvars));
+                                    transform_stmt_trace ([append_trace (Semantics.generator (leak_set_reg_range_to_vars fpval argvars));
                                                       do_stmt fbody;
                                                       append_trace (Semantics.generator (leak_set_vars_to_reg_range fpval resvars))] ++
                                                        todo_stack')
@@ -276,7 +276,7 @@ Section Spilling.
                             | SInteract resvars _ argvars =>
                                 match t with
                                 | Semantics.cons_IO i t' =>
-                                    transform_trace ([append_trace (Semantics.generator (leak_set_reg_range_to_vars fpval argvars));
+                                    transform_stmt_trace ([append_trace (Semantics.generator (leak_set_reg_range_to_vars fpval argvars));
                                                       append_trace (Semantics.cons_IO i Semantics.empty);
                                                       append_trace (Semantics.generator (leak_set_vars_to_reg_range fpval resvars))] ++
                                                        todo_stack')
@@ -335,7 +335,7 @@ Section Spilling.
                 (List.firstn (length argvars) (reg_class.all reg_class.arg));;
       set_vars_to_reg_range resvars a0
     end.
-Check bytes_per_word.
+
   Definition max_var_bcond(c: bcond Z): Z :=
     match c with
     | CondBinary _ x y => Z.max x y
@@ -451,6 +451,16 @@ Check bytes_per_word.
           error:("Number of function arguments and return values must not exceed 8")
       else
         error:("Spilling got input program with invalid var names (please report as a bug)").
+  Print transform_stmt_trace.
+
+  Definition transform_fun_trace {env : map.map string (list Z * list Z * stmt)} (magicFuel : nat) (e : env) (f : list Z * list Z * stmt) (t : Semantics.abstract_trace) : Semantics.abstract_trace :=
+    let '(argnames, resnames, body) := f in
+    Semantics.cons_salloc (fun fpval =>
+                             Semantics.abstract_app
+                               (Semantics.generator (leak_set_vars_to_reg_range fpval argnames))
+                               (Semantics.abstract_app
+                                  (transform_stmt_trace magicFuel e fpval  [do_stmt body] t)
+                                  (Semantics.generator (leak_set_reg_range_to_vars fpval resnames)))).
 
   Lemma firstn_min_absorb_length_r{A: Type}: forall (l: list A) n,
       List.firstn (Nat.min n (length l)) l = List.firstn n l.
@@ -1358,13 +1368,22 @@ Check bytes_per_word.
     forall l mc, map.of_list_zip argnames argvals = Some l ->
                  exec e fbody t m l mc (fun t' m' l' mc' =>
                    exists retvals, map.getmany_of_list l' retnames = Some retvals /\
-                                     post (Semantics.filterio t') m' retvals). Check spill_fun.
-  Print transform_trace. Check exec. Check spill_stmt.
+                   post (Semantics.filterio t') m' retvals).
 
-  (*Lemma transform_trace_correct e1 e2 s1 m1 l1 mc1 :
+  Check transform_fun_trace. Print call_spec. Print related. Print exec.exec.
+  Print spill_fun.
+  Definition fun_has_abstract_trace
+    (e: env) (argnames : list Z) (fbody : stmt) (a: Semantics.abstract_trace)
+    (t: Semantics.trace)(m: mem)(argvals: list word): Prop :=
+    forall l mc, map.of_list_zip argnames argvals = Some l ->
+                 exec e fbody t m l mc (fun t' m' l' mc' =>
+                   exists t'', Semantics.generates a t'' /\ t' = t'' ++ t).
+  Lemma transform_trace_correct argnames argvals retnames argnames' resnames' fbody fbody' e1 e2 s1 t1 m1 l1 mc1 a :
     spill_functions e1 = Success e2 ->
-    exec e1 s1 nil m1 l1 mc1 (fun t1' m1' l1' mc1' => generates a1 t1') ->
-    exec e2 (spill_stmt s1) m1 l1 mc1*)
+    fun_has_abstract_trace e1 argnames fbody a t1 m1 argvals ->
+    spill_fun (argnames, retnames, fbody) = Success (argnames', resnames', fbody') ->
+    exists fuel,
+    exec e2 (spill_fun (argnames, retnames, fbody)) nil m1 l1 mc1 (fun t2' m2' l2' mc2' => Semantics.generates (transform_fun_trace fuel e2 [do_stmt fbody] a1) t2').
 
   (* In exec.call, there are many maps of locals involved:
 
