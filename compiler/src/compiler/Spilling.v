@@ -168,124 +168,118 @@ Section Spilling.
   (*TODO: remove sz from source-level read/writes. it's useless, we already know it from branching 
     information. similarly, we could replace separate read/writes with just one rw constructor. 
     maybe that's too much though. we could be sillier yet and say that every element of the trace is an integer (1,0 for branches)*) Print save_ires_reg. Print leak_load_iarg_reg. Print load_iarg_reg. Print ires_reg.
-  Inductive todo_stack_elt :=
-  | do_stmt (s : stmt)
-  | append_trace (t : Semantics.abstract_trace)
-  | do_elts (get_elts : bool -> list todo_stack_elt).
   Fixpoint transform_stmt_trace {env: map.map String.string (list Z * list Z * stmt)}
       (* maps the abstract trace of an unspilled program to the abstract trace of the spilled program.
          executes s, guided by t, popping events off of t and adding events to st as it goes.
          returns the final abstract trace st.
          may (but will not necessarily) return empty if input is garbage.
          *)
-      (magicFuel : nat) (e: env) (fpval: word) (todo_stack : list todo_stack_elt) (t : Semantics.abstract_trace) :
-      Semantics.abstract_trace :=
-      match magicFuel with
-      | O => Semantics.empty
-      | S magicFuel' => let transform_stmt_trace := transform_stmt_trace magicFuel' e fpval in
-                        match todo_stack with
-                        | nil => Semantics.empty (*this is not garbage*)
-                        | append_trace st :: todo_stack' =>
-                            Semantics.abstract_app st (transform_stmt_trace todo_stack' t)
-                        | do_elts get_elts :: todo_stack' =>
-                            match t with
-                            | Semantics.cons_branch b t' =>
-                                transform_stmt_trace (get_elts b ++ todo_stack') t'
-                            | _ => Semantics.empty (* this is garbage, like all the other empties *)
-                            end
-                        | do_stmt s :: todo_stack' =>
-                            match s with
-                            | SLoad sz x y o =>
-                                match t with
-                                | Semantics.cons_read _(*sz*) a t' =>
-                                    Semantics.abstract_app
-                                      (Semantics.generator (leak_save_ires_reg fpval x ++ [Semantics.read sz a] ++ leak_load_iarg_reg fpval y))
-                                      (transform_stmt_trace todo_stack' t')
-                                | _ => Semantics.empty
-                                end
-                            | SStore sz x y o =>
-                                match t with
-                                | Semantics.cons_write _(*sz*) a t' =>
-                                    Semantics.abstract_app
-                                      (Semantics.generator ([Semantics.write sz a] ++ leak_load_iarg_reg fpval y ++ leak_load_iarg_reg fpval x))
-                                      (transform_stmt_trace todo_stack' t')
-                                | _ => Semantics.empty
-                                end
-                            | SInlinetable _ x _ i =>
-                                Semantics.abstract_app
-                                  (Semantics.generator (leak_save_ires_reg fpval x ++ leak_load_iarg_reg fpval i))
-                                  (transform_stmt_trace todo_stack' t)
-                            | SStackalloc x _ body =>
-                                match t with
-                                | Semantics.cons_salloc f =>
-                                    Semantics.cons_salloc (fun a =>
-                                                   let t' := f a in
-                                                   Semantics.abstract_app
-                                                     (Semantics.generator (leak_save_ires_reg fpval x))
-                                                     (transform_stmt_trace (do_stmt body :: todo_stack') t'))
-                                | _ => Semantics.empty
-                                end
-                            | SLit x _ =>
-                                Semantics.abstract_app
-                                  (Semantics.generator (leak_save_ires_reg fpval x))
-                                  (transform_stmt_trace todo_stack' t)
-                            | SOp x op y oz =>
-                                let spilled_t :=
-                                  leak_save_ires_reg fpval x ++
-                                    match oz with
-                                    | Var z => leak_load_iarg_reg fpval z
-                                    | Const _ => nil
-                                    end ++
-                                    leak_load_iarg_reg fpval y in
-                                Semantics.abstract_app
-                                  (Semantics.generator spilled_t)
-                                  (transform_stmt_trace todo_stack' t)
-                            | SSet x y =>
-                                Semantics.abstract_app
-                                  (Semantics.generator (leak_save_ires_reg fpval x ++ leak_load_iarg_reg fpval y))
-                                  (transform_stmt_trace todo_stack' t)
-                            | SIf c thn els =>
-                                transform_stmt_trace (do_elts (fun b => if b then [do_stmt thn] else [do_stmt els]) :: todo_stack') t
-                                (*match t with
-                                | cons_branch b t' =>
-                                    abstract_app
-                                      (generator (leak_spill_bcond ++ leak_prepare_bcond fpval c))
-                                      (transform_trace (do_stmt (if b then thn else els) :: todo_stack') t')
-                                | _ => empty
-                                end*)
-                            | SLoop s1 c s2 =>
-                                transform_stmt_trace
-                                  ([do_stmt s1;
-                                    append_trace (Semantics.generator (leak_prepare_bcond fpval c));
-                                    append_trace (Semantics.generator (leak_spill_bcond));
-                                    do_elts (fun b => if b then [do_stmt s2; do_stmt s] else [])] ++
-                                     todo_stack')
-                                  t
-                            | SSeq s1 s2 => transform_stmt_trace ([do_stmt s1; do_stmt s2] ++ todo_stack') t
-                            | SSkip => transform_stmt_trace todo_stack' t
-                            | SCall resvars fname argvars =>
-                                match @map.get _ _ env e fname with
-                                | Some (params, rets, fbody) =>
-                                    transform_stmt_trace ([append_trace (Semantics.generator (leak_set_reg_range_to_vars fpval argvars));
-                                                      do_stmt fbody;
-                                                      append_trace (Semantics.generator (leak_set_vars_to_reg_range fpval resvars))] ++
-                                                       todo_stack')
-                                      t
-                                | _ => Semantics.empty
-                                end
-                            | SInteract resvars _ argvars =>
-                                match t with
-                                | Semantics.cons_IO i t' =>
-                                    transform_stmt_trace ([append_trace (Semantics.generator (leak_set_reg_range_to_vars fpval argvars));
-                                                      append_trace (Semantics.cons_IO i Semantics.empty);
-                                                      append_trace (Semantics.generator (leak_set_vars_to_reg_range fpval resvars))] ++
-                                                       todo_stack')
-                                      t'
-                                | _ => Semantics.empty
-                                end
-                            end
-                        end
-      end.
+      (magicFuel : nat) (e: env) (fpval: word) (s : stmt) (t : Semantics.abstract_trace) (f : Semantics.abstract_trace(*remaining part of t*) -> Semantics.abstract_trace(*rest of st*)) :
+    Semantics.abstract_trace :=
+    match magicFuel with
+    | O => Semantics.empty
+    | S magicFuel' => let transform_stmt_trace := transform_stmt_trace magicFuel' e fpval in
+                      match s with
+                      | SLoad sz x y o =>
+                          match t with
+                          | Semantics.cons_read _(*sz*) a t' =>
+                              Semantics.abstract_app
+                                (Semantics.generator (leak_save_ires_reg fpval x ++
+                                                        [Semantics.read sz a] ++
+                                                        leak_load_iarg_reg fpval y))
+                                (f t')
+                          | _ => Semantics.empty
+                          end
+                      | SStore sz x y o =>
+                          match t with
+                          | Semantics.cons_write _(*sz*) a t' =>
+                              Semantics.abstract_app
+                                (Semantics.generator ([Semantics.write sz a] ++
+                                                        leak_load_iarg_reg fpval y ++
+                                                        leak_load_iarg_reg fpval x))
+                                (f t')
+                          | _ => Semantics.empty
+                          end
+                      | SInlinetable _ x _ i =>
+                          Semantics.abstract_app
+                            (Semantics.generator (leak_save_ires_reg fpval x ++
+                                                    leak_load_iarg_reg fpval i))
+                            (f t)
+                      | SStackalloc x _ body =>
+                          match t with
+                          | Semantics.cons_salloc g =>
+                              Semantics.cons_salloc (fun a =>
+                                                       let t' := g a in
+                                                       Semantics.abstract_app
+                                                         (Semantics.generator (leak_save_ires_reg fpval x))
+                                                         (transform_stmt_trace body t' f))
+                          | _ => Semantics.empty
+                          end
+                      | SLit x _ =>
+                          Semantics.abstract_app
+                            (Semantics.generator (leak_save_ires_reg fpval x))
+                            (f t)
+                      | SOp x op y oz =>
+                          let spilled_t :=
+                            leak_save_ires_reg fpval x ++
+                              match oz with
+                              | Var z => leak_load_iarg_reg fpval z
+                              | Const _ => nil
+                              end ++
+                              leak_load_iarg_reg fpval y in
+                          Semantics.abstract_app
+                            (Semantics.generator spilled_t)
+                            (f t)
+                      | SSet x y =>
+                            Semantics.abstract_app
+                              (Semantics.generator (leak_save_ires_reg fpval x ++ leak_load_iarg_reg fpval y))
+                              (f t)
+                      | SIf c thn els =>
+                          match t with
+                          | Semantics.cons_branch b t' =>
+                              Semantics.abstract_app
+                                (Semantics.generator (leak_spill_bcond ++ leak_prepare_bcond fpval c))
+                                (transform_stmt_trace (if b then thn else els) t' f)
+                          | _ => Semantics.empty
+                          end
+                      | SLoop s1 c s2 =>
+                          transform_stmt_trace s1 t (fun t' =>
+                                                       Semantics.abstract_app
+                                                         (Semantics.generator (leak_spill_bcond ++ leak_prepare_bcond fpval c))
+                                                         (match t' with
+                                                          | Semantics.cons_branch true t'' =>
+                                                              transform_stmt_trace s2 t'' (fun t''' => transform_stmt_trace s t''' f)
+                                                          | Semantics.cons_branch false t'' =>
+                                                              f t''
+                                                          | _ => Semantics.empty
+                                                          end)
+                            )
+                      | SSeq s1 s2 => transform_stmt_trace s1 t (fun t' => transform_stmt_trace s2 t' f)
+                      | SSkip => f t
+                      | SCall resvars fname argvars =>
+                          match @map.get _ _ env e fname with
+                          | Some (params, rets, fbody) =>
+                              Semantics.abstract_app
+                                (Semantics.generator (leak_set_reg_range_to_vars fpval argvars))
+                                (transform_stmt_trace fbody t (fun t' =>
+                                                                 Semantics.abstract_app
+                                                                   (Semantics.generator (leak_set_vars_to_reg_range fpval resvars))
+                                                                   (f t')))
+           
+                          | _ => Semantics.empty
+                          end
+                      | SInteract resvars _ argvars =>
+                          match t with
+                          | Semantics.cons_IO i t' =>
+                              Semantics.abstract_app
+                                (Semantics.generator (leak_set_vars_to_reg_range fpval resvars ++
+                                                        [Semantics.IO i] ++
+                                                        leak_set_reg_range_to_vars fpval argvars))
+                                (f t')
+                          | _ => Semantics.empty
+                          end
+                      end
+    end.
 
   Fixpoint spill_stmt(s: stmt): stmt :=
     match s with
