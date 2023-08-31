@@ -167,7 +167,10 @@ Section Spilling.
    Check bytes_per_word.
   (*TODO: remove sz from source-level read/writes. it's useless, we already know it from branching 
     information. similarly, we could replace separate read/writes with just one rw constructor. 
-    maybe that's too much though. we could be sillier yet and say that every element of the trace is an integer (1,0 for branches)*) Print save_ires_reg. Print leak_load_iarg_reg. Print load_iarg_reg. Print ires_reg.
+    maybe that's too much though. we could be sillier yet and say that every element of the trace is an integer (word.unsigned for r/w/salloc, 1/0 for branches)*) Print save_ires_reg. Print leak_load_iarg_reg. Print load_iarg_reg. Print ires_reg.
+   Check exec.
+   Print exec.exec.
+   
   Fixpoint transform_stmt_trace {env: map.map String.string (list Z * list Z * stmt)}
       (* maps the abstract trace of an unspilled program to the abstract trace of the spilled program.
          executes s, guided by t, popping events off of t and adding events to st as it goes.
@@ -453,7 +456,7 @@ Section Spilling.
                              Semantics.abstract_app
                                (Semantics.generator (leak_set_vars_to_reg_range fpval argnames))
                                (Semantics.abstract_app
-                                  (transform_stmt_trace magicFuel e fpval  [do_stmt body] t)
+                                  (transform_stmt_trace magicFuel e fpval body t (fun x => x))
                                   (Semantics.generator (leak_set_reg_range_to_vars fpval resnames)))).
 
   Lemma firstn_min_absorb_length_r{A: Type}: forall (l: list A) n,
@@ -1372,12 +1375,12 @@ Section Spilling.
     forall l mc, map.of_list_zip argnames argvals = Some l ->
                  exec e fbody t m l mc (fun t' m' l' mc' =>
                    exists t'', Semantics.generates a t'' /\ t' = t'' ++ t).
-  Lemma transform_trace_correct argnames argvals retnames argnames' resnames' fbody fbody' e1 e2 s1 t1 m1 l1 mc1 a :
+  (*Lemma transform_trace_correct argnames argvals retnames argnames' resnames' fbody fbody' e1 e2 s1 t1 m1 l1 mc1 a :
     spill_functions e1 = Success e2 ->
     fun_has_abstract_trace e1 argnames fbody a t1 m1 argvals ->
     spill_fun (argnames, retnames, fbody) = Success (argnames', resnames', fbody') ->
     exists fuel,
-    exec e2 (spill_fun (argnames, retnames, fbody)) nil m1 l1 mc1 (fun t2' m2' l2' mc2' => Semantics.generates (transform_fun_trace fuel e2 [do_stmt fbody] a1) t2').
+    exec e2 (spill_fun (argnames, retnames, fbody)) nil m1 l1 mc1 (fun t2' m2' l2' mc2' => Semantics.generates (transform_fun_trace fuel e2 [do_stmt fbody] a1) t2').*)
 
   (* In exec.call, there are many maps of locals involved:
 
