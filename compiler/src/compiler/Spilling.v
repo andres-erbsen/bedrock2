@@ -1092,15 +1092,7 @@ Section Spilling.
         { assumption. }
         { assumption. }
   Qed.
-    
-  Definition nill : Semantics.trace := nil.
 
-  Fixpoint stupid (n : nat) :=
-    match n with
-    | S n' => stupid n' ++ [0]
-    | O => nil
-    end.
-        
   Lemma set_reg_range_to_vars_correct:
     forall args argvs start e t1 t2 m1 m2 l1 l2 mc2 maxvar frame post fpval,
       related maxvar frame fpval (fio t1) m1 l1 (fio t2) m2 l2 ->
@@ -1345,10 +1337,23 @@ Section Spilling.
       blia.
   Qed.
 
-  Definition spilling_correct_for(e1 e2 : env)(s1 : stmt): Prop :=
+  Definition stmt_has_abstract_trace
+    (e: env) (s : stmt) (a: Semantics.abstract_trace)
+    (t: Semantics.trace)(m: mem)(l: locals)(mc: MetricLog): Prop :=
+    exec e s t m l mc (fun t' _ _ _ =>
+                         exists t'', Semantics.generates a t'' /\ t' = t'' ++ t).
+
+  Print transform_stmt_trace.
+  Definition generates_with_rem : Semantics.abstract_trace -> Semantics.trace -> Semantics.abstract_trace -> Prop. Admitted.
+
+  Definition spilling_correct_for(e1 e2 : env)(s1 : stmt)(a1 : option Semantics.abstract_trace)(f : Semantics.abstract_trace -> Semantics.abstract_trace): Prop :=
       forall (t1 : Semantics.trace) (m1 : mem) (l1 : locals) (mc1 : MetricLog)
              (post : Semantics.trace -> mem -> locals -> MetricLog -> Prop),
-        exec e1 s1 t1 m1 l1 mc1 post ->
+        exec e1 s1 t1 m1 l1 mc1 (fun t1' m1' l1' mc1' =>
+                                   post t1' m1' l1' mc1' /\
+                                     (match a1 with
+                                      | None => True
+                                      | Some a1 => exists t1'' a1', generates_with_rem a1 t1'' a1' /\ t1' = t1'' ++ t1 end)) ->
         forall (frame : mem -> Prop) (maxvar : Z),
           valid_vars_src maxvar s1 ->
           forall (t2 : Semantics.trace) (m2 : mem) (l2 : locals) (mc2 : MetricLog) (fpval : word),
@@ -1357,7 +1362,14 @@ Section Spilling.
                  (fun (t2' : Semantics.trace) (m2' : mem) (l2' : locals) (mc2' : MetricLog) =>
                     exists t1' m1' l1' mc1',
                       related maxvar frame fpval (fio t1') m1' l1' (fio t2') m2' l2' /\
-                      post t1' m1' l1' mc1').
+                        post t1' m1' l1' mc1' /\
+                        (match a1 with
+                         | None => True
+                         | Some a1 => exists fuel a1' t1'' t2'', generates_with_rem a1 t1'' a1' /\
+                                                                   t1' = t1'' ++ t1 /\
+                                                                   generates_with_rem (transform_stmt_trace fuel e2 fpval s1 a1 id) t2'' (f a1') /\
+                                                                   t2' = t2'' ++ t2 end)).
+              
 
   Definition call_spec(e: env) '(argnames, retnames, fbody)
              (t: Semantics.trace)(m: mem)(argvals: list word)
@@ -1367,20 +1379,20 @@ Section Spilling.
                    exists retvals, map.getmany_of_list l' retnames = Some retvals /\
                    post (Semantics.filterio t') m' retvals).
 
-  Check transform_fun_trace. Print call_spec. Print related. Print exec.exec.
-  Print spill_fun.
   Definition fun_has_abstract_trace
     (e: env) (argnames : list Z) (fbody : stmt) (a: Semantics.abstract_trace)
     (t: Semantics.trace)(m: mem)(argvals: list word): Prop :=
     forall l mc, map.of_list_zip argnames argvals = Some l ->
                  exec e fbody t m l mc (fun t' m' l' mc' =>
-                   exists t'', Semantics.generates a t'' /\ t' = t'' ++ t).
-  (*Lemma transform_trace_correct argnames argvals retnames argnames' resnames' fbody fbody' e1 e2 s1 t1 m1 l1 mc1 a :
+                                          exists t'', Semantics.generates a t'' /\ t' = t'' ++ t).
+  
+  Lemma transform_trace_correct argnames argvals retnames argnames' resnames' fbody fbody' e1 e2 t m a :
     spill_functions e1 = Success e2 ->
-    fun_has_abstract_trace e1 argnames fbody a t1 m1 argvals ->
+    fun_has_abstract_trace e1 argnames fbody a t m argvals ->
     spill_fun (argnames, retnames, fbody) = Success (argnames', resnames', fbody') ->
     exists fuel,
-    exec e2 (spill_fun (argnames, retnames, fbody)) nil m1 l1 mc1 (fun t2' m2' l2' mc2' => Semantics.generates (transform_fun_trace fuel e2 [do_stmt fbody] a1) t2').*)
+      fun_has_abstract_trace e2 argnames' fbody' (transform_fun_trace fuel e2 (argnames', resnames', fbody') a) t m argvals. Abort.
+
 
   (* In exec.call, there are many maps of locals involved:
 
@@ -1408,7 +1420,7 @@ Section Spilling.
      what happens in the callee. TODO: actually use that lemma in case exec.call.
      Moreover, this lemma will also be used in the pipeline, where phases
      are composed based on the semantics of function calls. *)
-  Lemma spill_fun_correct_aux: forall e1 e2 argnames1 retnames1 body1 argnames2 retnames2 body2,
+  (*Lemma spill_fun_correct_aux: forall e1 e2 argnames1 retnames1 body1 argnames2 retnames2 body2,
       spill_fun (argnames1, retnames1, body1) = Success (argnames2, retnames2, body2) ->
       spilling_correct_for e1 e2 body1 ->
       forall argvals t m (post: Semantics.io_trace -> mem -> list word -> Prop),
@@ -1552,7 +1564,7 @@ Section Spilling.
     { eassumption. }
     Unshelve.
     all: try assumption.
-  Qed.
+  Qed.*)
 
   Lemma spilling_correct (e1 e2 : env) (Ev : spill_functions e1 = Success e2)
         (s1 : stmt)
