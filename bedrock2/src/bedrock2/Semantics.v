@@ -34,12 +34,28 @@ Inductive abstract_trace {width: Z}{BW: Bitwidth width}{word: word.word width}{m
 | cons_salloc (after : word -> abstract_trace).
 Import ListNotations.
 Inductive generates {width: Z}{BW: Bitwidth width}{word: word.word width}{mem: map.map word byte} : abstract_trace -> trace -> Prop :=
-| empty_gen : generates empty nil
+| nil_gen : generates empty nil
 | IO_gen : forall x a t_rev, generates a t_rev -> generates (cons_IO x a) (IO x :: t_rev)
 | branch_gen : forall x a t_rev, generates a t_rev -> generates (cons_branch x a) (branch x :: t_rev)
 | read_gen : forall x1 x2 a t_rev, generates a t_rev -> generates (cons_read x1 x2 a) (read x1 x2 :: t_rev)
 | write_gen : forall x1 x2 a t_rev, generates a t_rev -> generates (cons_write x1 x2 a) (write x1 x2 :: t_rev)
-| salloc_gen : forall f x t_rev, generates (f x) t_rev -> generates (cons_salloc f) (salloc x :: t_rev). Print app.
+| salloc_gen : forall f x t_rev, generates (f x) t_rev -> generates (cons_salloc f) (salloc x :: t_rev).
+
+Inductive generates_with_rem {width: Z}{BW: Bitwidth width}{word: word.word width}{mem: map.map word byte} : abstract_trace -> trace -> abstract_trace -> Prop :=
+| nil_gen_rem : forall a, generates_with_rem a nil a
+| IO_gen_rem : forall x a t_rev a', generates_with_rem a t_rev a' -> generates_with_rem (cons_IO x a) (IO x :: t_rev) a'
+| branch_gen_rem : forall x a t_rev a', generates_with_rem a t_rev a' -> generates_with_rem (cons_branch x a) (branch x :: t_rev) a'
+| read_gen_rem : forall x1 x2 a t_rev a', generates_with_rem a t_rev a' -> generates_with_rem (cons_read x1 x2 a) (read x1 x2 :: t_rev) a'
+| write_gen_rem : forall x1 x2 a t_rev a', generates_with_rem a t_rev a' -> generates_with_rem (cons_write x1 x2 a) (write x1 x2 :: t_rev) a'
+| salloc_gen_rem : forall f x t_rev a', generates_with_rem (f x) t_rev a' -> generates_with_rem (cons_salloc f) (salloc x :: t_rev) a'.
+
+Lemma generates_generates_with_empty_rem {width: Z}{BW: Bitwidth width}{word: word.word width}{mem: map.map word byte} a t :
+  generates a t <-> generates_with_rem a t empty.
+Proof.
+  split; intros H.
+  - induction H; constructor; assumption.
+  - remember empty as a'. induction H; subst; constructor; auto.
+Qed.
 
 Fixpoint abstract_app {width: Z}{BW: Bitwidth width}{word: word.word width}{mem: map.map word byte} (a1 a2 : abstract_trace) : abstract_trace :=
   match a1 with
