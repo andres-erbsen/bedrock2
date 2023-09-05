@@ -1028,7 +1028,8 @@ Section Spilling.
       a0 <= start ->
       start + Z.of_nat (List.length args) <= a7 + 1 ->
       Forall (fun x => fp < x <= maxvar /\ (x < a0 \/ a7 < x)) args ->
-      (forall t2' m2' l2' mc2',
+      (forall m2' l2' mc2',
+          let t2' := leak_set_vars_to_reg_range fpval args ++ t2 in
           related maxvar frame fpval (fio t1) m1 l1' (fio t2') m2' l2' ->
           post t2' m2' l2' mc2') ->
       exec e (set_vars_to_reg_range args start) t2 m2 l2 mc2 post.
@@ -1039,6 +1040,7 @@ Section Spilling.
       unfold related in H. fwd.
       eapply exec.seq_cps.
       rewrite (Z.add_comm 1 start) in *.
+      simpl in H6. cbv [leak_set_var_to_reg stack_loc] in H6.
       destr (32 <=? a).
       + edestruct store_to_word_array with (i := a - 32).
         1: ecancel_assumption. 1: blia.
@@ -1067,7 +1069,8 @@ Section Spilling.
           match goal with H: _ |- _ => eapply H end. 1: blia.
           assumption. }
         { blia. }
-      + eapply exec.set.
+      + rewrite app_nil_r in H6.
+        eapply exec.set.
         { eassumption. }
         eapply IHargs; try eassumption; try blia. 2: {
           eapply map.getmany_of_list_put_diff. 2: eassumption.
@@ -1101,7 +1104,8 @@ Section Spilling.
       start + Z.of_nat (List.length args) <= a7 + 1 ->
       Forall (fun x => fp < x <= maxvar /\ (x < a0 \/ a7 < x)) args ->
       map.getmany_of_list l1 args = Some argvs ->
-      (forall t2' l2' mc2',
+      (forall l2' mc2',
+          let t2' := leak_set_reg_range_to_vars fpval args ++ t2 in
           related maxvar frame fpval (fio t1) m1 l1 (fio t2') m2 l2' ->
           map.getmany_of_list l2' (List.unfoldn (Z.add 1) (List.length args) start) = Some argvs ->
           post t2' m2 l2' mc2') ->
@@ -1118,6 +1122,7 @@ Section Spilling.
       eapply map.invert_getmany_of_list_cons in H4. destruct H4 as [G GM].
       cbn [List.length] in *.
       simp.
+      cbn [leak_set_reg_range_to_vars] in H5. cbv [leak_set_reg_to_var stack_loc] in H5.
       destr (32 <=? a).
       + eapply exec.seq_cps.
         eapply IHargs; try eassumption; try blia.
@@ -1132,7 +1137,7 @@ Section Spilling.
           eapply map.get_split_r. 1,3: eassumption.
           destr (map.get mp a); [exfalso|reflexivity].
           specialize H3p2 with (1 := E0). blia.
-        * repeat rewrite <- app_comm_cons in H5. eapply H5.
+        * eapply H5.
           -- unfold related.
              repeat match goal with
                     | |- exists _, _ => eexists
@@ -1343,9 +1348,6 @@ Section Spilling.
     exec e s t m l mc (fun t' _ _ _ =>
                          exists t'', Semantics.generates a t'' /\ t' = t'' ++ t).
 
-  Print transform_stmt_trace.
-  Definition generates_with_rem : Semantics.abstract_trace -> Semantics.trace -> Semantics.abstract_trace -> Prop. Admitted.
-
   Definition spilling_correct_for(e1 e2 : env)(s1 : stmt)(a1 : option Semantics.abstract_trace)(f : Semantics.abstract_trace -> Semantics.abstract_trace): Prop :=
       forall (t1 : Semantics.trace) (m1 : mem) (l1 : locals) (mc1 : MetricLog)
              (post : Semantics.trace -> mem -> locals -> MetricLog -> Prop),
@@ -1353,7 +1355,7 @@ Section Spilling.
                                    post t1' m1' l1' mc1' /\
                                      (match a1 with
                                       | None => True
-                                      | Some a1 => exists t1'' a1', generates_with_rem a1 t1'' a1' /\ t1' = t1'' ++ t1 end)) ->
+                                      | Some a1 => exists t1'' a1', Semantics.generates_with_rem a1 (rev t1'') a1' /\ t1' = t1'' ++ t1 end)) ->
         forall (frame : mem -> Prop) (maxvar : Z),
           valid_vars_src maxvar s1 ->
           forall (t2 : Semantics.trace) (m2 : mem) (l2 : locals) (mc2 : MetricLog) (fpval : word),
@@ -1365,9 +1367,9 @@ Section Spilling.
                         post t1' m1' l1' mc1' /\
                         (match a1 with
                          | None => True
-                         | Some a1 => exists fuel a1' t1'' t2'', generates_with_rem a1 t1'' a1' /\
+                         | Some a1 => exists fuel a1' t1'' t2'', Semantics.generates_with_rem a1 (rev t1'') a1' /\
                                                                    t1' = t1'' ++ t1 /\
-                                                                   generates_with_rem (transform_stmt_trace fuel e2 fpval s1 a1 id) t2'' (f a1') /\
+                                                                   Semantics.generates_with_rem (transform_stmt_trace fuel e2 fpval s1 a1 f) t2'' (f a1') /\
                                                                    t2' = t2'' ++ t2 end)).
               
 
@@ -1566,25 +1568,42 @@ Section Spilling.
     all: try assumption.
   Qed.*)
 
+  Lemma app_one_cons {A} (x : A) (l : list A) :
+    x :: l = [x] ++ l.
+  Proof. reflexivity. Qed.
+
   Lemma spilling_correct (e1 e2 : env) (Ev : spill_functions e1 = Success e2)
         (s1 : stmt)
         (t1 : Semantics.trace)
         (m1 : mem)
         (l1 : locals)
         (mc1 : MetricLog)
-        (post : Semantics.trace -> mem -> locals -> MetricLog -> Prop):
-    exec e1 s1 t1 m1 l1 mc1 post ->
-    forall (frame : mem -> Prop) (maxvar : Z),
-      valid_vars_src maxvar s1 ->
-      forall (t2 : Semantics.trace) (m2 : mem) (l2 : locals) (mc2 : MetricLog) (fpval : word),
-        related maxvar frame fpval (fio t1) m1 l1 (fio t2) m2 l2 ->
-        exec e2 (spill_stmt s1) t2 m2 l2 mc2
-             (fun (t2' : Semantics.trace) (m2' : mem) (l2' : locals) (mc2' : MetricLog) =>
-                exists t1' m1' l1' mc1',
-                  related maxvar frame fpval (fio t1') m1' l1' (fio t2') m2' l2' /\
-                  post t1' m1' l1' mc1').
+        (post : Semantics.trace -> mem -> locals -> MetricLog -> Prop)
+        (a1: option Semantics.abstract_trace)
+        (f: Semantics.abstract_trace -> Semantics.abstract_trace):
+    exec e1 s1 t1 m1 l1 mc1 (fun t1' m1' l1' mc1' =>
+                                   post t1' m1' l1' mc1' /\
+                                     (match a1 with
+                                      | None => True
+                                      | Some a1 => exists t1'' a1', Semantics.generates_with_rem a1 (rev t1'') a1' /\ t1' = t1'' ++ t1 end)) ->
+        forall (frame : mem -> Prop) (maxvar : Z),
+          valid_vars_src maxvar s1 ->
+          forall (t2 : Semantics.trace) (m2 : mem) (l2 : locals) (mc2 : MetricLog) (fpval : word),
+            related maxvar frame fpval (fio t1) m1 l1 (fio t2) m2 l2 ->
+            exec e2 (spill_stmt s1) t2 m2 l2 mc2
+                 (fun (t2' : Semantics.trace) (m2' : mem) (l2' : locals) (mc2' : MetricLog) =>
+                    exists t1' m1' l1' mc1',
+                      related maxvar frame fpval (fio t1') m1' l1' (fio t2') m2' l2' /\
+                        post t1' m1' l1' mc1' /\
+                        (match a1 with
+                         | None => True
+                         | Some a1 => exists fuel a1' t1'' t2'', Semantics.generates_with_rem a1 (rev t1'') a1' /\
+                                                                   t1' = t1'' ++ t1 /\
+                                                                   Semantics.generates_with_rem (transform_stmt_trace fuel e2 fpval s1 a1 f) t2'' (f a1') /\
+                                                                   t2' = t2'' ++ t2 end)).
   Proof.
-    induction 1; intros; cbn [spill_stmt valid_vars_src Forall_vars_stmt] in *; fwd.
+    remember (fun _ _ _ _ => _) as post0.
+    induction 1; intros; cbn [spill_stmt valid_vars_src Forall_vars_stmt] in *; fwd; subst.
     - (* exec.interact *)
       eapply exec.seq_cps.
       eapply set_reg_range_to_vars_correct; try eassumption; try (unfold a0, a7; blia).
@@ -1626,13 +1645,32 @@ Section Spilling.
         { reflexivity. }
         { unfold a0, a7. blia. }
         { eassumption. }
-        { intros. do 4 eexists. split. 1: eassumption. eapply H2p1.
-          unfold map.split. split; [reflexivity|].
-          move C at bottom.
-          unfold sep at 1 in C. destruct C as (mKeepL' & mRest & SC & ? & _). subst mKeepL'.
-          move H2 at bottom. unfold map.split in H2. fwd.
-          eapply map.shrink_disjoint_l; eassumption. }
-        (* related for set_vars_to_reg_range_correct: *)
+        { Check set_vars_to_reg_range_correct. intros. do 4 eexists. split. 1: eassumption.
+          assert (H5: map.split (map.putmany mKeep mReceive) mKeep mReceive).
+          { unfold map.split. split; [reflexivity|].
+            move C at bottom.
+            unfold sep at 1 in C. destruct C as (mKeepL' & mRest & SC & ? & _). subst mKeepL'.
+            move H2 at bottom. unfold map.split in H2. fwd.
+            eapply map.shrink_disjoint_l; eassumption. }
+          apply H2p1 in H5.
+          destruct H5 as [H5p1 H5p2]. split; [apply H5p1|].
+          destruct a1 as [a1|]; [|reflexivity].
+          destruct H5p2 as [t1'' [a1' [H5p2p1 H5p2p2]]].
+          rewrite app_one_cons in H5p2p2.
+          apply app_inv_tail in H5p2p2. subst.
+          exists 1%nat. eexists. eexists. eexists.
+          split; [apply H5p2p1|].
+          split; [reflexivity|].
+          cbn [transform_stmt_trace].
+          simpl in H5p2p1.
+          inversion H5p2p1. subst.
+          inversion H9. subst.
+          subst t2'. subst t2'0. split.
+          2: { rewrite app_one_cons. do 2 rewrite app_assoc. reflexivity. }
+          
+          exists 1 a1' t1''.
+          cbn
+          (* related for set_vars_to_reg_range_correct: *)
         unfold related.
         eexists _, _, _. ssplit.
         * simpl. f_equal. assumption.
