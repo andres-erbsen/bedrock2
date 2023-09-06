@@ -1572,6 +1572,16 @@ Section Spilling.
     x :: l = [x] ++ l.
   Proof. reflexivity. Qed.
 
+  Lemma generates_with_rem_app a1 a1' a2 t :
+    Semantics.generates_with_rem a1 t a1' ->
+    Semantics.generates_with_rem (Semantics.abstract_app a1 a2) t (Semantics.abstract_app a1' a2).
+  Proof. Admitted.
+
+  Lemma generates_with_empty_rem_app a1 a2 t :
+    Semantics.generates_with_rem a1 t Semantics.empty ->
+    Semantics.generates_with_rem (Semantics.abstract_app a1 a2) t a2.
+  Proof. Admitted.
+
   Lemma spilling_correct (e1 e2 : env) (Ev : spill_functions e1 = Success e2)
         (s1 : stmt)
         (t1 : Semantics.trace)
@@ -1581,11 +1591,11 @@ Section Spilling.
         (post : Semantics.trace -> mem -> locals -> MetricLog -> Prop)
         (a1: option Semantics.abstract_trace)
         (f: Semantics.abstract_trace -> Semantics.abstract_trace):
-    exec e1 s1 t1 m1 l1 mc1 (fun t1' m1' l1' mc1' =>
-                                   post t1' m1' l1' mc1' /\
-                                     (match a1 with
+    exec e1 s1 t1 m1 l1 mc1 post ->
+    (forall t1' m1' l1' mc1', post t1' m1' l1' mc1' ->
+                              match a1 with
                                       | None => True
-                                      | Some a1 => exists t1'' a1', Semantics.generates_with_rem a1 (rev t1'') a1' /\ t1' = t1'' ++ t1 end)) ->
+                                      | Some a1 => exists t1'' a1', Semantics.generates_with_rem a1 (rev t1'') a1' /\ t1' = t1'' ++ t1 end) ->
         forall (frame : mem -> Prop) (maxvar : Z),
           valid_vars_src maxvar s1 ->
           forall (t2 : Semantics.trace) (m2 : mem) (l2 : locals) (mc2 : MetricLog) (fpval : word),
@@ -1602,12 +1612,12 @@ Section Spilling.
                                                                    Semantics.generates_with_rem (transform_stmt_trace fuel e2 fpval s1 a1 f) t2'' (f a1') /\
                                                                    t2' = t2'' ++ t2 end)).
   Proof.
-    remember (fun _ _ _ _ => _) as post0.
-    induction 1; intros; cbn [spill_stmt valid_vars_src Forall_vars_stmt] in *; fwd; subst.
+    induction 1; intros; cbn [spill_stmt valid_vars_src Forall_vars_stmt] in *; fwd.
     - (* exec.interact *)
+      subst. 
       eapply exec.seq_cps.
       eapply set_reg_range_to_vars_correct; try eassumption; try (unfold a0, a7; blia).
-      intros *. intros R GM. clear l2 mc2 H4.
+      intros *. intros R GM. clear l2 mc2 H5.
       unfold related in R. fwd.
       spec (subst_split (ok := mem_ok) m) as A.
       1: eassumption. 1: ecancel_assumption.
@@ -1646,30 +1656,33 @@ Section Spilling.
         { unfold a0, a7. blia. }
         { eassumption. }
         { Check set_vars_to_reg_range_correct. intros. do 4 eexists. split. 1: eassumption.
-          assert (H5: map.split (map.putmany mKeep mReceive) mKeep mReceive).
+          assert (H6: map.split (map.putmany mKeep mReceive) mKeep mReceive).
           { unfold map.split. split; [reflexivity|].
             move C at bottom.
             unfold sep at 1 in C. destruct C as (mKeepL' & mRest & SC & ? & _). subst mKeepL'.
             move H2 at bottom. unfold map.split in H2. fwd.
             eapply map.shrink_disjoint_l; eassumption. }
-          apply H2p1 in H5.
-          destruct H5 as [H5p1 H5p2]. split; [apply H5p1|].
+          apply H2p1 in H6.
+          split; [apply H6|].
           destruct a1 as [a1|]; [|reflexivity].
-          destruct H5p2 as [t1'' [a1' [H5p2p1 H5p2p2]]].
-          rewrite app_one_cons in H5p2p2.
-          apply app_inv_tail in H5p2p2. subst.
+          (* begin constant-time stuff for interact *)
+          apply H3 in H6.
+          destruct H6 as [t1'' [a1' [H6p1 H6p2]]].
+          rewrite app_one_cons in H6p2.
+          apply app_inv_tail in H6p2. subst.
           exists 1%nat. eexists. eexists. eexists.
-          split; [apply H5p2p1|].
+          split; [apply H6p1|].
           split; [reflexivity|].
           cbn [transform_stmt_trace].
-          simpl in H5p2p1.
-          inversion H5p2p1. subst.
-          inversion H9. subst.
+          simpl in H6p1.
+          inversion H6p1. subst.
+          inversion H10. subst.
           subst t2'. subst t2'0. split.
           2: { rewrite app_one_cons. do 2 rewrite app_assoc. reflexivity. }
-          
-          exists 1 a1' t1''.
-          cbn
+          apply generates_with_empty_rem_app.
+          apply Semantics.generates_generates_with_empty_rem. repeat rewrite app_assoc.
+          apply Semantics.generator_generates.
+          (* end constant-time stuff for interact *) }
           (* related for set_vars_to_reg_range_correct: *)
         unfold related.
         eexists _, _, _. ssplit.
@@ -1685,7 +1698,7 @@ Section Spilling.
         * eassumption.
         * eassumption.
 
-    - (* exec.call *)
+    - Search outcome. (* exec.call *)
       (* H = High-level, L = Low-level, C = Caller, F = called Function
 
                    H                                       L
@@ -1707,7 +1720,7 @@ Section Spilling.
                   lCH8                                    lCL8
       *)
       rename l into lCH1, l2 into lCL1, st0 into lFH4.
-      rename H4p0 into FR, H4p1 into FA.
+      rename H5p0 into FR, H5p1 into FA.
       unfold spill_functions in Ev.
       eapply map.try_map_values_fw in Ev. 2: eassumption.
       unfold spill_fun in Ev. fwd.
@@ -1715,7 +1728,7 @@ Section Spilling.
       apply_in_hyps @map.getmany_of_list_length.
       apply_in_hyps @map.putmany_of_list_zip_sameLength.
       eapply set_reg_range_to_vars_correct; try eassumption || (unfold a0, a7 in *; blia).
-      intros tL2 lCL2 ? ? ?.
+      intros lCL2 ? tCL2 ? ?.
       assert (bytes_per_word = 4 \/ bytes_per_word = 8) as B48. {
         unfold bytes_per_word. destruct width_cases as [E' | E']; rewrite E'; cbv; auto.
       }
@@ -1751,7 +1764,7 @@ Section Spilling.
         Z.to_euclidean_division_equations; blia.
       }
       eapply exec.seq_cps.
-      unfold related in H4. fwd. rename lStack into lStack1, lRegs into lRegs1.
+      unfold related in H5. fwd. rename lStack into lStack1, lRegs into lRegs1.
       eapply set_vars_to_reg_range_correct.
       { eapply fresh_related with (m1 := m) (frame := (word_array fpval stackwords * frame)%sep).
         - eassumption.
@@ -1784,11 +1797,12 @@ Section Spilling.
         2: eapply Forall_le_max.
         cbv beta.
         subst maxvar'. clear. blia. }
-      intros tL4 mL4 lFL4 mcL4 R.
+      intros mL4 lFL4 mcL4 tL4 R.
       eapply exec.seq_cps.
-      eapply exec.weaken. {
+      eapply exec.weaken. { Check IHexec. Search outcome.
         eapply IHexec.
-        2: { Search (fio t). rewrite H4p0. exact R. }
+        { intros t1' m1' l1' mc1' H8. apply H3 in H8. destruct H8 as [retvs [l' [H8p1 [H8p2 H8p3]]]]. eapply H4. apply H8p3. }
+        2: { rewrite H5p0. exact R. }
         unfold valid_vars_src.
         eapply Forall_vars_stmt_impl.
         2: eapply max_var_sound.
@@ -1801,7 +1815,7 @@ Section Spilling.
         }
         cbv beta. subst maxvar'. blia.
       }
-      cbv beta. intros tL5 mL5 lFL5 mcL5 (tH5 & mH5 & lFH5 & mcH5 & R5 & OC).
+      cbv beta. intros tL5 mL5 lFL5 mcL5 (tH5 & mH5 & lFH5 & mcH5 & R5 & OC & CT).
       match goal with
       | H: context[outcome], A: context[outcome] |- _ =>
         specialize H with (1 := A); move H at bottom; rename H into Q
@@ -1839,7 +1853,7 @@ Section Spilling.
         apply_in_hyps @map.getmany_of_list_length.
         apply_in_hyps @map.putmany_of_list_zip_sameLength.
         congruence.
-      }
+      } Check lCL2.
       eapply map.sameLength_putmany_of_list with (st := lCL2) in PM67.
       destruct PM67 as (lCL7 & PM67).
       subst mL5. unfold map.split.
@@ -1884,8 +1898,9 @@ Section Spilling.
       { reflexivity. }
       { unfold a0, a7. blia. }
       { eassumption. }
-      { intros t22 m22 l22 mc22 R22. do 4 eexists. split. 1: eassumption.
-        eassumption. }
+      { intros m22 l22 mc22 t22 R22. do 4 eexists. split. 1: eassumption. split. 1: eassumption.
+        (* more not-entirely-trivial CT stuff goes here. *)
+      }
 
     - (* exec.load *)
       eapply exec.seq_cps.
