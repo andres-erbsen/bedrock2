@@ -1582,59 +1582,6 @@ Section Spilling.
     x :: l = [x] ++ l.
   Proof. reflexivity. Qed.
 
-  Lemma generates_with_rem_app a1 a1' a2 t :
-    Semantics.generates_with_rem a1 t a1' ->
-    Semantics.generates_with_rem (Semantics.abstract_app a1 a2) t (Semantics.abstract_app a1' a2).
-  Proof. Admitted.
-
-  Lemma generates_with_empty_rem_app a1 a2 t :
-    Semantics.generates_with_rem a1 t Semantics.empty ->
-    Semantics.generates_with_rem (Semantics.abstract_app a1 a2) t a2.
-  Proof. Admitted.
-
-  Lemma generates_with_rem_trans :
-    forall a1 a2 a3 t1 t2,
-      Semantics.generates_with_rem a1 t1 a2 ->
-      Semantics.generates_with_rem a2 t2 a3 ->
-      Semantics.generates_with_rem a1 (t1 ++ t2) a3.
-  Proof. Admitted.
-
-  Print Semantics.abstract_trace.
-  Fixpoint abstract_traces_equivalent a1 a2 : Prop :=
-    match a1, a2 with
-    | Semantics.empty, Semantics.empty => True
-    | Semantics.cons_IO i1 a1', Semantics.cons_IO i2 a2' => i1 = i2 /\ abstract_traces_equivalent a1' a2'
-    | Semantics.cons_branch b1 a1', Semantics.cons_branch b2 a2' => b1 = b2 /\ abstract_traces_equivalent a1' a2'
-    | Semantics.cons_read sz1 addr1 a1', Semantics.cons_read sz2 addr2 a2' => sz1 = sz2 /\ addr1 = addr2 /\ abstract_traces_equivalent a1' a2'
-    | Semantics.cons_write sz1 addr1 a1', Semantics.cons_write sz2 addr2 a2' => sz1 = sz2 /\ addr1 = addr2 /\ abstract_traces_equivalent a1' a2'
-    | Semantics.cons_salloc f1, Semantics.cons_salloc f2 => forall addr, abstract_traces_equivalent (f1 addr) (f2 addr)
-    | _, _ => False
-    end.
-
-  Lemma abstract_traces_equivalent_app a01 a02 a11 a12 :
-    abstract_traces_equivalent a01 a02 ->
-    abstract_traces_equivalent a11 a12 ->
-    abstract_traces_equivalent (Semantics.abstract_app a01 a11) (Semantics.abstract_app a02 a12).
-  Proof. Admitted.
-
-  Lemma abstract_trace_equivalent_to_self a :
-    abstract_traces_equivalent a a.
-  Proof. Admitted.
-
-  Lemma rem_unique a t a'1 a'2 :
-    Semantics.generates_with_rem a t a'1 ->
-    Semantics.generates_with_rem a t a'2 ->
-    abstract_traces_equivalent a'1 a'2.
-  Proof. Admitted.
-
-  Lemma abstract_traces_equivalent_correct a t a'1 a'2 :
-    Semantics.generates_with_rem a t a'1 ->
-    abstract_traces_equivalent a'1 a'2 ->
-    Semantics.generates_with_rem a t a'2.
-  Proof. Admitted.
-
-
-
   Lemma spilling_correct (e1 e2 : env) (Ev : spill_functions e1 = Success e2)
         (s1 : stmt)
         (t1 : Semantics.trace)

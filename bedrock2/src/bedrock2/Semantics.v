@@ -13,99 +13,185 @@ Require Import Coq.Lists.List.
 (* BW is not needed on the rhs, but helps infer width *)
 Definition io_event {width: Z}{BW: Bitwidth width}{word: word.word width}{mem: map.map word byte} : Type :=
   (mem * String.string * list word) * (mem * list word).
-Definition io_trace {width: Z}{BW: Bitwidth width}{word: word.word width}{mem: map.map word byte} : Type :=
-  list io_event.
 
-Inductive event {width: Z}{BW: Bitwidth width}{word: word.word width}{mem: map.map word byte} : Type :=
-| IO : io_event -> event
-| branch : bool -> event
-| read : access_size -> word -> event
-| write : access_size -> word -> event
-| salloc : word -> event.
-Definition trace {width: Z}{BW: Bitwidth width}{word: word.word width}{mem: map.map word byte} : Type :=
-  list event.
+Section WithIOEvent.
+  Context {width: Z}{BW: Bitwidth width}{word: word.word width}{mem: map.map word byte}.
 
-Inductive abstract_trace {width: Z}{BW: Bitwidth width}{word: word.word width}{mem: map.map word byte} : Type :=
-| empty
-| cons_IO (e: io_event) (after : abstract_trace)
-| cons_branch (b : bool) (after : abstract_trace)
-| cons_read (sz : access_size) (a : word) (after : abstract_trace)
-| cons_write (sz : access_size) (a : word) (after : abstract_trace)
-| cons_salloc (after : word -> abstract_trace).
-Import ListNotations.
-Inductive generates {width: Z}{BW: Bitwidth width}{word: word.word width}{mem: map.map word byte} : abstract_trace -> trace -> Prop :=
-| nil_gen : generates empty nil
-| IO_gen : forall x a t_rev, generates a t_rev -> generates (cons_IO x a) (IO x :: t_rev)
-| branch_gen : forall x a t_rev, generates a t_rev -> generates (cons_branch x a) (branch x :: t_rev)
-| read_gen : forall x1 x2 a t_rev, generates a t_rev -> generates (cons_read x1 x2 a) (read x1 x2 :: t_rev)
-| write_gen : forall x1 x2 a t_rev, generates a t_rev -> generates (cons_write x1 x2 a) (write x1 x2 :: t_rev)
-| salloc_gen : forall f x t_rev, generates (f x) t_rev -> generates (cons_salloc f) (salloc x :: t_rev).
+  Definition io_trace : Type := list io_event.
 
-Inductive generates_with_rem {width: Z}{BW: Bitwidth width}{word: word.word width}{mem: map.map word byte} : abstract_trace -> trace -> abstract_trace -> Prop :=
-| nil_gen_rem : forall a, generates_with_rem a nil a
-| IO_gen_rem : forall x a t_rev a', generates_with_rem a t_rev a' -> generates_with_rem (cons_IO x a) (IO x :: t_rev) a'
-| branch_gen_rem : forall x a t_rev a', generates_with_rem a t_rev a' -> generates_with_rem (cons_branch x a) (branch x :: t_rev) a'
-| read_gen_rem : forall x1 x2 a t_rev a', generates_with_rem a t_rev a' -> generates_with_rem (cons_read x1 x2 a) (read x1 x2 :: t_rev) a'
-| write_gen_rem : forall x1 x2 a t_rev a', generates_with_rem a t_rev a' -> generates_with_rem (cons_write x1 x2 a) (write x1 x2 :: t_rev) a'
-| salloc_gen_rem : forall f x t_rev a', generates_with_rem (f x) t_rev a' -> generates_with_rem (cons_salloc f) (salloc x :: t_rev) a'.
+  Inductive event  : Type :=
+  | IO : io_event -> event
+  | branch : bool -> event
+  | read : access_size -> word -> event
+  | write : access_size -> word -> event
+  | salloc : word -> event.
 
-Lemma generates_generates_with_empty_rem {width: Z}{BW: Bitwidth width}{word: word.word width}{mem: map.map word byte} a t :
-  generates a t <-> generates_with_rem a t empty.
-Proof.
-  split; intros H.
-  - induction H; constructor; assumption.
-  - remember empty as a'. induction H; subst; constructor; auto.
-Qed.
+  Definition trace : Type := list event.
 
-Fixpoint abstract_app {width: Z}{BW: Bitwidth width}{word: word.word width}{mem: map.map word byte} (a1 a2 : abstract_trace) : abstract_trace :=
-  match a1 with
-  | empty => a2
-  | cons_IO e a1' => cons_IO e (abstract_app a1' a2)
-  | cons_branch b a1' => cons_branch b (abstract_app a1' a2)
-  | cons_read sz a a1' => cons_read sz a (abstract_app a1' a2)
-  | cons_write sz a a1' => cons_write sz a (abstract_app a1' a2)
-  | cons_salloc a1' => cons_salloc (fun w => abstract_app (a1' w) a2)
-  end.
+  Inductive abstract_trace : Type :=
+  | empty
+  | cons_IO (e: io_event) (after : abstract_trace)
+  | cons_branch (b : bool) (after : abstract_trace)
+  | cons_read (sz : access_size) (a : word) (after : abstract_trace)
+  | cons_write (sz : access_size) (a : word) (after : abstract_trace)
+  | cons_salloc (after : word -> abstract_trace).
 
-Lemma generates_app {width: Z}{BW: Bitwidth width}{word: word.word width}{mem: map.map word byte} :
-  forall a1 a2 t1 t2,
-  generates a1 t1 -> generates a2 t2 -> generates (abstract_app a1 a2) (t1 ++ t2).
-Proof.
-  intros a1. induction a1; intros a2 t1 t2 H1 H2; inversion H1; subst.
-  - simpl. assumption.
-  - simpl. constructor. auto.
-  - simpl. constructor. auto.
-  - simpl. constructor. auto.
-  - simpl. constructor. auto.
-  - simpl. constructor. auto.
-Qed. 
+  Inductive abs_tr_eq : abstract_trace -> abstract_trace -> Prop :=
+  | empty_eq : abs_tr_eq empty empty
+  | cons_IO_eq : forall i1 a1' i2 a2',
+      i1 = i2 ->
+      abs_tr_eq a1' a2' ->
+      abs_tr_eq (cons_IO i1 a1') (cons_IO i2 a2')
+  | cons_branch_eq : forall b1 a1' b2 a2',
+      b1 = b2 ->
+      abs_tr_eq a1' a2' ->
+      abs_tr_eq (cons_branch b1 a1') (cons_branch b2 a2')
+  | cons_read_eq : forall sz1 addr1 a1' sz2 addr2 a2',
+      sz1 = sz2 ->
+      addr1 = addr2 ->
+      abs_tr_eq a1' a2' ->
+      abs_tr_eq (cons_read sz1 addr1 a1') (cons_read sz2 addr2 a2')
+  | cons_write_eq : forall sz1 addr1 a1' sz2 addr2 a2',
+      sz1 = sz2 ->
+      addr1 = addr2 ->
+      abs_tr_eq a1' a2' ->
+      abs_tr_eq (cons_write sz1 addr1 a1') (cons_write sz2 addr2 a2')
+  | cons_salloc_eq : forall f1 f2,
+    (forall addr, abs_tr_eq (f1 addr) (f2 addr)) ->
+    abs_tr_eq (cons_salloc f1) (cons_salloc f2).
+  
+  Import ListNotations.
+  Inductive generates : abstract_trace -> trace -> Prop :=
+  | nil_gen : generates empty nil
+  | IO_gen : forall x a t_rev, generates a t_rev -> generates (cons_IO x a) (IO x :: t_rev)
+  | branch_gen : forall x a t_rev, generates a t_rev -> generates (cons_branch x a) (branch x :: t_rev)
+  | read_gen : forall x1 x2 a t_rev, generates a t_rev -> generates (cons_read x1 x2 a) (read x1 x2 :: t_rev)
+  | write_gen : forall x1 x2 a t_rev, generates a t_rev -> generates (cons_write x1 x2 a) (write x1 x2 :: t_rev)
+  | salloc_gen : forall f x t_rev, generates (f x) t_rev -> generates (cons_salloc f) (salloc x :: t_rev).
 
-Fixpoint generator {width: Z}{BW: Bitwidth width}{word: word.word width}{mem: map.map word byte} (t_rev : trace) : abstract_trace :=
-  match t_rev with
-  | nil => empty
-  | IO x :: t_rev' => cons_IO x (generator t_rev')
-  | branch x :: t_rev' => cons_branch x (generator t_rev')
-  | read x1 x2 :: t_rev' => cons_read x1 x2 (generator t_rev')
-  | write x1 x2 :: t_rev' => cons_write x1 x2 (generator t_rev')
-  | salloc x :: t_rev' => cons_salloc (fun _ => generator t_rev')
-  end.
+  Inductive generates_with_rem : abstract_trace -> trace -> abstract_trace -> Prop :=
+  | nil_gen_rem : forall a1 a2, abs_tr_eq a1 a2 -> generates_with_rem a1 nil a2
+  | IO_gen_rem : forall x a t_rev a', generates_with_rem a t_rev a' -> generates_with_rem (cons_IO x a) (IO x :: t_rev) a'
+  | branch_gen_rem : forall x a t_rev a', generates_with_rem a t_rev a' -> generates_with_rem (cons_branch x a) (branch x :: t_rev) a'
+  | read_gen_rem : forall x1 x2 a t_rev a', generates_with_rem a t_rev a' -> generates_with_rem (cons_read x1 x2 a) (read x1 x2 :: t_rev) a'
+  | write_gen_rem : forall x1 x2 a t_rev a', generates_with_rem a t_rev a' -> generates_with_rem (cons_write x1 x2 a) (write x1 x2 :: t_rev) a'
+  | salloc_gen_rem : forall f x t_rev a', generates_with_rem (f x) t_rev a' -> generates_with_rem (cons_salloc f) (salloc x :: t_rev) a'.
 
-Lemma generator_generates {width: Z}{BW: Bitwidth width}{word: word.word width}{mem: map.map word byte} (t: trace) :
-  generates (generator t) t.
-Proof.
-  induction t; try constructor. destruct a; cbn [generator]; constructor; assumption. Qed.
+  Fixpoint abstract_app (a1 a2 : abstract_trace) : abstract_trace :=
+    match a1 with
+    | empty => a2
+    | cons_IO e a1' => cons_IO e (abstract_app a1' a2)
+    | cons_branch b a1' => cons_branch b (abstract_app a1' a2)
+    | cons_read sz a a1' => cons_read sz a (abstract_app a1' a2)
+    | cons_write sz a a1' => cons_write sz a (abstract_app a1' a2)
+    | cons_salloc a1' => cons_salloc (fun w => abstract_app (a1' w) a2)
+    end.
 
+  Lemma abs_tr_eq_app a01 a02 a11 a12 :
+    abs_tr_eq a01 a02 ->
+    abs_tr_eq a11 a12 ->
+    abs_tr_eq (abstract_app a01 a11) (abstract_app a02 a12).
+  Proof. intros H1 H2. induction H1; cbn [abstract_app]; try constructor; auto. Qed.
 
+  Lemma abs_tr_eq_self a :
+    abs_tr_eq a a.
+  Proof. induction a; constructor; auto. Qed.
 
-Definition filterio {width: Z}{BW: Bitwidth width}{word: word.word width}{mem: map.map word byte} 
-  (t : trace) : io_trace :=
-  flat_map (fun e =>
-              match e with
-              | IO i => cons i nil
-              | _ => nil
-              end) t.
+  Lemma abs_tr_eq_trans a1 a2 a3 :
+    abs_tr_eq a1 a2 ->
+    abs_tr_eq a2 a3 ->
+    abs_tr_eq a1 a3.
+  Proof.
+    intros H1. generalize dependent a3. induction H1; intros a3 H2; inversion H2; subst; constructor; auto. Qed.
+
+  Lemma abs_tr_eq_symm a1 a2 :
+    abs_tr_eq a1 a2 ->
+    abs_tr_eq a2 a1.
+  Proof. intros H1. induction H1; constructor; auto. Qed.
+
+  Lemma generates_generates_with_empty_rem a t :
+    generates a t <-> generates_with_rem a t empty.
+  Proof.
+    split; intros H.
+    - induction H; constructor; try assumption. apply abs_tr_eq_self.
+    - remember empty as a'. induction H; subst; try constructor; auto.
+      inversion H. subst. constructor.
+  Qed.
+
+  Lemma generates_app :
+    forall a1 a2 t1 t2,
+      generates a1 t1 -> generates a2 t2 -> generates (abstract_app a1 a2) (t1 ++ t2).
+  Proof.
+    intros a1. induction a1; intros a2 t1 t2 H1 H2; inversion H1; subst; cbn [abstract_app List.app]; try constructor; auto.
+  Qed.
+
+  Fixpoint generator (t_rev : trace) : abstract_trace :=
+    match t_rev with
+    | nil => empty
+    | IO x :: t_rev' => cons_IO x (generator t_rev')
+    | branch x :: t_rev' => cons_branch x (generator t_rev')
+    | read x1 x2 :: t_rev' => cons_read x1 x2 (generator t_rev')
+    | write x1 x2 :: t_rev' => cons_write x1 x2 (generator t_rev')
+    | salloc x :: t_rev' => cons_salloc (fun _ => generator t_rev')
+    end.
+
+  Lemma generator_generates (t: trace) :
+    generates (generator t) t.
+  Proof. induction t; try constructor. destruct a; cbn [generator]; constructor; assumption. Qed.
+
+   Lemma abs_tr_eq_correct1 a t a'1 a'2 :
+    generates_with_rem a t a'1 ->
+    abs_tr_eq a'1 a'2 ->
+    generates_with_rem a t a'2.
+  Proof.
+    intros H1 H2. induction H1; constructor; auto.
+    eapply abs_tr_eq_trans; eassumption.
+  Qed.
+
+  Lemma abs_tr_eq_correct2 a1 a2 t a' :
+    generates_with_rem a1 t a' ->
+    abs_tr_eq a1 a2 ->
+    generates_with_rem a2 t a'.
+  Proof.
+    intros H1. generalize dependent a2. induction H1; intros a22 H2; try solve [ inversion H2; subst; constructor; auto ].
+    constructor. eapply abs_tr_eq_trans; try eassumption. apply abs_tr_eq_symm; assumption.
+  Qed.
+
+  Lemma generates_with_rem_app :
+    forall a1 a1' a2 t,
+      generates_with_rem a1 t a1' ->
+      generates_with_rem (abstract_app a1 a2) t (abstract_app a1' a2).
+  Proof. intros a1 a1' a2 t H. induction H; cbn [abstract_app]; constructor; try assumption.
+         apply abs_tr_eq_app. { assumption. } apply abs_tr_eq_self. Qed.
+  
+  Lemma generates_with_empty_rem_app a1 a2 t :
+    generates_with_rem a1 t empty ->
+    generates_with_rem (abstract_app a1 a2) t a2.
+  Proof. intros H. eapply generates_with_rem_app in H. apply H. Qed.
+
+  Lemma generates_with_rem_trans :
+    forall a1 a2 a3 t1 t2,
+      generates_with_rem a1 t1 a2 ->
+      generates_with_rem a2 t2 a3 ->
+      generates_with_rem a1 (t1 ++ t2) a3.
+  Proof. intros a1 a2 a3 t1 t2 H12 H23. induction H12; cbn [List.app]; try constructor; auto.
+         eapply abs_tr_eq_correct2; try eassumption. apply abs_tr_eq_symm. assumption. Qed.
+
+  Lemma rem_unique a t a'1 a'2 :
+    generates_with_rem a t a'1 ->
+    generates_with_rem a t a'2 ->
+    abs_tr_eq a'1 a'2.
+  Proof. intros H1 H2. induction H1; inversion H2; subst; auto. eapply abs_tr_eq_trans; try eassumption. apply abs_tr_eq_symm. assumption. Qed.
+
+  Definition filterio (t : trace) : io_trace :=
+    flat_map (fun e =>
+                match e with
+                | IO i => cons i nil
+                | _ => nil
+                end) t.
+End WithIOEvent. (*maybe extend this to the end?*)
                             
-Definition ExtSpec{width: Z}{BW: Bitwidth width}{word: word.word width}{mem: map.map word byte} :=
+  Definition ExtSpec{width: Z}{BW: Bitwidth width}{word: word.word width}{mem: map.map word byte} :=
   (* Given a trace of what happened so far,
      the given-away memory, an action label and a list of function call arguments, *)
   io_trace -> mem -> String.string -> list word ->
