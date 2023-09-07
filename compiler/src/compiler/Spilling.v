@@ -272,10 +272,10 @@ Section Spilling.
                                 (Semantics.generator (leak_set_reg_range_to_vars fpval argvars))
                                 (Semantics.cons_salloc (fun fpval' =>
                                                           Semantics.abstract_app
-                                                            (Semantics.generator (leak_set_vars_to_reg_range fpval' argvars))
+                                                            (Semantics.generator (leak_set_vars_to_reg_range fpval' params))
                                                             (transform_stmt_trace fpval' fbody t (fun t' =>
                                                                                                     Semantics.abstract_app
-                                                                                                      (Semantics.generator (leak_set_reg_range_to_vars fpval' resvars ++ leak_set_vars_to_reg_range fpval resvars))
+                                                                                                      (Semantics.generator (leak_set_reg_range_to_vars fpval' rets ++ leak_set_vars_to_reg_range fpval resvars))
                                                                                                       (f t')))))
                           | _ => Semantics.empty
                           end
@@ -1592,6 +1592,13 @@ Section Spilling.
     Semantics.generates_with_rem (Semantics.abstract_app a1 a2) t a2.
   Proof. Admitted.
 
+  Lemma generates_with_rem_trans :
+    forall a1 a2 a3 t1 t2,
+      Semantics.generates_with_rem a1 t1 a2 ->
+      Semantics.generates_with_rem a2 t2 a3 ->
+      Semantics.generates_with_rem a1 (t1 ++ t2) a3.
+  Proof. Admitted.
+
   Lemma spilling_correct (e1 e2 : env) (Ev : spill_functions e1 = Success e2)
         (s1 : stmt)
         (t1 : Semantics.trace)
@@ -1599,8 +1606,7 @@ Section Spilling.
         (l1 : locals)
         (mc1 : MetricLog)
         (post : Semantics.trace -> mem -> locals -> MetricLog -> Prop)
-        (a1: option Semantics.abstract_trace)
-        (f: Semantics.abstract_trace -> Semantics.abstract_trace):
+        (a1: option Semantics.abstract_trace) :
     exec e1 s1 t1 m1 l1 mc1 post ->
     (forall t1' m1' l1' mc1', post t1' m1' l1' mc1' ->
                               match a1 with
@@ -1619,7 +1625,7 @@ Section Spilling.
                          | None => True
                          | Some a1 => exists fuel a1' t1'' t2'', Semantics.generates_with_rem a1 (rev t1'') a1' /\
                                                                    t1' = t1'' ++ t1 /\
-                                                                   Semantics.generates_with_rem (transform_stmt_trace fuel e1 fpval s1 a1 f) (rev t2'') (f a1') /\
+                                                                   (forall f, Semantics.generates_with_rem (transform_stmt_trace fuel e1 fpval s1 a1 f) (rev t2'') (f a1')) /\
                                                                    t2' = t2'' ++ t2 end)).
   Proof.
     induction 1; intros; cbn [spill_stmt valid_vars_src Forall_vars_stmt] in *; fwd.
@@ -1689,6 +1695,7 @@ Section Spilling.
           inversion H10. subst.
           subst t2'. subst t2'0. split.
           2: { rewrite app_one_cons. do 2 rewrite app_assoc. reflexivity. }
+          intros f.
           apply generates_with_empty_rem_app.
           apply Semantics.generates_generates_with_empty_rem.
           repeat rewrite rev_app_distr, rev_involutive. cbn [rev List.app]. repeat rewrite app_assoc.
@@ -1929,7 +1936,25 @@ Section Spilling.
              reflexivity. }
         repeat rewrite <- app_assoc. Print transform_stmt_trace.
         cbn [transform_stmt_trace]. Check Evp1. Search e1. rewrite H. Print transform_stmt_trace.
-        repeat rewrite rev_app_distr. repeat rewrite rev_involutive. cbn [rev List.app]. Search a1.
+        repeat rewrite rev_app_distr. repeat rewrite rev_involutive. cbn [rev List.app].
+        repeat rewrite <- app_assoc.
+        intros f.
+        eapply generates_with_rem_trans. Search args.
+        { eapply generates_with_rem_app. Search Semantics.generates_with_rem.
+          apply Semantics.generates_generates_with_empty_rem.
+          apply Semantics.generator_generates. }
+        cbn [Semantics.abstract_app]. cbn [List.app].
+        constructor.
+        eapply generates_with_rem_trans.
+        { eapply generates_with_rem_app.
+          apply Semantics.generates_generates_with_empty_rem. Search e1. Search args. Search params.
+          apply Semantics.generator_generates. }
+        cbn [Semantics.abstract_app].
+        eapply generates_with_rem_trans.
+        { Check CTp3. apply CTp3. }
+        eapply generates_with_empty_rem_app.
+        eapply generates_with_rem_trans.
+        Search a1.
         Search t1''0. Search outcome.
         Search a1. Search t2''. Search a1. Search t1''0. Print Semantics.generates_with_rem. Search a1'. Search a1'0. subst a1'.
         Search (_ ++ _ :: _ = _ ++ (_ :: _)).  [|split]. Search Semantics.generates_with_rem.
