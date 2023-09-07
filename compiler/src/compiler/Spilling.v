@@ -1599,6 +1599,42 @@ Section Spilling.
       Semantics.generates_with_rem a1 (t1 ++ t2) a3.
   Proof. Admitted.
 
+  Print Semantics.abstract_trace.
+  Fixpoint abstract_traces_equivalent a1 a2 : Prop :=
+    match a1, a2 with
+    | Semantics.empty, Semantics.empty => True
+    | Semantics.cons_IO i1 a1', Semantics.cons_IO i2 a2' => i1 = i2 /\ abstract_traces_equivalent a1' a2'
+    | Semantics.cons_branch b1 a1', Semantics.cons_branch b2 a2' => b1 = b2 /\ abstract_traces_equivalent a1' a2'
+    | Semantics.cons_read sz1 addr1 a1', Semantics.cons_read sz2 addr2 a2' => sz1 = sz2 /\ addr1 = addr2 /\ abstract_traces_equivalent a1' a2'
+    | Semantics.cons_write sz1 addr1 a1', Semantics.cons_write sz2 addr2 a2' => sz1 = sz2 /\ addr1 = addr2 /\ abstract_traces_equivalent a1' a2'
+    | Semantics.cons_salloc f1, Semantics.cons_salloc f2 => forall addr, abstract_traces_equivalent (f1 addr) (f2 addr)
+    | _, _ => False
+    end.
+
+  Lemma abstract_traces_equivalent_app a01 a02 a11 a12 :
+    abstract_traces_equivalent a01 a02 ->
+    abstract_traces_equivalent a11 a12 ->
+    abstract_traces_equivalent (Semantics.abstract_app a01 a11) (Semantics.abstract_app a02 a12).
+  Proof. Admitted.
+
+  Lemma abstract_trace_equivalent_to_self a :
+    abstract_traces_equivalent a a.
+  Proof. Admitted.
+
+  Lemma rem_unique a t a'1 a'2 :
+    Semantics.generates_with_rem a t a'1 ->
+    Semantics.generates_with_rem a t a'2 ->
+    abstract_traces_equivalent a'1 a'2.
+  Proof. Admitted.
+
+  Lemma abstract_traces_equivalent_correct a t a'1 a'2 :
+    Semantics.generates_with_rem a t a'1 ->
+    abstract_traces_equivalent a'1 a'2 ->
+    Semantics.generates_with_rem a t a'2.
+  Proof. Admitted.
+
+
+
   Lemma spilling_correct (e1 e2 : env) (Ev : spill_functions e1 = Success e2)
         (s1 : stmt)
         (t1 : Semantics.trace)
@@ -1625,7 +1661,10 @@ Section Spilling.
                          | None => True
                          | Some a1 => exists fuel a1' t1'' t2'', Semantics.generates_with_rem a1 (rev t1'') a1' /\
                                                                    t1' = t1'' ++ t1 /\
-                                                                   (forall f, Semantics.generates_with_rem (transform_stmt_trace fuel e1 fpval s1 a1 f) (rev t2'') (f a1')) /\
+                                                                   (forall f,
+                                                                       (forall a01 a02,
+                                                                           abstract_traces_equivalent a01 a02 -> abstract_traces_equivalent (f a01) (f a02)) ->
+                                                                       Semantics.generates_with_rem (transform_stmt_trace fuel e1 fpval s1 a1 f) (rev t2'') (f a1')) /\
                                                                    t2' = t2'' ++ t2 end)).
   Proof.
     induction 1; intros; cbn [spill_stmt valid_vars_src Forall_vars_stmt] in *; fwd.
@@ -1695,7 +1734,7 @@ Section Spilling.
           inversion H10. subst.
           subst t2'. subst t2'0. split.
           2: { rewrite app_one_cons. do 2 rewrite app_assoc. reflexivity. }
-          intros f.
+          intros f Hf.
           apply generates_with_empty_rem_app.
           apply Semantics.generates_generates_with_empty_rem.
           repeat rewrite rev_app_distr, rev_involutive. cbn [rev List.app]. repeat rewrite app_assoc.
@@ -1938,7 +1977,7 @@ Section Spilling.
         cbn [transform_stmt_trace]. Check Evp1. Search e1. rewrite H. Print transform_stmt_trace.
         repeat rewrite rev_app_distr. repeat rewrite rev_involutive. cbn [rev List.app].
         repeat rewrite <- app_assoc.
-        intros f.
+        intros f Hf.
         eapply generates_with_rem_trans. Search args.
         { eapply generates_with_rem_app. Search Semantics.generates_with_rem.
           apply Semantics.generates_generates_with_empty_rem.
@@ -1951,14 +1990,17 @@ Section Spilling.
           apply Semantics.generator_generates. }
         cbn [Semantics.abstract_app].
         eapply generates_with_rem_trans.
-        { Check CTp3. apply CTp3. }
-        eapply generates_with_empty_rem_app.
-        eapply generates_with_rem_trans.
-        Search a1.
-        Search t1''0. Search outcome.
-        Search a1. Search t2''. Search a1. Search t1''0. Print Semantics.generates_with_rem. Search a1'. Search a1'0. subst a1'.
-        Search (_ ++ _ :: _ = _ ++ (_ :: _)).  [|split]. Search Semantics.generates_with_rem.
-        
+        { Check CTp3. apply CTp3.
+          intros a01 a02 Hequiv.
+          apply abstract_traces_equivalent_app.
+          - apply abstract_trace_equivalent_to_self.
+          - apply Hf. apply Hequiv. }
+        eapply abstract_traces_equivalent_correct.
+        { eapply generates_with_empty_rem_app.
+          apply Semantics.generates_generates_with_empty_rem.
+          apply Semantics.generator_generates. }
+        apply Hf. eapply rem_unique; eassumption.
+        (* end constant-time stuff for call *)
       }
 
     - (* exec.load *)
