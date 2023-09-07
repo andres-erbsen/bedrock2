@@ -99,7 +99,7 @@ Section Spilling.
   Fixpoint leak_set_reg_range_to_vars(fpval: word)(srcs: list Z): Semantics.trace :=
     match srcs with
     | nil => nil
-    | x :: xs => leak_set_reg_to_var fpval x ++ leak_set_reg_range_to_vars fpval xs
+    | x :: xs => leak_set_reg_range_to_vars fpval xs ++ leak_set_reg_to_var fpval x
     end.
 
   (* var might be >=32, reg must be < 32 *)
@@ -124,7 +124,7 @@ Section Spilling.
   Fixpoint leak_set_vars_to_reg_range(fpval: word) (dests: list Z): Semantics.trace :=
     match dests with
     | nil => nil
-    | x :: xs => leak_set_vars_to_reg_range fpval xs ++ leak_set_var_to_reg fpval x
+    | x :: xs => leak_set_var_to_reg fpval x ++ leak_set_vars_to_reg_range fpval xs
     end.
 
   Fixpoint set_vars_to_reg_range_tailrec(do_first: stmt)(dests: list Z)(range_start: Z): stmt :=
@@ -152,7 +152,7 @@ Section Spilling.
 
   Definition leak_prepare_bcond(fpval: word) (c: bcond Z): Semantics.trace :=
     match c with
-    | CondBinary _ x y => leak_load_iarg_reg fpval y ++ leak_load_iarg_reg fpval x
+    | CondBinary _ x y => leak_load_iarg_reg fpval x ++ leak_load_iarg_reg fpval y
     | CondNez x => leak_load_iarg_reg fpval x
     end.
 
@@ -181,15 +181,15 @@ Section Spilling.
     Semantics.abstract_trace :=
     match magicFuel with
     | O => Semantics.empty
-    | S magicFuel' => let transform_stmt_trace := transform_stmt_trace magicFuel' e fpval in
+    | S magicFuel' => let transform_stmt_trace := transform_stmt_trace magicFuel' e in
                       match s with
                       | SLoad sz x y o =>
                           match t with
                           | Semantics.cons_read _(*sz*) a t' =>
                               Semantics.abstract_app
-                                (Semantics.generator (leak_save_ires_reg fpval x ++
+                                (Semantics.generator (leak_load_iarg_reg fpval y ++
                                                         [Semantics.read sz a] ++
-                                                        leak_load_iarg_reg fpval y))
+                                                        leak_save_ires_reg fpval x))
                                 (f t')
                           | _ => Semantics.empty
                           end
@@ -197,16 +197,16 @@ Section Spilling.
                           match t with
                           | Semantics.cons_write _(*sz*) a t' =>
                               Semantics.abstract_app
-                                (Semantics.generator ([Semantics.write sz a] ++
+                                (Semantics.generator (leak_load_iarg_reg fpval x ++
                                                         leak_load_iarg_reg fpval y ++
-                                                        leak_load_iarg_reg fpval x))
+                                                        [Semantics.write sz a]))
                                 (f t')
                           | _ => Semantics.empty
                           end
                       | SInlinetable _ x _ i =>
                           Semantics.abstract_app
-                            (Semantics.generator (leak_save_ires_reg fpval x ++
-                                                    leak_load_iarg_reg fpval i))
+                            (Semantics.generator (leak_load_iarg_reg fpval i ++
+                                                    leak_save_ires_reg fpval x))
                             (f t)
                       | SStackalloc x _ body =>
                           match t with
@@ -215,7 +215,7 @@ Section Spilling.
                                                        let t' := g a in
                                                        Semantics.abstract_app
                                                          (Semantics.generator (leak_save_ires_reg fpval x))
-                                                         (transform_stmt_trace body t' f))
+                                                         (transform_stmt_trace fpval body t' f))
                           | _ => Semantics.empty
                           end
                       | SLit x _ =>
@@ -224,60 +224,68 @@ Section Spilling.
                             (f t)
                       | SOp x op y oz =>
                           let spilled_t :=
-                            leak_save_ires_reg fpval x ++
+                            leak_load_iarg_reg fpval y ++
                               match oz with
                               | Var z => leak_load_iarg_reg fpval z
                               | Const _ => nil
                               end ++
-                              leak_load_iarg_reg fpval y in
+                              leak_save_ires_reg fpval x in
                           Semantics.abstract_app
                             (Semantics.generator spilled_t)
                             (f t)
                       | SSet x y =>
                             Semantics.abstract_app
-                              (Semantics.generator (leak_save_ires_reg fpval x ++ leak_load_iarg_reg fpval y))
+                              (Semantics.generator (leak_load_iarg_reg fpval y ++ leak_save_ires_reg fpval x))
                               (f t)
                       | SIf c thn els =>
                           match t with
                           | Semantics.cons_branch b t' =>
                               Semantics.abstract_app
-                                (Semantics.generator (leak_spill_bcond ++ leak_prepare_bcond fpval c))
-                                (transform_stmt_trace (if b then thn else els) t' f)
+                                (Semantics.generator (leak_prepare_bcond fpval c ++ leak_spill_bcond))
+                                (transform_stmt_trace fpval (if b then thn else els) t' f)
                           | _ => Semantics.empty
                           end
                       | SLoop s1 c s2 =>
-                          transform_stmt_trace s1 t (fun t' =>
+                          transform_stmt_trace fpval s1 t (fun t' =>
                                                        Semantics.abstract_app
-                                                         (Semantics.generator (leak_spill_bcond ++ leak_prepare_bcond fpval c))
+                                                         (Semantics.generator (leak_prepare_bcond fpval c ++ leak_spill_bcond))
                                                          (match t' with
                                                           | Semantics.cons_branch true t'' =>
-                                                              transform_stmt_trace s2 t'' (fun t''' => transform_stmt_trace s t''' f)
+                                                              transform_stmt_trace fpval s2 t'' (fun t''' => transform_stmt_trace fpval s t''' f)
                                                           | Semantics.cons_branch false t'' =>
                                                               f t''
                                                           | _ => Semantics.empty
                                                           end)
                             )
-                      | SSeq s1 s2 => transform_stmt_trace s1 t (fun t' => transform_stmt_trace s2 t' f)
+                      | SSeq s1 s2 => transform_stmt_trace fpval s1 t (fun t' => transform_stmt_trace fpval s2 t' f)
                       | SSkip => f t
+                      (* map.get e2 fname =
+                         Some
+                         (List.firstn (Datatypes.length params) (reg_class.all reg_class.arg),
+                         List.firstn (Datatypes.length rets) (reg_class.all reg_class.arg),
+                         SStackalloc fp (bytes_per_word * Z.of_nat (Z.to_nat (maxvar' - 31)))
+                         (set_vars_to_reg_range params a0;; spill_stmt fbody;; set_reg_range_to_vars a0 rets)) *)
                       | SCall resvars fname argvars =>
                           match @map.get _ _ env e fname with
                           | Some (params, rets, fbody) =>
                               Semantics.abstract_app
                                 (Semantics.generator (leak_set_reg_range_to_vars fpval argvars))
-                                (transform_stmt_trace fbody t (fun t' =>
-                                                                 Semantics.abstract_app
-                                                                   (Semantics.generator (leak_set_vars_to_reg_range fpval resvars))
-                                                                   (f t')))
-           
+                                (Semantics.cons_salloc (fun fpval' =>
+                                                          Semantics.abstract_app
+                                                            (Semantics.generator (leak_set_vars_to_reg_range fpval' argvars))
+                                                            (transform_stmt_trace fpval' fbody t (fun t' =>
+                                                                                                    Semantics.abstract_app
+                                                                                                      (Semantics.generator (leak_set_reg_range_to_vars fpval' resvars ++ leak_set_vars_to_reg_range fpval resvars))
+                                                                                                      (f t')))))
                           | _ => Semantics.empty
                           end
                       | SInteract resvars _ argvars =>
                           match t with
                           | Semantics.cons_IO i t' =>
                               Semantics.abstract_app
-                                (Semantics.generator (leak_set_vars_to_reg_range fpval resvars ++
+                                (Semantics.generator (leak_set_reg_range_to_vars fpval argvars ++
                                                         [Semantics.IO i] ++
-                                                        leak_set_reg_range_to_vars fpval argvars))
+                                                        leak_set_vars_to_reg_range fpval resvars))
                                 (f t')
                           | _ => Semantics.empty
                           end
@@ -1029,7 +1037,7 @@ Section Spilling.
       start + Z.of_nat (List.length args) <= a7 + 1 ->
       Forall (fun x => fp < x <= maxvar /\ (x < a0 \/ a7 < x)) args ->
       (forall m2' l2' mc2',
-          let t2' := leak_set_vars_to_reg_range fpval args ++ t2 in
+          let t2' := rev (leak_set_vars_to_reg_range fpval args) ++ t2 in
           related maxvar frame fpval (fio t1) m1 l1' (fio t2') m2' l2' ->
           post t2' m2' l2' mc2') ->
       exec e (set_vars_to_reg_range args start) t2 m2 l2 mc2 post.
@@ -1048,7 +1056,9 @@ Section Spilling.
         eapply exec.store.
         { eapply get_sep. ecancel_assumption. }
         { eassumption. }
-        { eassumption. }
+        { eassumption. } Search (rev (_ ++ _)).
+        rewrite rev_app_distr in H6. cbn [rev] in H6.
+        repeat rewrite <- List.app_assoc in H6. cbn [List.app] in H6.
         eapply IHargs; try eassumption; try blia.
         (* establish related for IH: *)
         unfold related.
@@ -1069,8 +1079,7 @@ Section Spilling.
           match goal with H: _ |- _ => eapply H end. 1: blia.
           assumption. }
         { blia. }
-      + rewrite app_nil_r in H6.
-        eapply exec.set.
+      + eapply exec.set.
         { eassumption. }
         eapply IHargs; try eassumption; try blia. 2: {
           eapply map.getmany_of_list_put_diff. 2: eassumption.
@@ -1105,7 +1114,7 @@ Section Spilling.
       Forall (fun x => fp < x <= maxvar /\ (x < a0 \/ a7 < x)) args ->
       map.getmany_of_list l1 args = Some argvs ->
       (forall l2' mc2',
-          let t2' := leak_set_reg_range_to_vars fpval args ++ t2 in
+          let t2' := rev (leak_set_reg_range_to_vars fpval args) ++ t2 in
           related maxvar frame fpval (fio t1) m1 l1 (fio t2') m2 l2' ->
           map.getmany_of_list l2' (List.unfoldn (Z.add 1) (List.length args) start) = Some argvs ->
           post t2' m2 l2' mc2') ->
@@ -1137,7 +1146,8 @@ Section Spilling.
           eapply map.get_split_r. 1,3: eassumption.
           destr (map.get mp a); [exfalso|reflexivity].
           specialize H3p2 with (1 := E0). blia.
-        * eapply H5.
+        * rewrite rev_app_distr in H5. rewrite <- List.app_assoc in H5. cbn [rev List.app] in H5.
+          eapply H5.
           -- unfold related.
              repeat match goal with
                     | |- exists _, _ => eexists
@@ -1163,7 +1173,7 @@ Section Spilling.
           eapply map.get_split_l. 1: exact S2. 2: exact G.
           destr (map.get lStack a); [exfalso|reflexivity].
           specialize H3p3 with (1 := E0). blia.
-        * eapply H5. 2: {
+        * rewrite app_nil_r in H5. eapply H5. 2: {
             cbn [List.unfoldn].
             eapply map.getmany_of_list_cons.
             - apply map.get_put_same.
@@ -1369,7 +1379,7 @@ Section Spilling.
                          | None => True
                          | Some a1 => exists fuel a1' t1'' t2'', Semantics.generates_with_rem a1 (rev t1'') a1' /\
                                                                    t1' = t1'' ++ t1 /\
-                                                                   Semantics.generates_with_rem (transform_stmt_trace fuel e2 fpval s1 a1 f) t2'' (f a1') /\
+                                                                   Semantics.generates_with_rem (transform_stmt_trace fuel e2 fpval s1 a1 f) (rev t2'') (f a1') /\
                                                                    t2' = t2'' ++ t2 end)).
               
 
@@ -1609,7 +1619,7 @@ Section Spilling.
                          | None => True
                          | Some a1 => exists fuel a1' t1'' t2'', Semantics.generates_with_rem a1 (rev t1'') a1' /\
                                                                    t1' = t1'' ++ t1 /\
-                                                                   Semantics.generates_with_rem (transform_stmt_trace fuel e2 fpval s1 a1 f) t2'' (f a1') /\
+                                                                   Semantics.generates_with_rem (transform_stmt_trace fuel e1 fpval s1 a1 f) (rev t2'') (f a1') /\
                                                                    t2' = t2'' ++ t2 end)).
   Proof.
     induction 1; intros; cbn [spill_stmt valid_vars_src Forall_vars_stmt] in *; fwd.
@@ -1680,7 +1690,8 @@ Section Spilling.
           subst t2'. subst t2'0. split.
           2: { rewrite app_one_cons. do 2 rewrite app_assoc. reflexivity. }
           apply generates_with_empty_rem_app.
-          apply Semantics.generates_generates_with_empty_rem. repeat rewrite app_assoc.
+          apply Semantics.generates_generates_with_empty_rem.
+          repeat rewrite rev_app_distr, rev_involutive. cbn [rev List.app]. repeat rewrite app_assoc.
           apply Semantics.generator_generates.
           (* end constant-time stuff for interact *) }
           (* related for set_vars_to_reg_range_correct: *)
@@ -1839,7 +1850,7 @@ Section Spilling.
         subst maxvar'. clear. blia. }
       { eassumption. }
       rename R into R0.
-      intros tL6 lFL6 mcL6 R GM.
+      intros lFL6 mcL6 tL6 R GM.
       (* prove that if we remove the additional stack provided by exec.stackalloc
          and store the result vars back into the caller's registers,
          states are still related and postcondition holds *)
@@ -1899,7 +1910,30 @@ Section Spilling.
       { unfold a0, a7. blia. }
       { eassumption. }
       { intros m22 l22 mc22 t22 R22. do 4 eexists. split. 1: eassumption. split. 1: eassumption.
-        (* more not-entirely-trivial CT stuff goes here. *)
+        (* begin constant-time stuff for call. *)
+        destruct a1 as [a1|]; [|reflexivity].
+        apply H4 in Qp2.
+        Check CT.
+        destruct CT as [fuel' [a1' [t1'' [t2'' [CTp1 [CTp2 [CTp3 CTp4]]]]]]].
+        destruct Qp2 as [t1''0 [a1'0 [Qp2p1 Qp2p2]]].
+        subst.
+        Search (_ ++ _ = _ ++ _ -> _).
+        apply app_inv_tail in Qp2p2.
+        subst.
+        exists (S fuel'). do 3 eexists.
+        split; [apply Qp2p1|].
+        split; [reflexivity|].
+        split.
+        2: { subst t22. subst tL6. subst tL4. subst tCL2.
+             rewrite app_one_cons. repeat rewrite app_assoc.
+             reflexivity. }
+        repeat rewrite <- app_assoc. Print transform_stmt_trace.
+        cbn [transform_stmt_trace]. Check Evp1. Search e1. rewrite H. Print transform_stmt_trace.
+        repeat rewrite rev_app_distr. repeat rewrite rev_involutive. cbn [rev List.app]. Search a1.
+        Search t1''0. Search outcome.
+        Search a1. Search t2''. Search a1. Search t1''0. Print Semantics.generates_with_rem. Search a1'. Search a1'0. subst a1'.
+        Search (_ ++ _ :: _ = _ ++ (_ :: _)).  [|split]. Search Semantics.generates_with_rem.
+        
       }
 
     - (* exec.load *)
