@@ -651,13 +651,14 @@ Section Spilling.
       related maxvar frame fpval (fio t1) m1 l1 (fio t2) m2 l2 ->
       fp < r <= maxvar /\ (r < a0 \/ a7 < r) ->
       map.get l1 r = Some v ->
-      (forall t2' mc2,
+      (forall mc2,
+          let t2' := rev (leak_load_iarg_reg fpval r) ++ t2 in
           related maxvar frame fpval (fio t1) m1 l1 (fio t2') m2 (map.put l2 (iarg_reg i r) v) ->
           post t2' m2 (map.put l2 (iarg_reg i r) v) mc2) ->
       exec e2 (load_iarg_reg i r) t2 m2 l2 mc2 post.
   Proof.
     intros.
-    unfold load_iarg_reg, stack_loc, iarg_reg, related in *. fwd.
+    unfold leak_load_iarg_reg, load_iarg_reg, stack_loc, iarg_reg, related in *. fwd.
     destr (32 <=? r).
     - eapply exec.load.
       + eapply get_sep. ecancel_assumption.
@@ -891,13 +892,14 @@ Section Spilling.
   Lemma save_ires_reg_correct'': forall e t1 t2 m1 m2 l1 l2 mc2 x v maxvar frame post fpval,
       related maxvar frame fpval (fio t1) m1 l1 (fio t2) m2 l2 ->
       fp < x <= maxvar /\ (x < a0 \/ a7 < x) ->
-      (forall t2' m2' l2' mc2',
+      (forall m2' l2' mc2',
+          let t2' := rev (leak_save_ires_reg fpval x) ++ t2 in
           related maxvar frame fpval (fio t1) m1 (map.put l1 x v) (fio t2') m2' l2' ->
           post t2' m2' l2' mc2') ->
       exec e (save_ires_reg x) t2 m2 (map.put l2 (ires_reg x) v) mc2 post.
   Proof.
     intros.
-    unfold save_ires_reg, stack_loc, ires_reg, related in *. fwd.
+    unfold leak_save_ires_reg, save_ires_reg, stack_loc, ires_reg, related in *. fwd.
     destr (32 <=? x).
     - edestruct store_to_word_array as (m' & stackwords' & St & S' & Ni & Nj & L).
       1: ecancel_assumption.
@@ -912,7 +914,7 @@ Section Spilling.
                  | |- exists _, _ => eexists
                  | |- _ /\ _ => split
                  end.
-          1: { rewrite ProgramLogic.filterio_cons. assumption. }
+          1: { cbn [rev List.app]. rewrite ProgramLogic.filterio_cons. assumption. }
           1: ecancel_assumption.
           3: {
             unfold sep, map.split in Hp3|-*.
@@ -1377,10 +1379,13 @@ Section Spilling.
                         post t1' m1' l1' mc1' /\
                         (match a1 with
                          | None => True
-                         | Some a1 => exists fuel a1' t1'' t2'', Semantics.generates_with_rem a1 (rev t1'') a1' /\
-                                                                   t1' = t1'' ++ t1 /\
-                                                                   Semantics.generates_with_rem (transform_stmt_trace fuel e2 fpval s1 a1 f) (rev t2'') (f a1') /\
-                                                                   t2' = t2'' ++ t2 end)).
+                         | Some a1 => exists F a1' t1'' t2'',
+                             forall fuel,
+                               Nat.le F fuel ->
+                               Semantics.generates_with_rem a1 (rev t1'') a1' /\
+                                 t1' = t1'' ++ t1 /\
+                                 Semantics.generates_with_rem (transform_stmt_trace fuel e2 fpval s1 a1 f) (rev t2'') (f a1') /\
+                                 t2' = t2'' ++ t2 end)).
               
 
   Definition call_spec(e: env) '(argnames, retnames, fbody)
@@ -1606,13 +1611,15 @@ Section Spilling.
                         post t1' m1' l1' mc1' /\
                         (match a1 with
                          | None => True
-                         | Some a1 => exists fuel a1' t1'' t2'', Semantics.generates_with_rem a1 (rev t1'') a1' /\
-                                                                   t1' = t1'' ++ t1 /\
-                                                                   (forall f,
-                                                                       (forall a01 a02,
-                                                                           Semantics.abs_tr_eq a01 a02 -> Semantics.abs_tr_eq (f a01) (f a02)) ->
-                                                                       Semantics.generates_with_rem (transform_stmt_trace fuel e1 fpval s1 a1 f) (rev t2'') (f a1')) /\
-                                                                   t2' = t2'' ++ t2 end)).
+                         | Some a1 => exists F a1' t1'' t2'',
+                             Semantics.generates_with_rem a1 (rev t1'') a1' /\
+                               t1' = t1'' ++ t1 /\
+                               (forall f fuel,
+                                   (forall a01 a02,
+                                       Semantics.abs_tr_eq a01 a02 -> Semantics.abs_tr_eq (f a01) (f a02)) ->
+                                   Nat.le F fuel ->
+                                   Semantics.generates_with_rem (transform_stmt_trace fuel e1 fpval s1 a1 f) (rev t2'') (f a1')) /\
+                               t2' = t2'' ++ t2 end)).
   Proof.
     induction 1; intros; cbn [spill_stmt valid_vars_src Forall_vars_stmt] in *; fwd.
     - (* exec.interact *)
@@ -1675,14 +1682,15 @@ Section Spilling.
           exists 1%nat. eexists. eexists. eexists.
           split; [apply H6p1|].
           split; [reflexivity|].
-          cbn [transform_stmt_trace].
           simpl in H6p1.
           inversion H6p1. subst.
           inversion H10. subst.
           subst t2'. subst t2'0. split.
           2: { rewrite app_one_cons. do 2 rewrite app_assoc. reflexivity. }
-          intros f Hf.
-          eapply Semantics.abs_tr_eq_correct1. 2: { apply Hf. eassumption. }
+          intros f fuel Hf Hfuel.
+          eapply Semantics.abs_tr_eq_correct1.
+          2: { apply Hf. eassumption. }
+          destruct fuel as [|fuel']; [blia|].
           apply Semantics.generates_with_empty_rem_app.
           apply Semantics.generates_generates_with_empty_rem.
           repeat rewrite rev_app_distr, rev_involutive. cbn [rev List.app]. repeat rewrite app_assoc.
@@ -1908,24 +1916,25 @@ Section Spilling.
         destruct a1 as [a1|]; [|reflexivity].
         apply H4 in Qp2.
         Check CT.
-        destruct CT as [fuel' [a1' [t1'' [t2'' [CTp1 [CTp2 [CTp3 CTp4]]]]]]].
+        destruct CT as [F [a1' [t1'' [t2'' [CTp1 [CTp2 [CTp3 CTp4]]]]]]].
         destruct Qp2 as [t1''0 [a1'0 [Qp2p1 Qp2p2]]].
         subst.
         Search (_ ++ _ = _ ++ _ -> _).
         apply app_inv_tail in Qp2p2.
         subst.
-        exists (S fuel'). do 3 eexists.
+        exists (S F). do 3 eexists.
         split; [apply Qp2p1|].
         split; [reflexivity|].
         split.
         2: { subst t22. subst tL6. subst tL4. subst tCL2.
              rewrite app_one_cons. repeat rewrite app_assoc.
              reflexivity. }
+        intros f fuel Hf Hfuel.
+        destruct fuel as [|fuel']; [blia|].
         repeat rewrite <- app_assoc. Print transform_stmt_trace.
         cbn [transform_stmt_trace]. Check Evp1. Search e1. rewrite H. Print transform_stmt_trace.
         repeat rewrite rev_app_distr. repeat rewrite rev_involutive. cbn [rev List.app].
         repeat rewrite <- app_assoc.
-        intros f Hf.
         eapply Semantics.generates_with_rem_trans. Search args.
         { eapply Semantics.generates_with_rem_app. Search Semantics.generates_with_rem.
           apply Semantics.generates_generates_with_empty_rem.
@@ -1938,7 +1947,7 @@ Section Spilling.
           apply Semantics.generator_generates. }
         cbn [Semantics.abstract_app].
         eapply Semantics.generates_with_rem_trans.
-        { Check CTp3. apply CTp3.
+        { Check CTp3. Check CTp3. eapply CTp3. 2: blia.
           intros a01 a02 Hequiv.
           apply Semantics.abs_tr_eq_app.
           - apply Semantics.abs_tr_eq_self.
@@ -1952,28 +1961,52 @@ Section Spilling.
       }
 
     - (* exec.load *)
-      eapply exec.seq_cps.
+      eapply exec.seq_cps. Check load_iarg_reg_correct.
       eapply load_iarg_reg_correct; (blia || eassumption || idtac).
-      clear mc2 H3. intros.
+      clear mc2 H4. intros.
       eapply exec.seq_cps.
-      pose proof H2 as A. unfold related in A. fwd.
-      unfold Memory.load, Memory.load_Z, Memory.load_bytes in *. fwd.
+      pose proof H3 as A. unfold related in A. fwd.
+      unfold Memory.load, Memory.load_Z, Memory.load_bytes in *. fwd. Search a. Check H1.
       eapply exec.load. {
         rewrite map.get_put_same. reflexivity. }
       { edestruct (@sep_def _ _ _ m2 (eq m)) as (m' & m2Rest & Sp & ? & ?).
         1: ecancel_assumption. unfold map.split in Sp. subst. fwd.
         unfold Memory.load, Memory.load_Z, Memory.load_bytes.
         erewrite map.getmany_of_tuple_in_disjoint_putmany; eauto. }
-      eapply save_ires_reg_correct.
-      + eassumption.
+      eapply save_ires_reg_correct''.
       + eassumption.
       + blia.
+      + intros. do 4 eexists.
+        split; [|split; [eassumption|]].
+        { eassumption. }
+        (* begin CT stuff for load *)
+        destruct a1 as [a1|]; try reflexivity.
+        apply H2 in H1. clear H2. destruct H1 as [t1'' [a1' [H1p1 H1p2]]].
+        exists 1%nat. do 3 eexists.
+        split; [eassumption|]. Search t1''.
+        split; [assumption|].
+        split.
+        2: { subst t2'0. subst t2'. rewrite app_one_cons. repeat rewrite app_assoc. reflexivity. }
+        intros f fuel Hf Hfuel. Search t1''.
+        rewrite app_one_cons in H1p2. apply app_inv_tail in H1p2. subst.
+        cbn [rev List.app] in H1p1.
+        inversion H1p1. subst.
+        destruct fuel as [|fuel']; [blia|].
+        cbn [transform_stmt_trace].
+        repeat rewrite rev_app_distr. repeat rewrite rev_involutive.
+        inversion H7. subst.
+        eapply Semantics.abs_tr_eq_correct1.
+        2: { apply Hf. eassumption. }
+        apply Semantics.generates_with_empty_rem_app.
+        apply Semantics.generates_generates_with_empty_rem.
+        apply Semantics.generator_generates.
+        (* end CT stuff for load *)
     - (* exec.store *)
       eapply exec.seq_cps. eapply load_iarg_reg_correct; (blia || eassumption || idtac).
-      clear mc2 H4. intros.
+      clear mc2 H5. intros.
       eapply exec.seq_cps. eapply load_iarg_reg_correct; (blia || eassumption || idtac).
-      clear mc2 H3. intros.
-      pose proof H3 as A. unfold related in A. fwd.
+      clear mc2 H4. intros.
+      pose proof H4 as A. unfold related in A. fwd.
       unfold Memory.store, Memory.store_Z, Memory.store_bytes in *. fwd.
       edestruct (@sep_def _ _ _ m2 (eq m)) as (m' & m2Rest & Sp & ? & ?).
       1: ecancel_assumption. unfold map.split in Sp. subst. fwd.
