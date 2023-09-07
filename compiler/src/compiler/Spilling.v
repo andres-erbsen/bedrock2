@@ -1610,7 +1610,7 @@ Section Spilling.
                                                                    t1' = t1'' ++ t1 /\
                                                                    (forall f,
                                                                        (forall a01 a02,
-                                                                           abstract_traces_equivalent a01 a02 -> abstract_traces_equivalent (f a01) (f a02)) ->
+                                                                           Semantics.abs_tr_eq a01 a02 -> Semantics.abs_tr_eq (f a01) (f a02)) ->
                                                                        Semantics.generates_with_rem (transform_stmt_trace fuel e1 fpval s1 a1 f) (rev t2'') (f a1')) /\
                                                                    t2' = t2'' ++ t2 end)).
   Proof.
@@ -1682,7 +1682,8 @@ Section Spilling.
           subst t2'. subst t2'0. split.
           2: { rewrite app_one_cons. do 2 rewrite app_assoc. reflexivity. }
           intros f Hf.
-          apply generates_with_empty_rem_app.
+          eapply Semantics.abs_tr_eq_correct1. 2: { apply Hf. eassumption. }
+          apply Semantics.generates_with_empty_rem_app.
           apply Semantics.generates_generates_with_empty_rem.
           repeat rewrite rev_app_distr, rev_involutive. cbn [rev List.app]. repeat rewrite app_assoc.
           apply Semantics.generator_generates.
@@ -1925,28 +1926,28 @@ Section Spilling.
         repeat rewrite rev_app_distr. repeat rewrite rev_involutive. cbn [rev List.app].
         repeat rewrite <- app_assoc.
         intros f Hf.
-        eapply generates_with_rem_trans. Search args.
-        { eapply generates_with_rem_app. Search Semantics.generates_with_rem.
+        eapply Semantics.generates_with_rem_trans. Search args.
+        { eapply Semantics.generates_with_rem_app. Search Semantics.generates_with_rem.
           apply Semantics.generates_generates_with_empty_rem.
           apply Semantics.generator_generates. }
         cbn [Semantics.abstract_app]. cbn [List.app].
         constructor.
-        eapply generates_with_rem_trans.
-        { eapply generates_with_rem_app.
+        eapply Semantics.generates_with_rem_trans.
+        { eapply Semantics.generates_with_rem_app.
           apply Semantics.generates_generates_with_empty_rem. Search e1. Search args. Search params.
           apply Semantics.generator_generates. }
         cbn [Semantics.abstract_app].
-        eapply generates_with_rem_trans.
+        eapply Semantics.generates_with_rem_trans.
         { Check CTp3. apply CTp3.
           intros a01 a02 Hequiv.
-          apply abstract_traces_equivalent_app.
-          - apply abstract_trace_equivalent_to_self.
+          apply Semantics.abs_tr_eq_app.
+          - apply Semantics.abs_tr_eq_self.
           - apply Hf. apply Hequiv. }
-        eapply abstract_traces_equivalent_correct.
-        { eapply generates_with_empty_rem_app.
+        eapply Semantics.abs_tr_eq_correct1.
+        { eapply Semantics.generates_with_empty_rem_app.
           apply Semantics.generates_generates_with_empty_rem.
           apply Semantics.generator_generates. }
-        apply Hf. eapply rem_unique; eassumption.
+        apply Hf. eapply Semantics.rem_unique; eassumption.
         (* end constant-time stuff for call *)
       }
 
