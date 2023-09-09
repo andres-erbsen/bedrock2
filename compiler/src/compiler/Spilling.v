@@ -1587,46 +1587,292 @@ Section Spilling.
     x :: l = [x] ++ l.
   Proof. reflexivity. Qed.
 
-  Lemma spilling_correct (e1 e2 : env) (Ev : spill_functions e1 = Success e2)
-        (s1 : stmt)
-        (t1 : Semantics.trace)
-        (m1 : mem)
-        (l1 : locals)
-        (mc1 : MetricLog)
-        (post : Semantics.trace -> mem -> locals -> MetricLog -> Prop)
-        (a1: option Semantics.abstract_trace) :
-    exec e1 s1 t1 m1 l1 mc1 post ->
-    (forall t1' m1' l1' mc1',
-        post t1' m1' l1' mc1' ->
-        match a1 with
-        | None => True
-        | Some a1 => exists t1'' a1',
-            Semantics.generates_with_rem a1 (rev t1'') a1' /\
-              t1' = t1'' ++ t1 end) ->
-        forall (frame : mem -> Prop) (maxvar : Z),
-          valid_vars_src maxvar s1 ->
-          forall (t2 : Semantics.trace) (m2 : mem) (l2 : locals) (mc2 : MetricLog) (fpval : word),
-            related maxvar frame fpval (fio t1) m1 l1 (fio t2) m2 l2 ->
-            exec e2 (spill_stmt s1) t2 m2 l2 mc2
-                 (fun (t2' : Semantics.trace) (m2' : mem) (l2' : locals) (mc2' : MetricLog) =>
-                    exists t1' m1' l1' mc1',
-                      related maxvar frame fpval (fio t1') m1' l1' (fio t2') m2' l2' /\
-                        post t1' m1' l1' mc1' /\
-                        (match a1 with
-                         | None => True
-                         | Some a1 => exists F a1' t1'' t2'',
-                             Semantics.generates_with_rem a1 (rev t1'') a1' /\
-                               t1' = t1'' ++ t1 /\
-                               (forall f fuel,
-                                   (forall a01 a02,
-                                       Semantics.abs_tr_eq a01 a02 -> Semantics.abs_tr_eq (f a01) (f a02)) ->
-                                   Nat.le F fuel ->
-                                   Semantics.generates_with_rem (transform_stmt_trace fuel e1 fpval s1 a1 f) (rev t2'') (f a1')) /\
-                               t2' = t2'' ++ t2 end)).
+  Lemma trace_prefix e s t m l mc post :
+    exec e s t m l mc post ->
+    exec e s t m l mc (fun t' m' l' mc' => exists t'', t' = t'' ++ t).
   Proof.
-    induction 1; intros; cbn [spill_stmt valid_vars_src Forall_vars_stmt] in *; fwd.
-    - (* exec.interact *)
-      subst. 
+    intros H. induction H.
+    - econstructor; try eassumption.
+      intros.
+      specialize (H2 _ _ H3). destruct H2 as [l' [H2p1 H2p2]].
+      exists l'. split; [assumption|]. intros. eexists [Semantics.IO _]. reflexivity.
+    - econstructor. 1: eassumption. 1: eassumption. 1: eassumption.
+      1: { eapply exec.intersect; [apply H2|apply IHexec]. }
+      intros. simpl in H4. destruct H4 as [H4p1 H4p2].
+      specialize (H3 _ _ _ _ H4p1). destruct H3 as [retvs [l' [H3p1 [H3p2 H3p3]]]].
+      eexists. eexists. split; [eassumption|]. split; eassumption.
+    - econstructor; try eassumption. eexists [_]. reflexivity.
+    - econstructor; try eassumption. eexists [_]. reflexivity.
+    - econstructor; try eassumption. eexists []. reflexivity.
+    - econstructor; try eassumption. intros. eapply exec.weaken.
+      { eapply exec.intersect. { eapply H0; eassumption. } { eapply H1; eassumption. } }
+      simpl. intros. destruct H4 as [[mSmall' [mStack' [H4p1 [H4p2 H4p3]]]] [t'' H4p4]].
+      eexists. eexists. split; [eassumption|]. split; [eassumption|].
+      exists (t'' ++ [Semantics.salloc a]). rewrite <- app_assoc. apply H4p4.
+    - econstructor; try eassumption. exists []. reflexivity.
+    - econstructor; try eassumption. exists []. reflexivity.
+    - econstructor; try eassumption. exists []. reflexivity.
+    - apply exec.if_true. 1: assumption. eapply exec.weaken.
+      { eapply exec.intersect. { eapply H0; eassumption. } { eapply IHexec; eassumption. } }
+      simpl. intros. destruct H1 as [_ [t'' H1]]. exists (t'' ++ [Semantics.branch true]).
+      rewrite <- app_assoc. apply H1.
+    - apply exec.if_false; try eassumption. eapply exec.weaken.
+      { eapply exec.intersect. { eapply H0; eassumption. } { eapply IHexec; eassumption. } }
+      simpl. intros. destruct H1 as [_ [t'' H1]]. exists (t'' ++ [Semantics.branch false]).
+      rewrite <- app_assoc. apply H1.
+    - econstructor.
+      1: { eapply exec.intersect. { exact H. } { exact IHexec. } }            
+      + simpl. intros. destruct H6 as [H6p1 H6p2]. eauto.
+      + simpl. intros. destruct H6 as [H6p1 [t'' H6p2]]. exists (Semantics.branch false :: t'').
+        simpl. f_equal. assumption.
+  Admitted.
+(*      + simpl. intros. destruct H6 as [H6p1 H6p2]. eapply exec.intersect.
+        -- eapply H2; eassumption.
+        -- eapply H3. eassumption. eapply H0.  eauto. apply exec.while_true.*)
+
+  Lemma spilling_correct : forall
+      (e1 e2 : env)
+      (Ev : spill_functions e1 = Success e2)
+      (s1 : stmt)
+      (t1 : Semantics.trace)
+      (m1 : mem)
+      (l1 : locals)
+      (mc1 : MetricLog)
+      (post : Semantics.trace -> mem -> locals -> MetricLog -> Prop)
+      (a1: option Semantics.abstract_trace),
+    exec e1 s1 t1 m1 l1 mc1 (fun t1' m1' l1' mc1' =>
+                               post t1' m1' l1' mc1' /\
+                               match a1 with
+                               | None => True
+                               | Some a1 => exists t1'' a1',
+                                   Semantics.generates_with_rem a1 (rev t1'') a1' /\
+                                     t1' = t1'' ++ t1 end) ->
+    forall (frame : mem -> Prop) (maxvar : Z),
+      valid_vars_src maxvar s1 ->
+      forall (t2 : Semantics.trace) (m2 : mem) (l2 : locals) (mc2 : MetricLog) (fpval : word),
+        related maxvar frame fpval (fio t1) m1 l1 (fio t2) m2 l2 ->
+        exec e2 (spill_stmt s1) t2 m2 l2 mc2
+          (fun (t2' : Semantics.trace) (m2' : mem) (l2' : locals) (mc2' : MetricLog) =>
+             exists t1' m1' l1' mc1',
+               related maxvar frame fpval (fio t1') m1' l1' (fio t2') m2' l2' /\
+                 post t1' m1' l1' mc1' /\
+                 (match a1 with
+                  | None => True
+                  | Some a1 => exists F a1' t1'' t2'',
+                      Semantics.generates_with_rem a1 (rev t1'') a1' /\
+                        t1' = t1'' ++ t1 /\
+                        (forall f fuel,
+                            (forall a01 a02,
+                                Semantics.abs_tr_eq a01 a02 -> Semantics.abs_tr_eq (f a01) (f a02)) ->
+                            Nat.le F fuel ->
+                            Semantics.generates_with_rem (transform_stmt_trace fuel e1 fpval s1 a1 f) (rev t2'') (f a1')) /\
+                        t2' = t2'' ++ t2 end)).
+  Proof.
+    intros e1 e2 Ev s1. induction s1; intros; cbn [spill_stmt valid_vars_src Forall_vars_stmt] in *; fwd.
+    - (* SLoad *)
+      inversion H. subst.
+      eapply exec.seq_cps. Check load_iarg_reg_correct.
+      eapply load_iarg_reg_correct; (blia || eassumption || idtac). Search related.
+      clear mc2 H1. intros.
+      eapply exec.seq_cps. Search related.
+      pose proof H0 as A. unfold related in A. fwd.
+      unfold Memory.load, Memory.load_Z, Memory.load_bytes in *. fwd.
+      eapply exec.load. {
+        rewrite map.get_put_same. reflexivity. }
+      { edestruct (@sep_def _ _ _ m2 (eq m1)) as (m' & m2Rest & Sp & ? & ?).
+        1: ecancel_assumption. unfold map.split in Sp. subst. fwd.
+        unfold Memory.load, Memory.load_Z, Memory.load_bytes.
+        erewrite map.getmany_of_tuple_in_disjoint_putmany; eauto. }
+      eapply save_ires_reg_correct''.
+      + eassumption.
+      + blia.
+      + intros. do 4 eexists.
+        split; [|split; [eassumption|]].
+        { eassumption. }
+        (* begin CT stuff for load *)
+        destruct a1 as [a1|]; try reflexivity.
+        destruct H12p1 as [t1'' [a1' [CTp1 CTp2]]].
+        exists 1%nat. do 3 eexists.
+        split; [eassumption|]. Search t1''.
+        split; [assumption|].
+        split.
+        2: { subst t2'0. subst t2'. rewrite app_one_cons. repeat rewrite app_assoc. reflexivity. }
+        intros f fuel Hf Hfuel. Search t1''.
+        rewrite app_one_cons in CTp2. apply app_inv_tail in CTp2. subst.
+        cbn [rev List.app] in CTp1.
+        inversion CTp1. subst.
+        destruct fuel as [|fuel']; [blia|].
+        cbn [transform_stmt_trace].
+        repeat rewrite rev_app_distr. repeat rewrite rev_involutive.
+        inversion H7. subst.
+        eapply Semantics.abs_tr_eq_correct1.
+        2: { apply Hf. eassumption. }
+        apply Semantics.generates_with_empty_rem_app.
+        apply Semantics.generates_generates_with_empty_rem.
+        apply Semantics.generator_generates.
+        (* end CT stuff for load *)
+    - (* SStore *)
+      inversion H. subst.
+      eapply exec.seq_cps. eapply load_iarg_reg_correct; (blia || eassumption || idtac).
+      clear mc2 H1. intros.
+      eapply exec.seq_cps. eapply load_iarg_reg_correct; (blia || eassumption || idtac).
+      clear mc2 H0. intros. Search related.
+      pose proof H0 as A. unfold related in A. fwd.
+      unfold Memory.store, Memory.store_Z, Memory.store_bytes in *. fwd.
+      edestruct (@sep_def _ _ _ m2 (eq m1)) as (m' & m2Rest & Sp & ? & ?).
+      1: ecancel_assumption. unfold map.split in Sp. subst. fwd.
+      eapply exec.store.
+      1: eapply get_iarg_reg_1; eauto with zarith.
+      1: apply map.get_put_same.
+      { unfold Memory.store, Memory.store_Z, Memory.store_bytes.
+        unfold Memory.load_bytes in *.
+        erewrite map.getmany_of_tuple_in_disjoint_putmany; eauto. }
+      do 4 eexists. split; [|split; [eassumption|]].
+      { unfold related.
+        repeat match goal with
+               | |- exists _, _ => eexists
+               | |- _ /\ _ => split
+               end.
+        all: try eassumption || reflexivity.
+        spec store_bytes_sep_hi2lo as A. 1: eassumption.
+        all: ecancel_assumption. }
+      destruct a1 as [a1|]; try reflexivity.
+      Search post.
+      destruct H13p1 as [t1'' [a1' [CTp1 CTp2]]].
+      exists 1%nat. do 3 eexists.
+      split; [eassumption|].
+      split; [eassumption|].
+      split.
+      2: { subst t2'0. subst t2'. rewrite app_one_cons. repeat rewrite app_assoc. reflexivity. }
+      intros f fuel Hf Hfuel.
+      destruct fuel as [|fuel']; [blia|]. Search a1. Search t1''.
+      rewrite app_one_cons in CTp2. Check CTp2. apply app_inv_tail in CTp2. Check CTp2.
+      subst. Search a1.
+      inversion CTp1. subst.
+      inversion H8. subst.
+      cbn [transform_stmt_trace].
+      repeat rewrite rev_app_distr. repeat rewrite rev_involutive. cbn [rev List.app].
+      eapply Semantics.abs_tr_eq_correct1.
+      2: { apply Hf. eassumption. }
+      apply Semantics.generates_with_empty_rem_app.
+      apply Semantics.generates_generates_with_empty_rem.
+      apply Semantics.generator_generates.
+    - (* SInlinetable *)
+      inversion H. subst.
+      eapply exec.seq_cps. eapply load_iarg_reg_correct; (blia || eassumption || idtac).
+      clear mc2 H1. intros.
+      eapply exec.seq_cps.
+      eapply exec.inlinetable.
+      { unfold ires_reg, iarg_reg, spill_tmp, fp, a0, a7 in *. destr (32 <=? x); destr (32 <=? i); try blia. }
+      { rewrite map.get_put_same. reflexivity. }
+      { eassumption. }
+      eapply save_ires_reg_correct''.
+      + eassumption.
+      + blia.
+      + destruct H13 as [Hpost CT].
+        intros. do 4 eexists.
+        split; [|split; [eassumption|]].
+        { eassumption. }
+        destruct a1 as [a1|]; [|reflexivity].
+        destruct CT as [t1'' [a1' [CTp1 CTp2]]].
+        exists 1%nat. do 3 eexists.
+        split; [eassumption|].
+        split; [assumption|].
+        split.
+        2: { subst t2'0. subst t2'. repeat rewrite app_assoc. reflexivity. }
+        intros f fuel Hf Hfuel.
+        destruct fuel as [|fuel']; [blia|].
+        cbn [transform_stmt_trace].
+        assert (CTp2' : [] ++ t1 = t1'' ++ t1) by assumption. clear CTp2.
+        apply app_inv_tail in CTp2'. subst.
+        inversion CTp1. subst.
+        eapply Semantics.abs_tr_eq_correct1.
+        2: { apply Hf. eassumption. }
+        repeat rewrite rev_app_distr. repeat rewrite rev_involutive.
+        apply Semantics.generates_with_empty_rem_app.
+        apply Semantics.generates_generates_with_empty_rem.
+        apply Semantics.generator_generates.
+    - (* exec.stackalloc *)
+      inversion H. subst.
+      Check exec.stackalloc. Check exec.stackalloc.
+      eapply exec.stackalloc. 1: assumption.
+      intros.
+      eapply exec.seq_cps.
+      edestruct grow_related_mem as (mCombined1 & ? & ?).
+      Search fio.
+      1,2: eassumption.
+      eapply save_ires_reg_correct''. 1: eassumption. 1: blia.
+      intros. Search post.
+      eapply exec.weaken. {
+        eapply IHs1. Search exec. Search exec.
+        { eapply exec.weaken. Search exec.weaken.
+          { eapply exec.intersect.
+            { eapply trace_prefix. eapply H10; eassumption. }
+            { eapply H10; eassumption. } }
+          intros. simpl in H6. destruct H6 as [H6p1 [mSmall' [mStack' [H6p2 [H6p3 [H6p4 H6p5]]]]]].
+          eassert (H6: exists _ _, _).
+            { exists mSmall'. exists mStack'. instantiate (1 := _ /\ _ /\ _ /\ _ /\ _).
+              split; [exact H6p1|].
+              split; [exact H6p2|].
+              split; [exact H6p3|].
+              split; [exact H6p4|].
+              instantiate (1 := match a1 with
+                                | Some a1 => exists f, a1 = Semantics.cons_salloc f
+                                | None => True end).
+              destruct a1; [|reflexivity].
+              destruct H6p5 as [t1'' [a1' [CTp1 CTp2]]].
+              destruct H6p1 as [t''0 Ht''0]. subst.
+              rewrite app_one_cons in CTp2. rewrite app_assoc in CTp2. apply app_inv_tail in CTp2. subst.
+              rewrite rev_app_distr in CTp1. simpl in CTp1. inversion CTp1. subst.
+              eexists. reflexivity.
+            }
+          split; [exact H6|].
+          
+          instantiate (1 := match a1 with
+                               | Some (Semantics.cons_salloc f) => Some (f a)
+                               | _ => None
+                               end).
+          destruct a1; [|reflexivity].
+          destruct H6p5 as [t1'' [a1' [CTp1 CTp2]]].
+          destruct H6p1 as [t''0 Ht''0]. subst.
+          rewrite app_one_cons in CTp2. rewrite app_assoc in CTp2. apply app_inv_tail in CTp2. subst.
+          rewrite rev_app_distr in CTp1. simpl in CTp1. inversion CTp1. subst.
+          eexists. eexists. split; [eassumption|]. reflexivity. }
+        { eassumption. }
+        { eassumption. } }
+      cbv beta. intros. fwd.
+      edestruct shrink_related_mem as (mSmall2 & ? & ?). 1,2: eassumption.
+      repeat match goal with
+             | |- exists _, _ => eexists
+             | |- _ /\ _ => split
+             end.
+      1,4,3,2: eassumption.
+      destruct a1; [|reflexivity].
+      destruct H6p1p4 as [f H6p1p4]. subst.
+      destruct H6p2 as [F' [a1' [t1'' [t2'' [CTp1 [CTp2 [CTp3 CTp4]]]]]]].
+      apply app_inv_tail in CTp2. subst.
+      exists (S F'). eexists. exists (t1'' ++ [Semantics.salloc a]). eexists.
+      split.
+      { rewrite rev_app_distr. cbn [rev List.app]. econstructor. eassumption. }
+      split.
+      { rewrite <- app_assoc. reflexivity. }
+      split.
+      2: { subst t2'. rewrite app_one_cons. repeat rewrite app_assoc. reflexivity. }
+      intros.
+      destruct fuel as [|fuel']; [blia|].
+      cbn [transform_stmt_trace].
+      repeat rewrite rev_app_distr. repeat rewrite rev_involutive. cbn [rev List.app].
+      constructor.
+      Check Semantics.generates_with_empty_rem_app.
+      eapply Semantics.generates_with_rem_trans.
+      { apply Semantics.generates_with_empty_rem_app.
+        apply Semantics.generates_generates_with_empty_rem.
+        apply Semantics.generator_generates. }
+      apply CTp3; [|blia].
+      intros. auto.
+    - 
+      
+      inversion H. subst.
       eapply exec.seq_cps.
       eapply set_reg_range_to_vars_correct; try eassumption; try (unfold a0, a7; blia).
       intros *. intros R GM. clear l2 mc2 H5.
@@ -2098,6 +2344,8 @@ Section Spilling.
         eapply IH; [eassumption|eassumption|..]. Check exec.stackalloc.
         { intros t1' m1' l1' mc1' H'. destruct H' as [mSmall' [mStack' [Hstack [Hsplit Hpost]]]].
           Search post. apply H2 in Hpost. destruct a1 as [a1|]; [|reflexivity]. Search t1'.
+          )
+          t1' = t1'' ++ t1_1 ++ t1_2
           admit. }
         { eassumption. }
         { eassumption. } }
