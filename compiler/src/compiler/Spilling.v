@@ -1645,6 +1645,18 @@ Section Spilling.
     - constructor. exists []. reflexivity.
   Qed.
 
+  Check trace_prefix.
+
+  Lemma post_and_trace_prefix :
+    forall (e : env) (s : stmt) (t : Semantics.trace) (m : mem) (l : locals) (mc : MetricLog) post,
+      exec e s t m l mc post -> exec e s t m l mc (fun (t' : Semantics.trace) (m' : mem) (l' : locals) (mc' : MetricLog) => post t' m' l' mc' /\ exists t'' : list Semantics.event, t' = t'' ++ t).
+  Proof.
+    intros. eapply exec.intersect. { assumption. }
+    eapply trace_prefix. apply H.
+  Qed.
+
+  Print exec.exec.
+  
   Lemma spilling_correct : forall
       (e1 e2 : env)
       (Ev : spill_functions e1 = Success e2)
@@ -1655,13 +1667,14 @@ Section Spilling.
       (mc1 : MetricLog)
       (post : Semantics.trace -> mem -> locals -> MetricLog -> Prop)
       (a1: option Semantics.abstract_trace),
-    exec e1 s1 t1 m1 l1 mc1 (fun t1' m1' l1' mc1' =>
-                               post t1' m1' l1' mc1' /\
-                               match a1 with
-                               | None => True
-                               | Some a1 => exists t1'' a1',
-                                   Semantics.generates_with_rem a1 (rev t1'') a1' /\
-                                     t1' = t1'' ++ t1 end) ->
+    (forall t1' m1' l1' mc1',
+      post t1' m1' l1' mc1' ->
+      match a1 with
+      | None => True
+      | Some a1 => exists t1'' a1',
+          Semantics.generates_with_rem a1 (rev t1'') a1' /\
+            t1' = t1'' ++ t1 end) ->
+    exec e1 s1 t1 m1 l1 mc1 post ->
     forall (frame : mem -> Prop) (maxvar : Z),
       valid_vars_src maxvar s1 ->
       forall (t2 : Semantics.trace) (m2 : mem) (l2 : locals) (mc2 : MetricLog) (fpval : word),
@@ -1683,18 +1696,18 @@ Section Spilling.
                             Semantics.generates_with_rem (transform_stmt_trace fuel e1 fpval s1 a1 f) (rev t2'') (f a1')) /\
                         t2' = t2'' ++ t2 end)).
   Proof.
-    intros e1 e2 Ev s1. induction s1; intros; cbn [spill_stmt valid_vars_src Forall_vars_stmt] in *; fwd.
-    - (* SLoad *)
-      inversion H. subst.
+    intros e1 e2 Ev. intros s1 t1 m1 l1 mc1 post a1 Hpost.
+    induction 1; intros; cbn [spill_stmt valid_vars_src Forall_vars_stmt] in *; fwd.
+    3: { (* SLoad *)
       eapply exec.seq_cps. Check load_iarg_reg_correct.
       eapply load_iarg_reg_correct; (blia || eassumption || idtac). Search related.
-      clear mc2 H1. intros.
+      clear mc2 H3. intros.
       eapply exec.seq_cps. Search related.
-      pose proof H0 as A. unfold related in A. fwd.
+      pose proof H2 as A. unfold related in A. fwd.
       unfold Memory.load, Memory.load_Z, Memory.load_bytes in *. fwd.
       eapply exec.load. {
         rewrite map.get_put_same. reflexivity. }
-      { edestruct (@sep_def _ _ _ m2 (eq m1)) as (m' & m2Rest & Sp & ? & ?).
+      { edestruct (@sep_def _ _ _ m2 (eq m)) as (m' & m2Rest & Sp & ? & ?). Search m2.
         1: ecancel_assumption. unfold map.split in Sp. subst. fwd.
         unfold Memory.load, Memory.load_Z, Memory.load_bytes.
         erewrite map.getmany_of_tuple_in_disjoint_putmany; eauto. }
@@ -1706,7 +1719,8 @@ Section Spilling.
         { eassumption. }
         (* begin CT stuff for load *)
         destruct a1 as [a1|]; try reflexivity.
-        destruct H12p1 as [t1'' [a1' [CTp1 CTp2]]].
+        specialize (Hpost _ _ _ _ H1).
+        destruct Hpost as [t1'' [a1' [CTp1 CTp2]]].
         exists 1%nat. do 3 eexists.
         split; [eassumption|]. Search t1''.
         split; [assumption|].
@@ -1719,96 +1733,14 @@ Section Spilling.
         destruct fuel as [|fuel']; [blia|].
         cbn [transform_stmt_trace].
         repeat rewrite rev_app_distr. repeat rewrite rev_involutive.
-        inversion H7. subst.
+        inversion H8. subst.
         eapply Semantics.abs_tr_eq_correct1.
         2: { apply Hf. eassumption. }
         apply Semantics.generates_with_empty_rem_app.
         apply Semantics.generates_generates_with_empty_rem.
         apply Semantics.generator_generates.
-        (* end CT stuff for load *)
-    - (* SStore *)
-      inversion H. subst.
-      eapply exec.seq_cps. eapply load_iarg_reg_correct; (blia || eassumption || idtac).
-      clear mc2 H1. intros.
-      eapply exec.seq_cps. eapply load_iarg_reg_correct; (blia || eassumption || idtac).
-      clear mc2 H0. intros. Search related.
-      pose proof H0 as A. unfold related in A. fwd.
-      unfold Memory.store, Memory.store_Z, Memory.store_bytes in *. fwd.
-      edestruct (@sep_def _ _ _ m2 (eq m1)) as (m' & m2Rest & Sp & ? & ?).
-      1: ecancel_assumption. unfold map.split in Sp. subst. fwd.
-      eapply exec.store.
-      1: eapply get_iarg_reg_1; eauto with zarith.
-      1: apply map.get_put_same.
-      { unfold Memory.store, Memory.store_Z, Memory.store_bytes.
-        unfold Memory.load_bytes in *.
-        erewrite map.getmany_of_tuple_in_disjoint_putmany; eauto. }
-      do 4 eexists. split; [|split; [eassumption|]].
-      { unfold related.
-        repeat match goal with
-               | |- exists _, _ => eexists
-               | |- _ /\ _ => split
-               end.
-        all: try eassumption || reflexivity.
-        spec store_bytes_sep_hi2lo as A. 1: eassumption.
-        all: ecancel_assumption. }
-      destruct a1 as [a1|]; try reflexivity.
-      Search post.
-      destruct H13p1 as [t1'' [a1' [CTp1 CTp2]]].
-      exists 1%nat. do 3 eexists.
-      split; [eassumption|].
-      split; [eassumption|].
-      split.
-      2: { subst t2'0. subst t2'. rewrite app_one_cons. repeat rewrite app_assoc. reflexivity. }
-      intros f fuel Hf Hfuel.
-      destruct fuel as [|fuel']; [blia|]. Search a1. Search t1''.
-      rewrite app_one_cons in CTp2. Check CTp2. apply app_inv_tail in CTp2. Check CTp2.
-      subst. Search a1.
-      inversion CTp1. subst.
-      inversion H8. subst.
-      cbn [transform_stmt_trace].
-      repeat rewrite rev_app_distr. repeat rewrite rev_involutive. cbn [rev List.app].
-      eapply Semantics.abs_tr_eq_correct1.
-      2: { apply Hf. eassumption. }
-      apply Semantics.generates_with_empty_rem_app.
-      apply Semantics.generates_generates_with_empty_rem.
-      apply Semantics.generator_generates.
-    - (* SInlinetable *)
-      inversion H. subst.
-      eapply exec.seq_cps. eapply load_iarg_reg_correct; (blia || eassumption || idtac).
-      clear mc2 H1. intros.
-      eapply exec.seq_cps.
-      eapply exec.inlinetable.
-      { unfold ires_reg, iarg_reg, spill_tmp, fp, a0, a7 in *. destr (32 <=? x); destr (32 <=? i); try blia. }
-      { rewrite map.get_put_same. reflexivity. }
-      { eassumption. }
-      eapply save_ires_reg_correct''.
-      + eassumption.
-      + blia.
-      + destruct H13 as [Hpost CT].
-        intros. do 4 eexists.
-        split; [|split; [eassumption|]].
-        { eassumption. }
-        destruct a1 as [a1|]; [|reflexivity].
-        destruct CT as [t1'' [a1' [CTp1 CTp2]]].
-        exists 1%nat. do 3 eexists.
-        split; [eassumption|].
-        split; [assumption|].
-        split.
-        2: { subst t2'0. subst t2'. repeat rewrite app_assoc. reflexivity. }
-        intros f fuel Hf Hfuel.
-        destruct fuel as [|fuel']; [blia|].
-        cbn [transform_stmt_trace].
-        assert (CTp2' : [] ++ t1 = t1'' ++ t1) by assumption. clear CTp2.
-        apply app_inv_tail in CTp2'. subst.
-        inversion CTp1. subst.
-        eapply Semantics.abs_tr_eq_correct1.
-        2: { apply Hf. eassumption. }
-        repeat rewrite rev_app_distr. repeat rewrite rev_involutive.
-        apply Semantics.generates_with_empty_rem_app.
-        apply Semantics.generates_generates_with_empty_rem.
-        apply Semantics.generator_generates.
-    - (* exec.stackalloc *)
-      inversion H. subst.
+    (* end CT stuff for load *) }
+    5: { (* exec.stackalloc *) (* inductive hypothesis for this case is problematic :(.  I want freedom to choose post however I want. *)
       Check exec.stackalloc. Check exec.stackalloc.
       eapply exec.stackalloc. 1: assumption.
       intros.
@@ -1819,8 +1751,10 @@ Section Spilling.
       eapply save_ires_reg_correct''. 1: eassumption. 1: blia.
       intros. Search post.
       eapply exec.weaken. {
-        eapply IHs1. Search exec. Search exec.
-        { eapply exec.weaken. Search exec.weaken.
+        eapply post_and_trace_prefix. eapply H1; [eassumption|eassumption| |..]. Search exec. Search exec.
+        { intros. apply Hpost. split.
+          { intros [H1' H2']. eexists. eexists. split; [eassumption|]. split; [eassumption|]. rewrite <- Hpost0 in *.
+        { intros.
           { eapply exec.intersect.
             { eapply trace_prefix. eapply H10; eassumption. }
             { eapply H10; eassumption. } }
@@ -1885,6 +1819,86 @@ Section Spilling.
         apply Semantics.generator_generates. }
       apply CTp3; [|blia].
       intros. auto.
+    3: { rewrite <- Hpost0 in *. clear Hpost0 post0. (* SStore *)
+      eapply exec.seq_cps. eapply load_iarg_reg_correct; (blia || eassumption || idtac).
+      clear mc2 H4. intros.
+      eapply exec.seq_cps. eapply load_iarg_reg_correct; (blia || eassumption || idtac).
+      clear mc2 H3. intros. Search related.
+      pose proof H3 as A. unfold related in A. fwd.
+      unfold Memory.store, Memory.store_Z, Memory.store_bytes in *. fwd.
+      edestruct (@sep_def _ _ _ m2 (eq m)) as (m' & m2Rest & Sp & ? & ?).
+      1: ecancel_assumption. unfold map.split in Sp. subst. fwd.
+      eapply exec.store.
+      1: eapply get_iarg_reg_1; eauto with zarith.
+      1: apply map.get_put_same.
+      { unfold Memory.store, Memory.store_Z, Memory.store_bytes.
+        unfold Memory.load_bytes in *.
+        erewrite map.getmany_of_tuple_in_disjoint_putmany; eauto. }
+      do 4 eexists. split; [|split; [eassumption|]].
+      { unfold related.
+        repeat match goal with
+               | |- exists _, _ => eexists
+               | |- _ /\ _ => split
+               end.
+        all: try eassumption || reflexivity.
+        spec store_bytes_sep_hi2lo as A. 1: eassumption.
+        all: ecancel_assumption. }
+      destruct a1 as [a1|]; try reflexivity.
+      Search post.
+      destruct H2p1 as [t1'' [a1' [CTp1 CTp2]]].
+      exists 1%nat. do 3 eexists.
+      split; [eassumption|].
+      split; [eassumption|].
+      split.
+      2: { subst t2'0. subst t2'. rewrite app_one_cons. repeat rewrite app_assoc. reflexivity. }
+      intros f fuel Hf Hfuel.
+      destruct fuel as [|fuel']; [blia|]. Search a1. Search t1''.
+      rewrite app_one_cons in CTp2. Check CTp2. apply app_inv_tail in CTp2. Check CTp2.
+      subst. Search a1.
+      inversion CTp1. subst.
+      inversion H8. subst.
+      cbn [transform_stmt_trace].
+      repeat rewrite rev_app_distr. repeat rewrite rev_involutive. cbn [rev List.app].
+      eapply Semantics.abs_tr_eq_correct1.
+      2: { apply Hf. eassumption. }
+      apply Semantics.generates_with_empty_rem_app.
+      apply Semantics.generates_generates_with_empty_rem.
+      apply Semantics.generator_generates. }
+    3: { rewrite <- Hpost0 in *. (* SInlinetable *)
+      eapply exec.seq_cps. eapply load_iarg_reg_correct; (blia || eassumption || idtac).
+      clear mc2 H4. intros.
+      eapply exec.seq_cps.
+      eapply exec.inlinetable.
+      { unfold ires_reg, iarg_reg, spill_tmp, fp, a0, a7 in *. destr (32 <=? x); destr (32 <=? i); try blia. }
+      { rewrite map.get_put_same. reflexivity. }
+      { eassumption. }
+      eapply save_ires_reg_correct''.
+      + eassumption.
+      + blia.
+      + destruct H2 as [Hpost CT].
+        intros. do 4 eexists.
+        split; [|split; [eassumption|]].
+        { eassumption. }
+        destruct a1 as [a1|]; [|reflexivity].
+        destruct CT as [t1'' [a1' [CTp1 CTp2]]].
+        exists 1%nat. do 3 eexists.
+        split; [eassumption|].
+        split; [assumption|].
+        split.
+        2: { subst t2'0. subst t2'. repeat rewrite app_assoc. reflexivity. }
+        intros f fuel Hf Hfuel.
+        destruct fuel as [|fuel']; [blia|].
+        cbn [transform_stmt_trace].
+        assert (CTp2' : [] ++ t = t1'' ++ t) by assumption. clear CTp2.
+        apply app_inv_tail in CTp2'. subst.
+        inversion CTp1. subst.
+        eapply Semantics.abs_tr_eq_correct1.
+        2: { apply Hf. eassumption. }
+        repeat rewrite rev_app_distr. repeat rewrite rev_involutive.
+        apply Semantics.generates_with_empty_rem_app.
+        apply Semantics.generates_generates_with_empty_rem.
+        apply Semantics.generator_generates. }
+    3: 
     - inversion H. subst.
       eapply exec.seq_cps. eapply exec.lit.
       eapply save_ires_reg_correct''.
@@ -2279,7 +2293,67 @@ Section Spilling.
            apply H3p3; [|blia].
            intros. auto.
            (*end thing copy-pasted from above*)
-    - (*SLoop*)
+    - (*SLoop*) Check exec.loop.
+      inversion H. subst.
+      rename IHs1_1 into IH1, H12 into IH2, H13 into IH12.
+      Check exec.loop.
+      Check exec.loop_cps.
+      eapply exec.loop_cps.
+      eapply exec.seq.
+      { eapply IH1.
+        { eapply exec.weaken.
+          { eapply exec.intersect. { eapply trace_prefix. eapply H4. } { eapply H4. } }
+          simpl. intros. split; [apply H0(*probably dont want this*)|].
+          destruct H0 as [H01 Hmid1].
+          specialize (H5 _ _ _ _ Hmid1). specialize (H6 _ _ _ _ Hmid1).
+          specialize (IH2 _ _ _ _ Hmid1). clear Hmid1 mid1 H4. Unshelve. 5: {
+          instantiate (1 := eval_bcond l' cond).
+          destruct (eval_bcond l' cond) as [eval_cond|]; [|congruence].
+          instantiate (1 := a1).
+          destruct eval_cond.
+          { clear H6. specialize (IH2 eq_refl). Search exec.
+            eapply 
+          
+          Search a1. eassumption.
+      cbv beta. intros. fwd.
+      unfold prepare_bcond. destr cond; cbn [ForallVars_bcond] in *; fwd.
+      + specialize H0 with (1 := H3p1). cbn in H0. fwd.
+        eapply exec.seq. {
+          eapply load_iarg_reg_correct''; (blia || eassumption || idtac).
+        }
+        cbv beta. intros. fwd.
+        eapply exec.weaken. {
+          eapply load_iarg_reg_correct''; (blia || eassumption || idtac).
+        }
+        cbv beta. intros. fwd. cbn [eval_bcond spill_bcond].
+        erewrite get_iarg_reg_1 by eauto with zarith.
+        rewrite map.get_put_same. eexists. split; [reflexivity|].
+        split; intros.
+        * do 4 eexists. split.
+          2: { eapply H1. 1: eassumption. cbn. rewrite E, E0. congruence. }
+          { exact H3p6. }
+        * eapply exec.weaken. 1: eapply IH2.
+          -- eassumption.
+          -- cbn. rewrite E, E0. congruence.
+          -- eassumption.
+          -- eassumption.
+          -- cbv beta. intros. fwd. eauto 10. (* IH12 *)
+      + specialize H0 with (1 := H3p1). cbn in H0. fwd.
+        eapply exec.weaken. {
+          eapply load_iarg_reg_correct''; (blia || eassumption || idtac).
+        }
+        cbv beta. intros. fwd. cbn [eval_bcond spill_bcond].
+        rewrite map.get_put_same. eexists. split; [reflexivity|].
+        split; intros.
+        * do 4 eexists. split.
+          2: { eapply H1. 1: eassumption. cbn. rewrite E. congruence. }
+          { exact H3p5. }
+        * eapply exec.weaken. 1: eapply IH2.
+          -- eassumption.
+          -- cbn. rewrite E. congruence.
+          -- eassumption.
+          -- eassumption.
+          -- cbv beta. intros. fwd. eauto 10. (* IH12 *)
       
            
         eapply IHexec; eassumption.
