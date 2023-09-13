@@ -1645,8 +1645,6 @@ Section Spilling.
     - constructor. exists []. reflexivity.
   Qed.
 
-  Check trace_prefix.
-
   Lemma post_and_trace_prefix :
     forall (e : env) (s : stmt) (t : Semantics.trace) (m : mem) (l : locals) (mc : MetricLog) post,
       exec e s t m l mc post -> exec e s t m l mc (fun (t' : Semantics.trace) (m' : mem) (l' : locals) (mc' : MetricLog) => post t' m' l' mc' /\ exists t'' : list Semantics.event, t' = t'' ++ t).
@@ -1656,7 +1654,127 @@ Section Spilling.
   Qed.
 
   Print exec.exec.
-  
+  Check exec.exec_ind.
+
+  (*Lemma exec_ind' :
+    forall (e : env) (P : FlatImp.stmt Z -> Semantics.trace -> mem -> locals -> MetricLog -> (Semantics.trace -> mem -> locals -> MetricLog -> Prop) -> Prop),
+       (forall (t : Semantics.trace) (m mKeep mGive : mem) (l : locals) (mc : MetricLog) (action : string) (argvars : list Z) (argvals : list word) (resvars : list Z)
+          (outcome : mem -> list word -> Prop) (post : Semantics.trace -> mem -> locals -> MetricLog -> Prop),
+        map.split m mKeep mGive ->
+        map.getmany_of_list l argvars = Some argvals ->
+        ext_spec (fio t) mGive action argvals outcome ->
+        (forall (mReceive : mem) (resvals : list word),
+         outcome mReceive resvals ->
+         exists l' : locals,
+           map.putmany_of_list_zip resvars resvals l = Some l' /\
+           (forall m' : mem,
+            map.split m' mKeep mReceive -> post (Semantics.IO (mGive, action, argvals, (mReceive, resvals)) :: t) m' l' (addMetricInstructions 1 (addMetricStores 1 (addMetricLoads 2 mc))))) ->
+        P (SInteract resvars action argvars) t m l mc post) ->
+       (forall (t : Semantics.trace) (m : mem) (l : locals) (mc : MetricLog) (binds : list Z) (fname : string) (args params rets : list Z) (fbody : FlatImp.stmt Z)
+          (argvs : list word) (st0 : locals) (post outcome : Semantics.trace -> mem -> locals -> MetricLog -> Prop),
+        map.get e fname = Some (params, rets, fbody) ->
+        map.getmany_of_list l args = Some argvs ->
+        map.putmany_of_list_zip params argvs map.empty = Some st0 ->
+        exec e fbody t m st0 (addMetricInstructions 100 (addMetricJumps 100 (addMetricLoads 100 (addMetricStores 100 mc)))) outcome ->
+        P fbody t m st0 (addMetricInstructions 100 (addMetricJumps 100 (addMetricLoads 100 (addMetricStores 100 mc)))) outcome ->
+        (forall (t' : Semantics.trace) (m' : mem) (mc' : MetricLog) (st1 : locals),
+         outcome t' m' st1 mc' ->
+         exists (retvs : list word) (l' : locals),
+           map.getmany_of_list st1 rets = Some retvs /\
+           map.putmany_of_list_zip binds retvs l = Some l' /\ post t' m' l' (addMetricInstructions 100 (addMetricJumps 100 (addMetricLoads 100 (addMetricStores 100 mc'))))) ->
+        P (SCall binds fname args) t m l mc post) ->
+       (forall (t : list Semantics.event) (m : mem) (l : locals) (mc : MetricLog) (sz : Syntax.access_size.access_size) (x a : Z) (o : Z) (v addr : word)
+          (post : Semantics.trace -> mem -> locals -> MetricLog -> Prop),
+        map.get l a = Some addr ->
+        Memory.load sz m (word.add addr (word.of_Z o)) = Some v ->
+        post (Semantics.read sz (word.add addr (word.of_Z o)) :: t) m (map.put l x v) (addMetricLoads 2 (addMetricInstructions 1 mc)) -> P (SLoad sz x a o) t m l mc post) ->
+       (forall (t : list Semantics.event) (m m' : mem) (mc : MetricLog) (l : locals) (sz : Syntax.access_size.access_size) (a : Z) (o : Z) (addr : word) (v : Z) 
+          (val : word) (post : Semantics.trace -> mem -> locals -> MetricLog -> Prop),
+        map.get l a = Some addr ->
+        map.get l v = Some val ->
+        Memory.store sz m (word.add addr (word.of_Z o)) val = Some m' ->
+        post (Semantics.write sz (word.add addr (word.of_Z o)) :: t) m' l (addMetricLoads 1 (addMetricInstructions 1 (addMetricStores 1 mc))) -> P (SStore sz a v o) t m l mc post) ->
+       (forall (sz : Syntax.access_size.access_size) (x : Z) (table : list Init.Byte.byte) (i : Z) (v index : word) (t : Semantics.trace) (m : mem) (l : locals) 
+          (mc : MetricLog) (post : Semantics.trace -> mem -> locals -> MetricLog -> Prop),
+        x <> i ->
+        map.get l i = Some index ->
+        Memory.load sz (OfListWord.map.of_list_word table) index = Some v ->
+        post t m (map.put l x v) (addMetricLoads 4 (addMetricInstructions 3 (addMetricJumps 1 mc))) -> P (SInlinetable sz x table i) t m l mc post) ->
+       (forall (t : list Semantics.event) (mSmall : mem) (l : locals) (mc : MetricLog) (x : Z) (n : Z) (body : FlatImp.stmt Z)
+               (mid post : Semantics.trace -> mem -> locals -> MetricLog -> Prop),
+           n mod Memory.bytes_per_word width = 0 ->
+           (forall t' mCombined' l' mc',
+               mid t' mCombined' l' mc' -> exists mSmall' mStack' : mem, Memory.anybytes a n mStack' /\ map.split mCombined' mSmall' mStack' /\ post t' mSmall' l' mc')
+        (forall (a : word) (mStack mCombined : mem),
+         Memory.anybytes a n mStack ->
+         map.split mCombined mSmall mStack ->
+         exec e body (Semantics.salloc a :: t) mCombined (map.put l x a) (addMetricLoads 1 (addMetricInstructions 1 mc)) mid) ->
+        (forall (a : word) (mStack mCombined : mem),
+         Memory.anybytes a n mStack ->
+         map.split mCombined mSmall mStack ->
+         P body (Semantics.salloc a :: t) mCombined (map.put l x a) (addMetricLoads 1 (addMetricInstructions 1 mc))
+           (fun (t' : Semantics.trace) (mCombined' : mem) (l' : locals) (mc' : MetricLog) =>
+            exists mSmall' mStack' : mem, Memory.anybytes a n mStack' /\ map.split mCombined' mSmall' mStack' /\ post t' mSmall' l' mc')) -> P (SStackalloc x n body) t mSmall l mc post) ->
+       (forall (t : Semantics.trace) (m : mem) (l : locals) (mc : MetricLog) (x : Z) (v : Z) (post : Semantics.trace -> mem -> locals -> MetricLog -> Prop),
+        post t m (map.put l x (word.of_Z v)) (addMetricLoads 8 (addMetricInstructions 8 mc)) -> P (SLit x v) t m l mc post) ->
+       (forall (t : Semantics.trace) (m : mem) (l : locals) (mc : MetricLog) (x : Z) (op : Syntax.bopname.bopname) (y : Z) (y' : word) (z : operand) (z' : word)
+          (post : Semantics.trace -> mem -> locals -> MetricLog -> Prop),
+        map.get l y = Some y' ->
+        exec.lookup_op_locals l z = Some z' -> post t m (map.put l x (Semantics.interp_binop op y' z')) (addMetricLoads 2 (addMetricInstructions 2 mc)) -> P (SOp x op y z) t m l mc post) ->
+       (forall (t : Semantics.trace) (m : mem) (l : locals) (mc : MetricLog) (x y : Z) (y' : word) (post : Semantics.trace -> mem -> locals -> MetricLog -> Prop),
+        map.get l y = Some y' -> post t m (map.put l x y') (addMetricLoads 1 (addMetricInstructions 1 mc)) -> P (SSet x y) t m l mc post) ->
+       (forall (t : list Semantics.event) (m : mem) (l : locals) (mc : MetricLog) (cond : bcond Z) (bThen bElse : FlatImp.stmt Z)
+          (post : Semantics.trace -> mem -> locals -> MetricLog -> Prop),
+        eval_bcond l cond = Some true ->
+        exec e bThen (Semantics.branch true :: t) m l (addMetricLoads 2 (addMetricInstructions 2 (addMetricJumps 1 mc))) post ->
+        P bThen (Semantics.branch true :: t) m l (addMetricLoads 2 (addMetricInstructions 2 (addMetricJumps 1 mc))) post -> P (SIf cond bThen bElse) t m l mc post) ->
+       (forall (t : list Semantics.event) (m : mem) (l : locals) (mc : MetricLog) (cond : bcond Z) (bThen bElse : FlatImp.stmt Z)
+          (post : Semantics.trace -> mem -> locals -> MetricLog -> Prop),
+        eval_bcond l cond = Some false ->
+        exec e bElse (Semantics.branch false :: t) m l (addMetricLoads 2 (addMetricInstructions 2 (addMetricJumps 1 mc))) post ->
+        P bElse (Semantics.branch false :: t) m l (addMetricLoads 2 (addMetricInstructions 2 (addMetricJumps 1 mc))) post -> P (SIf cond bThen bElse) t m l mc post) ->
+       (forall (t : Semantics.trace) (m : mem) (l : locals) (mc : MetricLog) (cond : bcond Z) (body1 body2 : FlatImp.stmt Z)
+          (mid1 mid2 post : Semantics.trace -> mem -> locals -> MetricLog -> Prop),
+        exec e body1 t m l mc mid1 ->
+        P body1 t m l mc mid1 ->
+        (forall (t' : Semantics.trace) (m' : mem) (l' : locals) (mc' : MetricLog), mid1 t' m' l' mc' -> eval_bcond l' cond <> None) ->
+        (forall (t' : Semantics.trace) (m' : mem) (l' : locals) (mc' : MetricLog),
+         mid1 t' m' l' mc' -> eval_bcond l' cond = Some false -> post (Semantics.branch false :: t') m' l' (addMetricLoads 1 (addMetricInstructions 1 (addMetricJumps 1 mc')))) ->
+        (forall (t' : Semantics.trace) (m' : mem) (l' : locals) (mc' : MetricLog), mid1 t' m' l' mc' -> eval_bcond l' cond = Some true -> exec e body2 (Semantics.branch true :: t') m' l' mc' mid2) ->
+        (forall (t' : Semantics.trace) (m' : mem) (l' : locals) (mc' : MetricLog), mid1 t' m' l' mc' -> eval_bcond l' cond = Some true -> P body2 (Semantics.branch true :: t') m' l' mc' mid2) ->
+        (forall (t'' : Semantics.trace) (m'' : mem) (l'' : locals) (mc'' : MetricLog),
+         mid2 t'' m'' l'' mc'' -> exec e (SLoop body1 cond body2) t'' m'' l'' (addMetricLoads 2 (addMetricInstructions 2 (addMetricJumps 1 mc''))) post) ->
+        (forall (t'' : Semantics.trace) (m'' : mem) (l'' : locals) (mc'' : MetricLog),
+         mid2 t'' m'' l'' mc'' -> P (SLoop body1 cond body2) t'' m'' l'' (addMetricLoads 2 (addMetricInstructions 2 (addMetricJumps 1 mc''))) post) -> P (SLoop body1 cond body2) t m l mc post) ->
+       (forall (t : Semantics.trace) (m : mem) (l : locals) (mc : MetricLog) (s1 s2 : FlatImp.stmt Z) (mid post : Semantics.trace -> mem -> locals -> MetricLog -> Prop),
+        exec e s1 t m l mc mid ->
+        P s1 t m l mc mid ->
+        (forall (t' : Semantics.trace) (m' : mem) (l' : locals) (mc' : MetricLog), mid t' m' l' mc' -> exec e s2 t' m' l' mc' post) ->
+        (forall (t' : Semantics.trace) (m' : mem) (l' : locals) (mc' : MetricLog), mid t' m' l' mc' -> P s2 t' m' l' mc' post) -> P (s1;; s2) t m l mc post) ->
+       (forall (t : Semantics.trace) (m : mem) (l : locals) (mc : MetricLog) (post : Semantics.trace -> mem -> locals -> MetricLog -> Prop), post t m l mc -> P SSkip t m l mc post) ->
+       forall (s : FlatImp.stmt Z) (t : Semantics.trace) (r : mem) (r0 : locals) (m : MetricLog) (P0 : Semantics.trace -> mem -> locals -> MetricLog -> Prop),
+       exec e s t r r0 m P0 -> P s t r r0 m P0.*)
+
+  Lemma trans_invertible a a' a'' t1 t2 :
+    Semantics.generates_with_rem a t1 a' ->
+    Semantics.generates_with_rem a (t1 ++ t2) a'' ->
+    Semantics.generates_with_rem a' t2 a''.
+  Proof.
+    intros H1 H2. induction H1; cbn [List.app] in *; try constructor; auto.
+    - eapply Semantics.abs_tr_eq_correct2; eassumption.
+    - inversion H2. subst. auto.
+    - inversion H2. subst. auto.
+    - inversion H2. subst. auto.
+    - inversion H2. subst. auto.
+    - inversion H2. subst. auto.
+  Qed.
+
+  Lemma abstract_app_assoc a1 a2 a3 :
+    Semantics.abs_tr_eq
+      (Semantics.abstract_app a1 (Semantics.abstract_app a2 a3))
+      (Semantics.abstract_app (Semantics.abstract_app a1 a2) a3).
+  Proof. Admitted.
+    
   Lemma spilling_correct : forall
       (e1 e2 : env)
       (Ev : spill_functions e1 = Success e2)
@@ -1665,45 +1783,50 @@ Section Spilling.
       (m1 : mem)
       (l1 : locals)
       (mc1 : MetricLog)
-      (post : Semantics.trace -> mem -> locals -> MetricLog -> Prop)
-      (a1: option Semantics.abstract_trace),
-    (forall t1' m1' l1' mc1',
-      post t1' m1' l1' mc1' ->
-      match a1 with
-      | None => True
-      | Some a1 => exists t1'' a1',
-          Semantics.generates_with_rem a1 (rev t1'') a1' /\
-            t1' = t1'' ++ t1 end) ->
-    exec e1 s1 t1 m1 l1 mc1 post ->
-    forall (frame : mem -> Prop) (maxvar : Z),
-      valid_vars_src maxvar s1 ->
-      forall (t2 : Semantics.trace) (m2 : mem) (l2 : locals) (mc2 : MetricLog) (fpval : word),
-        related maxvar frame fpval (fio t1) m1 l1 (fio t2) m2 l2 ->
-        exec e2 (spill_stmt s1) t2 m2 l2 mc2
-          (fun (t2' : Semantics.trace) (m2' : mem) (l2' : locals) (mc2' : MetricLog) =>
-             exists t1' m1' l1' mc1',
-               related maxvar frame fpval (fio t1') m1' l1' (fio t2') m2' l2' /\
-                 post t1' m1' l1' mc1' /\
-                 (match a1 with
-                  | None => True
-                  | Some a1 => exists F a1' t1'' t2'',
-                      Semantics.generates_with_rem a1 (rev t1'') a1' /\
-                        t1' = t1'' ++ t1 /\
-                        (forall f fuel,
-                            (forall a01 a02,
-                                Semantics.abs_tr_eq a01 a02 -> Semantics.abs_tr_eq (f a01) (f a02)) ->
-                            Nat.le F fuel ->
-                            Semantics.generates_with_rem (transform_stmt_trace fuel e1 fpval s1 a1 f) (rev t2'') (f a1')) /\
-                        t2' = t2'' ++ t2 end)).
+      (post : Semantics.trace -> mem -> locals -> MetricLog -> Prop),
+      exec e1 s1 t1 m1 l1 mc1 post ->
+      forall (is_ct : bool) (a1 a1' a1'' : Semantics.abstract_trace) (P : Semantics.trace -> Prop),
+        (match is_ct with
+         | false => True
+         | true =>
+               forall t1' m1' l1' mc1',
+                 post t1' m1' l1' mc1' ->
+                 (exists t1'', t1' = t1'' ++ t1) ->
+                 (P t1') /\
+                 Semantics.generates_with_rem a1 (rev t1) a1' /\
+                   Semantics.generates_with_rem a1 (rev t1') a1''
+         end) ->
+        forall (frame : mem -> Prop) (maxvar : Z),
+          valid_vars_src maxvar s1 ->
+          forall (t2 : Semantics.trace) (m2 : mem) (l2 : locals) (mc2 : MetricLog) (fpval : word),
+            related maxvar frame fpval (fio t1) m1 l1 (fio t2) m2 l2 ->
+            exec e2 (spill_stmt s1) t2 m2 l2 mc2
+              (fun (t2' : Semantics.trace) (m2' : mem) (l2' : locals) (mc2' : MetricLog) =>
+                 exists t1' m1' l1' mc1',
+                   related maxvar frame fpval (fio t1') m1' l1' (fio t2') m2' l2' /\
+                     post t1' m1' l1' mc1' /\
+                     (match is_ct with
+                      | false => True
+                      | true => exists F,
+                            (forall f fuel a2,
+                                (forall a01 a02,
+                                    Semantics.abs_tr_eq a01 a02 -> Semantics.abs_tr_eq (f a01) (f a02)) ->
+                                Nat.le F fuel ->
+                                Semantics.generates_with_rem a2 (rev t2) Semantics.empty ->
+                                P t1' /\
+                                Semantics.generates_with_rem
+                                  (Semantics.abstract_app a2 (transform_stmt_trace fuel e1 fpval s1 a1' f))
+                                  (rev t2')
+                                  (f a1'')) end)).
   Proof.
-    intros e1 e2 Ev. intros s1 t1 m1 l1 mc1 post a1 Hpost.
+    intros e1 e2 Ev. intros s1 t1 m1 l1 mc1 post.
     induction 1; intros; cbn [spill_stmt valid_vars_src Forall_vars_stmt] in *; fwd.
     3: { (* SLoad *)
       eapply exec.seq_cps. Check load_iarg_reg_correct.
       eapply load_iarg_reg_correct; (blia || eassumption || idtac). Search related.
-      clear mc2 H3. intros.
+      clear mc2 H4. intros.
       eapply exec.seq_cps. Search related.
-      pose proof H2 as A. unfold related in A. fwd.
+      pose proof H3 as A. unfold related in A. fwd.
       unfold Memory.load, Memory.load_Z, Memory.load_bytes in *. fwd.
       eapply exec.load. {
         rewrite map.get_put_same. reflexivity. }
@@ -1718,28 +1841,31 @@ Section Spilling.
         split; [|split; [eassumption|]].
         { eassumption. }
         (* begin CT stuff for load *)
-        destruct a1 as [a1|]; try reflexivity.
-        specialize (Hpost _ _ _ _ H1).
-        destruct Hpost as [t1'' [a1' [CTp1 CTp2]]].
-        exists 1%nat. do 3 eexists.
-        split; [eassumption|]. Search t1''.
-        split; [assumption|].
-        split.
-        2: { subst t2'0. subst t2'. rewrite app_one_cons. repeat rewrite app_assoc. reflexivity. }
-        intros f fuel Hf Hfuel. Search t1''.
-        rewrite app_one_cons in CTp2. apply app_inv_tail in CTp2. subst.
-        cbn [rev List.app] in CTp1.
-        inversion CTp1. subst.
+        destruct is_ct; [|reflexivity].
+        specialize (H2 _ _ _ _ H1). clear H1.
+        destruct H2 as [HP [CTp1 CTp2]].
+        { eexists. rewrite app_one_cons. reflexivity. }
+        exists 1%nat.
+        intros f fuel a2 Hf Hfuel Ha2.
         destruct fuel as [|fuel']; [blia|].
+        cbn [rev] in CTp2.
+        Check trans_invertible.
+        assert (CTp3 := trans_invertible _ _ _ _ _ CTp1 CTp2).
+        inversion CTp3. subst. clear CTp3. inversion H7. subst. clear H7.
         cbn [transform_stmt_trace].
-        repeat rewrite rev_app_distr. repeat rewrite rev_involutive.
-        inversion H8. subst.
+        subst t2'0. subst t2'.
+        repeat (rewrite rev_app_distr || cbn [rev List.app] || rewrite rev_involutive).
+        repeat rewrite <- app_assoc. Search a2.
+        split; [assumption|].
+        eapply Semantics.generates_with_rem_trans.
+        { eapply Semantics.generates_with_empty_rem_app. eassumption. }
         eapply Semantics.abs_tr_eq_correct1.
-        2: { apply Hf. eassumption. }
-        apply Semantics.generates_with_empty_rem_app.
-        apply Semantics.generates_generates_with_empty_rem.
-        apply Semantics.generator_generates.
-    (* end CT stuff for load *) }
+        { eapply Semantics.generates_with_empty_rem_app.
+          eapply Semantics.generates_generates_with_empty_rem.
+          apply Semantics.generator_generates. }
+        auto.
+        (* end CT stuff for load *)
+    }
     5: { (* exec.stackalloc *) (* inductive hypothesis for this case is problematic :(.  I want freedom to choose post however I want. *)
       Check exec.stackalloc. Check exec.stackalloc.
       eapply exec.stackalloc. 1: assumption.
@@ -1751,8 +1877,101 @@ Section Spilling.
       eapply save_ires_reg_correct''. 1: eassumption. 1: blia.
       intros. Search post.
       eapply exec.weaken. {
-        eapply post_and_trace_prefix. eapply H1; [eassumption|eassumption| |..]. Search exec. Search exec.
-        { intros. apply Hpost. split.
+        eapply H1 with (is_ct := is_ct); try eassumption.
+        destruct is_ct; [|reflexivity].
+        intros.
+        destruct H9 as [mSmall' [mStack' [H9p1 [H9p2 Hpost]]]].
+        Check (fun t1' => exists t1'', t1' = t1'' ++ Semantics.salloc a :: t /\ match a1' with | Semantics.cons_salloc f => True | _ => False end).
+        instantiate (5 := (fun t1' => exists t1'', t1' = t1'' ++ Semantics.salloc a :: t /\ match a1' with | Semantics.cons_salloc f => True | _ => False end)).
+        destruct H10 as [t1'' Hprefix]. subst.
+        apply H2 in Hpost; clear H2.
+        2: { eexists. rewrite app_one_cons. rewrite app_assoc. reflexivity. }
+        destruct Hpost as [HP [CTIHp1 CTIHp2]].
+        rewrite rev_app_distr in CTIHp2. cbn [rev] in CTIHp2. rewrite <- app_assoc in CTIHp2.
+        assert (CTIHp3 := trans_invertible _ _ _ _ _ CTIHp1 CTIHp2).
+        cbn [List.app] in CTIHp3.
+        instantiate (3 := match a1' with | Semantics.cons_salloc f => (f a) | _ => Semantics.empty end).
+        inversion CTIHp3. subst. clear CTIHp3.
+        split.
+        { eexists. split; reflexivity. }
+        split.
+        { cbn [rev]. eapply Semantics.generates_with_rem_trans. { eassumption. }
+          constructor. constructor. apply Semantics.abs_tr_eq_self. }
+        rewrite rev_app_distr. cbn [rev]. rewrite <- app_assoc. eassumption. }
+      cbv beta. intros. fwd.
+      edestruct shrink_related_mem as (mSmall2 & ? & ?). 1,2: eassumption.
+      repeat match goal with
+             | |- exists _, _ => eexists
+             | |- _ /\ _ => split
+             end.
+      1,4,3,2: eassumption.
+      destruct is_ct; [|reflexivity].
+      destruct H9p2 as [F' H9p2].
+      exists (S F').
+      intros. Search P.
+      destruct fuel as [|fuel']; [blia|].
+      eenough _.
+      2: { apply H9p2.
+           3: { subst t2'.
+                repeat (rewrite rev_app_distr || cbn [rev] || rewrite rev_involutive).
+                rewrite <- app_assoc.
+                
+                eapply Semantics.generates_with_rem_trans.
+                { eapply Semantics.generates_with_empty_rem_app. eapply H13. }
+                eapply Semantics.generates_generates_with_empty_rem.
+                simpl. (* instantiate (1 := Semantics.cons_salloc (fun aa => Semantics.generator (leak_save_ires_reg fpval x))).*)
+                eapply Semantics.generator_generates. }
+           { eassumption. }
+           { instantiate (1 := fuel'). blia. } }
+      destruct X as [[t1'' [IHp1 IHp2]] IHp3]. subst.
+      destruct a1'; try solve [ destruct IHp2]. clear IHp2.
+      apply H2 in H9p1p2.
+      2: { eexists. rewrite app_one_cons. rewrite app_assoc. reflexivity. }
+      destruct H9p1p2 as [HP [CTp1 CTp2]].
+      split; [apply HP|].
+      cbn [transform_stmt_trace].
+      eapply Semantics.abs_tr_eq_correct2. { apply IHp3. }
+      Search (Semantics.abs_tr_eq (Semantics.abstract_app _ _) _).
+      eapply Semantics.abs_tr_eq_trans.
+      { apply Semantics.abs_tr_eq_symm. apply abstract_app_assoc. }
+      eapply Semantics.abs_tr_eq_app.
+      { apply Semantics.abs_tr_eq_self. }
+      { cbn [Semantics.generator Semantics.abstract_app]. constructor.
+      eapply Semantics.abs_tr_eq_correct2 in IHp3.
+      2: { eapply Semantics.abs_tr_eq_symm. eapply abstract_app_assoc. }
+      cbn [List.app Semantics.generator] in IHp3.
+      Search t'.
+      Search P. Search post.
+      clear IHp1. Search P. Search t'.
+           
+       specialize (H9p2 _ _ _ _ _ _).
+      apply H2 in H9p1p2. Search t1'.
+      destruct H9p1p2 as [HP [CTp1 CTp2]].
+      eenough _.
+      2: { apply H9p2. Search t2'.
+      apply app_inv_tail in CTp2. subst.
+      exists (S F'). eexists. exists (t1'' ++ [Semantics.salloc a]). eexists.
+      split.
+      { rewrite rev_app_distr. cbn [rev List.app]. econstructor. eassumption. }
+      split.
+      { rewrite <- app_assoc. reflexivity. }
+      split.
+      2: { subst t2'. rewrite app_one_cons. repeat rewrite app_assoc. reflexivity. }
+      intros.
+      destruct fuel as [|fuel']; [blia|].
+      cbn [transform_stmt_trace].
+      repeat rewrite rev_app_distr. repeat rewrite rev_involutive. cbn [rev List.app].
+      constructor.
+      Check Semantics.generates_with_empty_rem_app.
+      eapply Semantics.generates_with_rem_trans.
+      { apply Semantics.generates_with_empty_rem_app.
+        apply Semantics.generates_generates_with_empty_rem.
+        apply Semantics.generator_generates. }
+      simpl. intros.
+      destruct H9 as [[t1' [m1' [l1' [mc1' [IHp1 [IHp2 IHp3]]]]]] [t'' IHp5]].
+      destruct IHp2 as [mSmall' [mStack' [IHp2p1 [IHp2p2 IHp2p3]]]].
+      exists mSmall'. exists mStack'. Search Memory.anybytes. split; [exact IHp2p2|]. Search m1'. Search m'. unfold related in IHp1. split; [assumption|].
+            simpl.
           { intros [H1' H2']. eexists. eexists. split; [eassumption|]. split; [eassumption|]. rewrite <- Hpost0 in *.
         { intros.
           { eapply exec.intersect.
@@ -2826,12 +3045,7 @@ Section Spilling.
       eapply save_ires_reg_correct''. 1: eassumption. 1: blia.
       intros. Search post.
       eapply exec.weaken. {
-        eapply IH; [eassumption|eassumption|..]. Check exec.stackalloc.
-        { intros t1' m1' l1' mc1' H'. destruct H' as [mSmall' [mStack' [Hstack [Hsplit Hpost]]]].
-          Search post. apply H2 in Hpost. destruct a1 as [a1|]; [|reflexivity]. Search t1'.
-          )
-          t1' = t1'' ++ t1_1 ++ t1_2
-          admit. }
+        eapply IH; [eassumption|eassumption|..].
         { eassumption. }
         { eassumption. } }
       cbv beta. intros. fwd.
