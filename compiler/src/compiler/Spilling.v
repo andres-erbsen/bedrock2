@@ -1825,6 +1825,98 @@ Section Spilling.
   Proof.
     intros e1 e2 Ev. intros s1 t1 m1 l1 mc1 post.
     induction 1; intros; cbn [spill_stmt valid_vars_src Forall_vars_stmt] in *; fwd.
+    - eapply exec.seq_cps.
+      eapply set_reg_range_to_vars_correct; try eassumption; try (unfold a0, a7; blia).
+      intros *. intros R GM. clear l2 mc2 H5.
+      unfold related in R. fwd.
+      spec (subst_split (ok := mem_ok) m) as A.
+      1: eassumption. 1: ecancel_assumption.
+      edestruct (@sep_def _ _ _ m2 (eq mGive)) as (mGive' & mKeepL & B & ? & C).
+      1: ecancel_assumption.
+      subst mGive'.
+      eapply exec.seq_cps.
+      eapply @exec.interact with (mGive := mGive).
+      + eapply map.split_comm. exact B.
+      + rewrite arg_regs_alt by blia. 1: eassumption.
+      + rewrite <- Rp0. eassumption.
+      + intros.
+        match goal with
+        | H: context[outcome], A: context[outcome] |- _ =>
+          specialize H with (1 := A); move H at bottom
+        end.
+        fwd.
+        rename l into l1, l' into l1'.
+        rename H2p0 into Q.
+        assert (List.length (List.firstn (length resvars) (reg_class.all reg_class.arg)) =
+                List.length resvals) as HL. {
+          eapply map.putmany_of_list_zip_sameLength in Q. rewrite <- Q.
+          rewrite List.firstn_length. change (length (reg_class.all reg_class.arg)) with 8%nat.
+          blia.
+        }
+        eapply map.sameLength_putmany_of_list in HL. destruct HL as (l2'' & ER).
+        eexists. split. 1: exact ER.
+        intros.
+        eapply set_vars_to_reg_range_correct; cycle 1.
+        { eassumption. }
+        { eapply map.putmany_of_list_zip_to_getmany_of_list.
+          - rewrite <- arg_regs_alt by blia. eassumption.
+          - eapply List.NoDup_unfoldn_Z_seq. }
+        { blia. }
+        { reflexivity. }
+        { unfold a0, a7. blia. }
+        { eassumption. }
+        { intros. do 4 eexists.
+          split. 1: eassumption.
+          eenough _ as Hpost.
+          2: { eapply H2p1.
+               unfold map.split. split; [reflexivity|].
+               move C at bottom.
+               unfold sep at 1 in C. destruct C as (mKeepL' & mRest & SC & ? & _). subst mKeepL'.
+               move H2 at bottom. unfold map.split in H2. fwd.
+               eapply map.shrink_disjoint_l; eassumption. }
+          clear H2p1.
+          split. 1: eassumption.
+          (*begin ct stuff for interact*)
+          destruct is_ct; [|reflexivity].
+          Search post.
+          apply H3 in Hpost.
+          2: { eexists. rewrite app_one_cons. reflexivity. }
+          clear H3. destruct Hpost as [HP [a1' [t1'' [CTp1 CTp2]]]].
+          rewrite app_one_cons in CTp1. apply app_inv_tail in CTp1. subst.
+          exists 1%nat.
+          intros f fuel Hf Hfuel.
+          destruct fuel as [|fuel']; [blia|]. clear Hfuel.
+          split. 1: eassumption. clear HP.
+          do 3 eexists.
+          split.
+          { rewrite app_one_cons. reflexivity. }
+          split. 1: eassumption.
+          split.
+          { subst t2'0. subst t2'. rewrite app_one_cons. repeat rewrite app_assoc. reflexivity. }
+          repeat (rewrite rev_app_distr || rewrite rev_involutive || cbn [rev List.app]).
+          cbn [rev List.app] in CTp2.
+          inversion CTp2. subst. inversion H9. subst. clear CTp2 H9.
+          cbn [transform_stmt_trace].
+          eapply Semantics.abs_tr_eq_correct1.
+          { eapply Semantics.generates_with_empty_rem_app.
+            apply Semantics.generates_generates_with_empty_rem.
+            cbn [List.app]. apply Semantics.generator_generates. }
+          auto. }
+        (* related for set_vars_to_reg_range_correct: *)
+        unfold related.
+        eexists _, _, _. ssplit.
+        * repeat rewrite ProgramLogic.filterio_cons. f_equal. assumption.
+        * eenough ((eq _ * (word_array fpval stackwords * frame))%sep m') as En.
+          1: ecancel_assumption.
+          move C at bottom.
+          eapply grow_eq_sep. 1: exact C. eassumption.
+        * eassumption.
+        * eassumption.
+        * eassumption.
+        * eapply arg_regs_absorbs_putmany_of_list_zip; try eassumption.
+        * eassumption.
+        * eassumption.
+    - 
     3: { (* SLoad *)
       eapply exec.seq_cps. Check load_iarg_reg_correct.
       eapply load_iarg_reg_correct; (blia || eassumption || idtac). Search related.
