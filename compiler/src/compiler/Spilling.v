@@ -16,13 +16,25 @@ Require Import coqutil.Tactics.autoforward.
 Require Import coqutil.Tactics.fwd.
 Require bedrock2.ProgramLogic.
 
-Notation empty := Semantics.empty.
-  Notation cons_IO := Semantics.cons_IO.
-  Notation cons_branch := Semantics.cons_branch.
-  Notation cons_read := Semantics.cons_read.
-  Notation cons_write := Semantics.cons_write.
-  Notation cons_salloc := Semantics.cons_salloc.
-  Notation abstract_trace := Semantics.abstract_trace.
+Notation trace := Semantics.trace.
+Notation salloc := Semantics.salloc.
+Notation write := Semantics.write.
+Notation read := Semantics.read.
+Notation branch := Semantics.branch.
+Notation IO := Semantics.IO.
+
+(*Definition step A B := A -> (list A * (list B -> B)) + B.*)
+
+(*https://www.cs.yale.edu/homes/wilke-pierre/jar18/doc/html/Iteration.html*)
+(*Fixpoint iterate {A B : Type} (n : nat) (default : B) (step : step A B) (a : A) : B :=
+  match n with
+  | O => default
+  | S n' =>
+      match (step a) with
+      | inr b => b
+      | inl (l, f) => f (map (iterate n' default step) l)
+      end
+  end.*)
 
 Open Scope Z_scope.
 
@@ -47,15 +59,6 @@ Section Spilling.
 
   Context {width} {BW: Bitwidth width} {word: word.word width} {word_ok: word.ok word}.
   Context {mem: map.map word byte} {mem_ok: map.ok mem}.
-
-  (*Inductive option_trace : Type :=
-   | empty
-   | cons_IO (first : Semantics.io_event) (rest : option_trace)
-   | cons_branch (b : bool) (rest : option_trace)
-   | cons_read (sz : Syntax.access_size.access_size) (loc : word) (rest : option_trace)
-   | cons_write (sz : Syntax.access_size.access_size) (loc : word) (rest : option_trace)
-   | cons_salloc (rest : nat -> word -> option option_trace).*)
-
   
   Definition stack_loc(r: Z): option Z :=
     if Z.leb 32 r then Some ((r - 32) * bytes_per_word) else None.
@@ -72,12 +75,12 @@ Section Spilling.
     match stack_loc r with
     | Some o => SLoad Syntax.access_size.word (9 + i) fp o
     | None => SSkip
-    end. Check Semantics.read.
+    end.
 
-  Definition leak_load_iarg_reg(fpval: word) (r: Z) (a: abstract_trace): abstract_trace :=
+  Definition leak_load_iarg_reg(fpval: word) (r: Z): trace :=
     match stack_loc r with
-    | Some o => cons_read Syntax.access_size.word (word.add fpval (word.of_Z o)) a
-    | None => a
+    | Some o => [read Syntax.access_size.word (word.add fpval (word.of_Z o))]
+    | None => nil
     end.
 
   Definition save_ires_reg(r: Z): stmt :=
@@ -86,10 +89,10 @@ Section Spilling.
     | None => SSkip
     end.
 
-  Definition leak_save_ires_reg(fpval: word) (r: Z) a : abstract_trace :=
+  Definition leak_save_ires_reg(fpval: word) (r: Z) : trace :=
     match stack_loc r with
-    | Some o => cons_write Syntax.access_size.word (word.add fpval (word.of_Z o)) a
-    | None => a
+    | Some o => [write Syntax.access_size.word (word.add fpval (word.of_Z o))]
+    | None => nil
     end.
 
   Notation "s1 ;; s2" := (SSeq s1 s2) (right associativity, at level 60).
@@ -101,10 +104,10 @@ Section Spilling.
     | None => SSet reg var
     end.
 
-  Definition leak_set_reg_to_var(fpval: word) (var: Z) a : abstract_trace :=
+  Definition leak_set_reg_to_var(fpval: word) (var: Z) : trace :=
     match stack_loc var with
-    | Some o => cons_read Syntax.access_size.word (word.add fpval (word.of_Z o)) a
-    | None => a
+    | Some o => [read Syntax.access_size.word (word.add fpval (word.of_Z o))]
+    | None => nil
     end.
 
   Fixpoint set_reg_range_to_vars(range_start: Z)(srcs: list Z): stmt :=
@@ -113,10 +116,10 @@ Section Spilling.
     | x :: xs => set_reg_range_to_vars (range_start+1) xs;; set_reg_to_var range_start x
     end.
 
-  Fixpoint leak_set_reg_range_to_vars(fpval: word)(srcs: list Z) a : abstract_trace :=
+  Fixpoint leak_set_reg_range_to_vars(fpval: word)(srcs: list Z) : trace :=
     match srcs with
-    | nil => a
-    | x :: xs => leak_set_reg_range_to_vars fpval xs (leak_set_reg_to_var fpval x a)
+    | nil => nil
+    | x :: xs => leak_set_reg_range_to_vars fpval xs ++ (leak_set_reg_to_var fpval x)
     end.
 
   (* var might be >=32, reg must be < 32 *)
@@ -126,10 +129,10 @@ Section Spilling.
     | None => SSet var reg
     end.
 
-  Definition leak_set_var_to_reg(fpval: word) (var: Z) a : abstract_trace :=
+  Definition leak_set_var_to_reg(fpval: word) (var: Z) : trace :=
     match stack_loc var with
-    | Some o => cons_write Syntax.access_size.word (word.add fpval (word.of_Z o)) a
-    | None => a
+    | Some o => [write Syntax.access_size.word (word.add fpval (word.of_Z o))]
+    | None => nil
     end.
 
   Fixpoint set_vars_to_reg_range(dests: list Z)(range_start: Z): stmt :=
@@ -138,10 +141,10 @@ Section Spilling.
     | x :: xs => set_var_to_reg x range_start;; set_vars_to_reg_range xs (range_start+1)
     end.
 
-  Fixpoint leak_set_vars_to_reg_range(fpval: word) (dests: list Z) a : abstract_trace :=
+  Fixpoint leak_set_vars_to_reg_range(fpval: word) (dests: list Z) : trace :=
     match dests with
-    | nil => a
-    | x :: xs => leak_set_var_to_reg fpval x (leak_set_vars_to_reg_range fpval xs a)
+    | nil => nil
+    | x :: xs => leak_set_var_to_reg fpval x ++ (leak_set_vars_to_reg_range fpval xs)
     end.
 
   Fixpoint set_vars_to_reg_range_tailrec(do_first: stmt)(dests: list Z)(range_start: Z): stmt :=
@@ -167,10 +170,10 @@ Section Spilling.
   Print load_iarg_reg. (* fun i r : Z => ... *)
   Print leak_load_iarg_reg. (* fun (fpval : word) (r : Z) => ... *)
 
-  Definition leak_prepare_bcond(fpval: word) (c: bcond Z) a : abstract_trace :=
+  Definition leak_prepare_bcond(fpval: word) (c: bcond Z) : trace :=
     match c with
-    | CondBinary _ x y => leak_load_iarg_reg fpval x (leak_load_iarg_reg fpval y a)
-    | CondNez x => leak_load_iarg_reg fpval x a
+    | CondBinary _ x y => leak_load_iarg_reg fpval x ++ (leak_load_iarg_reg fpval y)
+    | CondNez x => leak_load_iarg_reg fpval x
     end.
 
   Definition spill_bcond(c: bcond Z): bcond Z :=
@@ -179,66 +182,34 @@ Section Spilling.
     | CondNez x => CondNez (iarg_reg 1 x)
     end.
 
-  Definition leak_spill_bcond a : abstract_trace :=
-    a.
-   Check bytes_per_word.
+  Definition leak_spill_bcond : trace :=
+    nil.
   (*TODO: remove sz from source-level read/writes. it's useless, we already know it from branching 
     information. similarly, we could replace separate read/writes with just one rw constructor. 
-    maybe that's too much though. we could be sillier yet and say that every element of the trace is an integer (word.unsigned for r/w/salloc, 1/0 for branches)*) Print save_ires_reg. Print leak_load_iarg_reg. Print load_iarg_reg. Print ires_reg.
-   Print Semantics.abstract_trace.
-   
-   Print Semantics.generates_with_rem.
+    maybe that's too much though. we could be sillier yet and say that every element of the trace is an integer (word.unsigned for r/w/salloc, 1/0 for branches)*)
 
-   Print Semantics.abs_tr_eq.
+   (*Inductive weird_trace : Type :=
+   | empty
+   | cons_IO (e: Semantics.io_event) (after : weird_trace)
+   | cons_branch (b : bool) (after : weird_trace)
+   | cons_read (sz : Syntax.access_size.access_size) (a : word) (after : weird_trace)
+   | cons_write (sz : Syntax.access_size.access_size) (a : word) (after : weird_trace)
+   | cons_salloc (T S : Type) (interpret : S -> weird_trace) (after : word -> step T S).*)
 
-   (*Inductive opt_tr_eq : option_trace -> option_trace -> Prop :=
-  | empty_eq : opt_tr_eq empty empty
-  | cons_IO_eq : forall i1 a1' i2 a2',
-      i1 = i2 ->
-      opt_tr_eq a1' a2' ->
-      opt_tr_eq (cons_IO i1 a1') (cons_IO i2 a2')
-  | cons_branch_eq : forall b1 a1' b2 a2',
-      b1 = b2 ->
-      opt_tr_eq a1' a2' ->
-      opt_tr_eq (cons_branch b1 a1') (cons_branch b2 a2')
-  | cons_read_eq : forall sz1 addr1 a1' sz2 addr2 a2',
-      sz1 = sz2 ->
-      addr1 = addr2 ->
-      opt_tr_eq a1' a2' ->
-      opt_tr_eq (cons_read sz1 addr1 a1') (cons_read sz2 addr2 a2')
-  | cons_write_eq : forall sz1 addr1 a1' sz2 addr2 a2',
-      sz1 = sz2 ->
-      addr1 = addr2 ->
-      opt_tr_eq a1' a2' ->
-      opt_tr_eq (cons_write sz1 addr1 a1') (cons_write sz2 addr2 a2')
-  | cons_salloc_eq : forall f1 f2,
-      (forall addr, exists F, forall fuel, Nat.le F fuel ->
-                                           exists a1 a2,
-                                             f1 fuel addr = Some a1 /\
-                                               f2 fuel addr = Some a2 /\
-                                               opt_tr_eq a1 a2) ->
-    opt_tr_eq (cons_salloc f1) (cons_salloc f2).
+   (* for a constant-time program, we should have a function which, given all compiler decisions that have
+      happened so far, returns the next element of the trace.*)
+   Print Semantics.event.
 
-   Inductive option_gen_with_rem : option_trace -> Semantics.trace -> option_trace -> Prop :=
-   | nil_gen_rem : forall a1 a2, opt_tr_eq a1 a2 -> option_gen_with_rem a1 nil a2
-   | IO_gen_rem : forall x a t_rev a', option_gen_with_rem a t_rev a' -> option_gen_with_rem (cons_IO x a) (Semantics.IO x :: t_rev) a'
-   | branch_gen_rem : forall x a t_rev a', option_gen_with_rem a t_rev a' -> option_gen_with_rem (cons_branch x a) (Semantics.branch x :: t_rev) a'
-   | read_gen_rem : forall x1 x2 a t_rev a', option_gen_with_rem a t_rev a' -> option_gen_with_rem (cons_read x1 x2 a) (Semantics.read x1 x2 :: t_rev) a'
-   | write_gen_rem : forall x1 x2 a t_rev a', option_gen_with_rem a t_rev a' -> option_gen_with_rem (cons_write x1 x2 a) (Semantics.write x1 x2 :: t_rev) a'
-   | salloc_gen_rem : forall f x t_rev a', (exists F,
-                                             forall fuel,
-                                               Nat.le F fuel ->
-                                               exists a,
-                                                 f fuel x = Some a /\
-                                                   option_gen_with_rem a t_rev a') ->
-                                             option_gen_with_rem (cons_salloc f) (Semantics.salloc x :: t_rev) a'.*)
-   
+   Fixpoint predict_next {env: map.map String.string (list Z * list Z * stmt)}
+     (e: env) (fuel : nat) (fpval: word) (s : stmt) (t : abstract_trace) : qevent :=...
+
+     
    Fixpoint transform_stmt_trace {env: map.map String.string (list Z * list Z * stmt)}
-      (* maps the abstract trace of an unspilled program to the abstract trace of the spilled program.
-         executes s, guided by t, popping events off of t and adding events to st as it goes.
-         returns the final abstract trace st.
-         may (but will not necessarily) return empty if input is garbage.
-         *)
+     (* maps the abstract trace of an unspilled program to the abstract trace of the spilled program.
+        executes s, guided by t, popping events off of t and adding events to st as it goes.
+        returns the final abstract trace st.
+        may (but will not necessarily) return empty if input is garbage.
+      *)
       (e: env) (fuel : nat) (fpval: word) (s : stmt) (t : abstract_trace) (f : abstract_trace(*remaining part of t*) -> abstract_trace(*rest of st*)) :
     abstract_trace :=
     match fuel with
@@ -249,51 +220,51 @@ Section Spilling.
         | SLoad sz x y o =>
             match t with
             | cons_read _(*sz*) a t' =>
-                leak_load_iarg_reg fpval y
+                abs_leak_load_iarg_reg fpval y
                   (cons_read sz a
-                     (leak_save_ires_reg fpval x
+                     (abs_leak_save_ires_reg fpval x
                         (f t')))
             | _ => empty
             end
         | SStore sz x y o =>
             match t with
             | cons_write _(*sz*) a t' =>
-                leak_load_iarg_reg fpval x
-                  (leak_load_iarg_reg fpval y
+                abs_leak_load_iarg_reg fpval x
+                  (abs_leak_load_iarg_reg fpval y
                      (cons_write sz a
                         (f t')))
             | _ => empty
             end
         | SInlinetable _ x _ i =>
-            leak_load_iarg_reg fpval i
-              (leak_save_ires_reg fpval x
+            abs_leak_load_iarg_reg fpval i
+              (abs_leak_save_ires_reg fpval x
                  (f t))
         | SStackalloc x _ body =>
             match t with
             | cons_salloc g =>
                 cons_salloc (fun a =>
                                let t' := g a in
-                               leak_save_ires_reg fpval x
+                               abs_leak_save_ires_reg fpval x
                                  (transform_stmt_trace fuel' fpval body t' f))
             | _ => empty
             end
-        | SLit x _ => leak_save_ires_reg fpval x (f t)
+        | SLit x _ => abs_leak_save_ires_reg fpval x (f t)
         | SOp x op y oz =>
-            let rest := leak_save_ires_reg fpval x (f t) in
-            leak_load_iarg_reg fpval y
+            let rest := abs_leak_save_ires_reg fpval x (f t) in
+            abs_leak_load_iarg_reg fpval y
               (match oz with 
-               | Var z => leak_load_iarg_reg fpval z rest
+               | Var z => abs_leak_load_iarg_reg fpval z rest
                | Const _ => rest
                end)
         | SSet x y =>
-            leak_load_iarg_reg fpval y
-              (leak_save_ires_reg fpval x
+            abs_leak_load_iarg_reg fpval y
+              (abs_leak_save_ires_reg fpval x
                  (f t))
         | SIf c thn els =>
             match t with
             | cons_branch b t' =>
-                leak_prepare_bcond fpval c
-                  (leak_spill_bcond
+                abs_leak_prepare_bcond fpval c
+                  (abs_leak_spill_bcond
                      (cons_branch b
                         (transform_stmt_trace fuel' fpval (if b then thn else els) t' f)))
             | _ => empty
@@ -301,8 +272,8 @@ Section Spilling.
         | SLoop s1 c s2 =>
             transform_stmt_trace fuel' fpval s1 t
               (fun t' =>
-                 leak_prepare_bcond fpval c
-                   (leak_spill_bcond
+                 abs_leak_prepare_bcond fpval c
+                   (abs_leak_spill_bcond
                       (match t' with
                        | cons_branch true t'' =>
                            transform_stmt_trace fuel' fpval s2 t''
@@ -321,29 +292,64 @@ Section Spilling.
         | SCall resvars fname argvars =>
             match @map.get _ _ env e fname with
             | Some (params, rets, fbody) =>
-                leak_set_reg_range_to_vars fpval argvars
+                abs_leak_set_reg_range_to_vars fpval argvars
                   (cons_salloc
                      (fun fpval' =>
-                        leak_set_vars_to_reg_range fpval' params
+                        abs_leak_set_vars_to_reg_range fpval' params
                           (transform_stmt_trace fuel' fpval' fbody t
                              (fun t' =>
-                                leak_set_reg_range_to_vars fpval' rets
-                                  (leak_set_vars_to_reg_range fpval resvars
+                                abs_leak_set_reg_range_to_vars fpval' rets
+                                  (abs_leak_set_vars_to_reg_range fpval resvars
                                      (f t'))))))
             | _ => empty
             end
         | SInteract resvars _ argvars =>
             match t with
             | cons_IO i t' =>
-                leak_set_reg_range_to_vars fpval argvars
+                abs_leak_set_reg_range_to_vars fpval argvars
                   (cons_IO i
-                     (leak_set_vars_to_reg_range fpval resvars
+                     (abs_leak_set_vars_to_reg_range fpval resvars
                         (f t')))
             | _ => empty
             end
         end
-    end.
-   
+    end. Check transform_stmt_trace.
+
+   Lemma something {env: map.map string (list Z * list Z * stmt)} e1 fpval s a1 f : exists a2,
+     forall F t2 a2',
+       (forall fuel, Nat.le F fuel ->
+       Semantics.generates_with_rem (transform_stmt_trace e1 fuel fpval s a1 f) t2 a2') ->
+       Semantics.generates_with_rem a2 t2 a2'.
+   Proof.
+     induction a1;
+     eexists (match s with
+              | SLoad a b c d => _
+              | SStore a b c d => _
+              | SInlinetable a b c d => _
+              | SStackalloc a b c => _
+              | SLit a b => _
+              | SOp a b c d => _
+              | SSet a b => _
+              | SIf a b c => _
+              | SLoop a b c => _
+              | SSeq a b => _
+              | SSkip => _
+              | SCall a b c => _
+              | SInteract a b c => _ end); induction s.     
+     all: try (intros; specialize (H (S F)%nat ltac:(blia)); simpl in H; apply H).
+     { intros. destruct F as [|F'].
+       - specialize (H 0%nat ltac:(blia)). simpl in H. specialize (H (S F)%nat ltac:(blia)); simpl in H. apply H.
+     { intros. specialize (H (S F)%nat ltac:(blia)). simpl in H.
+
+       - exists empty. intros. specialize (H (S F)%nat ltac:(blia)).
+       simpl in H. assumption.
+     - exists empty. intros. specialize (H (S F)%nat ltac:(blia)).
+       simpl in H. assumption. specialdestruct s; auto.
+       destruct F as [|F'].
+       + specialize (H (S F)%nat ltac:(blia)). simpl in H. apply H.
+       + specialize (H 1%nat ltac:(blia)).
+         simpl in H0, H1.       simpl in H.
+       
   Fixpoint spill_stmt(s: stmt): stmt :=
     match s with
     | SLoad sz x y o =>
@@ -1706,105 +1712,6 @@ Section Spilling.
 
   Print exec.exec.
   Check exec.exec_ind.
-
-  (*Lemma exec_ind' :
-    forall (e : env) (P : FlatImp.stmt Z -> Semantics.trace -> mem -> locals -> MetricLog -> (Semantics.trace -> mem -> locals -> MetricLog -> Prop) -> Prop),
-       (forall (t : Semantics.trace) (m mKeep mGive : mem) (l : locals) (mc : MetricLog) (action : string) (argvars : list Z) (argvals : list word) (resvars : list Z)
-          (outcome : mem -> list word -> Prop) (post : Semantics.trace -> mem -> locals -> MetricLog -> Prop),
-        map.split m mKeep mGive ->
-        map.getmany_of_list l argvars = Some argvals ->
-        ext_spec (fio t) mGive action argvals outcome ->
-        (forall (mReceive : mem) (resvals : list word),
-         outcome mReceive resvals ->
-         exists l' : locals,
-           map.putmany_of_list_zip resvars resvals l = Some l' /\
-           (forall m' : mem,
-            map.split m' mKeep mReceive -> post (Semantics.IO (mGive, action, argvals, (mReceive, resvals)) :: t) m' l' (addMetricInstructions 1 (addMetricStores 1 (addMetricLoads 2 mc))))) ->
-        P (SInteract resvars action argvars) t m l mc post) ->
-       (forall (t : Semantics.trace) (m : mem) (l : locals) (mc : MetricLog) (binds : list Z) (fname : string) (args params rets : list Z) (fbody : FlatImp.stmt Z)
-          (argvs : list word) (st0 : locals) (post outcome : Semantics.trace -> mem -> locals -> MetricLog -> Prop),
-        map.get e fname = Some (params, rets, fbody) ->
-        map.getmany_of_list l args = Some argvs ->
-        map.putmany_of_list_zip params argvs map.empty = Some st0 ->
-        exec e fbody t m st0 (addMetricInstructions 100 (addMetricJumps 100 (addMetricLoads 100 (addMetricStores 100 mc)))) outcome ->
-        P fbody t m st0 (addMetricInstructions 100 (addMetricJumps 100 (addMetricLoads 100 (addMetricStores 100 mc)))) outcome ->
-        (forall (t' : Semantics.trace) (m' : mem) (mc' : MetricLog) (st1 : locals),
-         outcome t' m' st1 mc' ->
-         exists (retvs : list word) (l' : locals),
-           map.getmany_of_list st1 rets = Some retvs /\
-           map.putmany_of_list_zip binds retvs l = Some l' /\ post t' m' l' (addMetricInstructions 100 (addMetricJumps 100 (addMetricLoads 100 (addMetricStores 100 mc'))))) ->
-        P (SCall binds fname args) t m l mc post) ->
-       (forall (t : list Semantics.event) (m : mem) (l : locals) (mc : MetricLog) (sz : Syntax.access_size.access_size) (x a : Z) (o : Z) (v addr : word)
-          (post : Semantics.trace -> mem -> locals -> MetricLog -> Prop),
-        map.get l a = Some addr ->
-        Memory.load sz m (word.add addr (word.of_Z o)) = Some v ->
-        post (Semantics.read sz (word.add addr (word.of_Z o)) :: t) m (map.put l x v) (addMetricLoads 2 (addMetricInstructions 1 mc)) -> P (SLoad sz x a o) t m l mc post) ->
-       (forall (t : list Semantics.event) (m m' : mem) (mc : MetricLog) (l : locals) (sz : Syntax.access_size.access_size) (a : Z) (o : Z) (addr : word) (v : Z) 
-          (val : word) (post : Semantics.trace -> mem -> locals -> MetricLog -> Prop),
-        map.get l a = Some addr ->
-        map.get l v = Some val ->
-        Memory.store sz m (word.add addr (word.of_Z o)) val = Some m' ->
-        post (Semantics.write sz (word.add addr (word.of_Z o)) :: t) m' l (addMetricLoads 1 (addMetricInstructions 1 (addMetricStores 1 mc))) -> P (SStore sz a v o) t m l mc post) ->
-       (forall (sz : Syntax.access_size.access_size) (x : Z) (table : list Init.Byte.byte) (i : Z) (v index : word) (t : Semantics.trace) (m : mem) (l : locals) 
-          (mc : MetricLog) (post : Semantics.trace -> mem -> locals -> MetricLog -> Prop),
-        x <> i ->
-        map.get l i = Some index ->
-        Memory.load sz (OfListWord.map.of_list_word table) index = Some v ->
-        post t m (map.put l x v) (addMetricLoads 4 (addMetricInstructions 3 (addMetricJumps 1 mc))) -> P (SInlinetable sz x table i) t m l mc post) ->
-       (forall (t : list Semantics.event) (mSmall : mem) (l : locals) (mc : MetricLog) (x : Z) (n : Z) (body : FlatImp.stmt Z)
-               (mid post : Semantics.trace -> mem -> locals -> MetricLog -> Prop),
-           n mod Memory.bytes_per_word width = 0 ->
-           (forall t' mCombined' l' mc',
-               mid t' mCombined' l' mc' -> exists mSmall' mStack' : mem, Memory.anybytes a n mStack' /\ map.split mCombined' mSmall' mStack' /\ post t' mSmall' l' mc')
-        (forall (a : word) (mStack mCombined : mem),
-         Memory.anybytes a n mStack ->
-         map.split mCombined mSmall mStack ->
-         exec e body (Semantics.salloc a :: t) mCombined (map.put l x a) (addMetricLoads 1 (addMetricInstructions 1 mc)) mid) ->
-        (forall (a : word) (mStack mCombined : mem),
-         Memory.anybytes a n mStack ->
-         map.split mCombined mSmall mStack ->
-         P body (Semantics.salloc a :: t) mCombined (map.put l x a) (addMetricLoads 1 (addMetricInstructions 1 mc))
-           (fun (t' : Semantics.trace) (mCombined' : mem) (l' : locals) (mc' : MetricLog) =>
-            exists mSmall' mStack' : mem, Memory.anybytes a n mStack' /\ map.split mCombined' mSmall' mStack' /\ post t' mSmall' l' mc')) -> P (SStackalloc x n body) t mSmall l mc post) ->
-       (forall (t : Semantics.trace) (m : mem) (l : locals) (mc : MetricLog) (x : Z) (v : Z) (post : Semantics.trace -> mem -> locals -> MetricLog -> Prop),
-        post t m (map.put l x (word.of_Z v)) (addMetricLoads 8 (addMetricInstructions 8 mc)) -> P (SLit x v) t m l mc post) ->
-       (forall (t : Semantics.trace) (m : mem) (l : locals) (mc : MetricLog) (x : Z) (op : Syntax.bopname.bopname) (y : Z) (y' : word) (z : operand) (z' : word)
-          (post : Semantics.trace -> mem -> locals -> MetricLog -> Prop),
-        map.get l y = Some y' ->
-        exec.lookup_op_locals l z = Some z' -> post t m (map.put l x (Semantics.interp_binop op y' z')) (addMetricLoads 2 (addMetricInstructions 2 mc)) -> P (SOp x op y z) t m l mc post) ->
-       (forall (t : Semantics.trace) (m : mem) (l : locals) (mc : MetricLog) (x y : Z) (y' : word) (post : Semantics.trace -> mem -> locals -> MetricLog -> Prop),
-        map.get l y = Some y' -> post t m (map.put l x y') (addMetricLoads 1 (addMetricInstructions 1 mc)) -> P (SSet x y) t m l mc post) ->
-       (forall (t : list Semantics.event) (m : mem) (l : locals) (mc : MetricLog) (cond : bcond Z) (bThen bElse : FlatImp.stmt Z)
-          (post : Semantics.trace -> mem -> locals -> MetricLog -> Prop),
-        eval_bcond l cond = Some true ->
-        exec e bThen (Semantics.branch true :: t) m l (addMetricLoads 2 (addMetricInstructions 2 (addMetricJumps 1 mc))) post ->
-        P bThen (Semantics.branch true :: t) m l (addMetricLoads 2 (addMetricInstructions 2 (addMetricJumps 1 mc))) post -> P (SIf cond bThen bElse) t m l mc post) ->
-       (forall (t : list Semantics.event) (m : mem) (l : locals) (mc : MetricLog) (cond : bcond Z) (bThen bElse : FlatImp.stmt Z)
-          (post : Semantics.trace -> mem -> locals -> MetricLog -> Prop),
-        eval_bcond l cond = Some false ->
-        exec e bElse (Semantics.branch false :: t) m l (addMetricLoads 2 (addMetricInstructions 2 (addMetricJumps 1 mc))) post ->
-        P bElse (Semantics.branch false :: t) m l (addMetricLoads 2 (addMetricInstructions 2 (addMetricJumps 1 mc))) post -> P (SIf cond bThen bElse) t m l mc post) ->
-       (forall (t : Semantics.trace) (m : mem) (l : locals) (mc : MetricLog) (cond : bcond Z) (body1 body2 : FlatImp.stmt Z)
-          (mid1 mid2 post : Semantics.trace -> mem -> locals -> MetricLog -> Prop),
-        exec e body1 t m l mc mid1 ->
-        P body1 t m l mc mid1 ->
-        (forall (t' : Semantics.trace) (m' : mem) (l' : locals) (mc' : MetricLog), mid1 t' m' l' mc' -> eval_bcond l' cond <> None) ->
-        (forall (t' : Semantics.trace) (m' : mem) (l' : locals) (mc' : MetricLog),
-         mid1 t' m' l' mc' -> eval_bcond l' cond = Some false -> post (Semantics.branch false :: t') m' l' (addMetricLoads 1 (addMetricInstructions 1 (addMetricJumps 1 mc')))) ->
-        (forall (t' : Semantics.trace) (m' : mem) (l' : locals) (mc' : MetricLog), mid1 t' m' l' mc' -> eval_bcond l' cond = Some true -> exec e body2 (Semantics.branch true :: t') m' l' mc' mid2) ->
-        (forall (t' : Semantics.trace) (m' : mem) (l' : locals) (mc' : MetricLog), mid1 t' m' l' mc' -> eval_bcond l' cond = Some true -> P body2 (Semantics.branch true :: t') m' l' mc' mid2) ->
-        (forall (t'' : Semantics.trace) (m'' : mem) (l'' : locals) (mc'' : MetricLog),
-         mid2 t'' m'' l'' mc'' -> exec e (SLoop body1 cond body2) t'' m'' l'' (addMetricLoads 2 (addMetricInstructions 2 (addMetricJumps 1 mc''))) post) ->
-        (forall (t'' : Semantics.trace) (m'' : mem) (l'' : locals) (mc'' : MetricLog),
-         mid2 t'' m'' l'' mc'' -> P (SLoop body1 cond body2) t'' m'' l'' (addMetricLoads 2 (addMetricInstructions 2 (addMetricJumps 1 mc''))) post) -> P (SLoop body1 cond body2) t m l mc post) ->
-       (forall (t : Semantics.trace) (m : mem) (l : locals) (mc : MetricLog) (s1 s2 : FlatImp.stmt Z) (mid post : Semantics.trace -> mem -> locals -> MetricLog -> Prop),
-        exec e s1 t m l mc mid ->
-        P s1 t m l mc mid ->
-        (forall (t' : Semantics.trace) (m' : mem) (l' : locals) (mc' : MetricLog), mid t' m' l' mc' -> exec e s2 t' m' l' mc' post) ->
-        (forall (t' : Semantics.trace) (m' : mem) (l' : locals) (mc' : MetricLog), mid t' m' l' mc' -> P s2 t' m' l' mc' post) -> P (s1;; s2) t m l mc post) ->
-       (forall (t : Semantics.trace) (m : mem) (l : locals) (mc : MetricLog) (post : Semantics.trace -> mem -> locals -> MetricLog -> Prop), post t m l mc -> P SSkip t m l mc post) ->
-       forall (s : FlatImp.stmt Z) (t : Semantics.trace) (r : mem) (r0 : locals) (m : MetricLog) (P0 : Semantics.trace -> mem -> locals -> MetricLog -> Prop),
-       exec e s t r r0 m P0 -> P s t r r0 m P0.*)
 
   Lemma trans_invertible a a' a'' t1 t2 :
     Semantics.generates_with_rem a t1 a' ->

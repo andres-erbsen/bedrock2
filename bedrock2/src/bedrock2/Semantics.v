@@ -26,6 +26,22 @@ Section WithIOEvent.
   | write : access_size -> word -> event
   | salloc : word -> event.
 
+  Inductive qevent : Type :=
+  | qIO : io_event -> qevent
+  | qbranch : bool -> qevent
+  | qread : access_size -> word -> qevent
+  | qwrite : access_size -> word -> qevent
+  | qsalloc : qevent.
+
+  Definition q e : qevent :=
+    match e with
+    | IO i => qIO i
+    | branch b => qbranch b
+    | read sz a => qread sz a
+    | write sz a => qwrite sz a
+    | salloc a => qsalloc
+    end.
+
   Definition trace : Type := list event.
 
   Inductive abstract_trace : Type :=
@@ -183,6 +199,79 @@ Section WithIOEvent.
     abs_tr_eq a'1 a'2.
   Proof. intros H1 H2. induction H1; inversion H2; subst; auto. eapply abs_tr_eq_trans; try eassumption. apply abs_tr_eq_symm. assumption. Qed.
 
+  Print abstract_trace.
+  Definition head (a : abstract_trace) : option qevent :=
+    match a with
+    | empty => None
+    | cons_IO i _ => Some (qIO i)
+    | cons_branch b _ => Some (qbranch b)
+    | cons_read sz a _ => Some (qread sz a)
+    | cons_write sz a _ => Some (qwrite sz a)
+    | cons_salloc _ => Some qsalloc
+    end.
+  Fixpoint predictor (a(*the whole thing*) : abstract_trace) (t(*so far*) : trace) : option qevent :=
+    match a, t with
+    | _, nil => head a
+    | cons_IO _ a', cons (IO _) t' => predictor a' t'
+    | cons_branch _ a', cons (branch _) t' => predictor a' t'
+    | cons_read _ _ a', cons (read _ _) t' => predictor a' t'
+    | cons_write _ _ a', cons (write _ _) t' => predictor a' t'
+    | cons_salloc f, cons (salloc a) t' => predictor (f a) t'
+    | _, _ => None (*failure*)
+    end.
+  Search (list ?A -> ?A).
+  Definition option_hd {A : Type} (l : list A) : option A :=
+    match l with
+    | a :: _ => Some a
+    | _ => None
+    end.
+  Definition predicts (f : trace -> option qevent) (t : trace) :=
+    forall t1 t2,
+      t = t1 ++ t2 ->
+      f t1 = option_map q (option_hd t2).
+  (*Definition sometimes_predicts (f : nat -> trace -> option (option qevent)) (t : trace) :=
+    forall t1 t2,
+      t = t1 ++ t2 ->
+      exists fuel, f fuel t1 = Some (option_map q (option_hd t2)).*)
+
+  Lemma predictor_works a t :
+    generates a t ->
+    predicts (predictor a) t.
+  Proof.
+    intros H. cbv [predicts]. induction H; intros.
+    - simpl. destruct t1, t2; try reflexivity. all: apply app_cons_not_nil in H; destruct H.
+    - destruct t1.
+      + destruct t2.
+        -- simpl in H0. congruence.
+        -- simpl in H0. injection H0 as H1 H2. subst. simpl. reflexivity.
+      + simpl in H0. injection H0 as H1 H2. subst. simpl. specialize (IHgenerates _ _ eq_refl).
+        apply IHgenerates.
+    - destruct t1.
+      + destruct t2.
+        -- simpl in H0. congruence.
+        -- simpl in H0. injection H0 as H1 H2. subst. simpl. reflexivity.
+      + simpl in H0. injection H0 as H1 H2. subst. simpl. specialize (IHgenerates _ _ eq_refl).
+        apply IHgenerates.
+    - destruct t1.
+      + destruct t2.
+        -- simpl in H0. congruence.
+        -- simpl in H0. injection H0 as H1 H2. subst. simpl. reflexivity.
+      + simpl in H0. injection H0 as H1 H2. subst. simpl. specialize (IHgenerates _ _ eq_refl).
+        apply IHgenerates.
+    - destruct t1.
+      + destruct t2.
+        -- simpl in H0. congruence.
+        -- simpl in H0. injection H0 as H1 H2. subst. simpl. reflexivity.
+      + simpl in H0. injection H0 as H1 H2. subst. simpl. specialize (IHgenerates _ _ eq_refl).
+        apply IHgenerates.
+    - destruct t1.
+      + destruct t2.
+        -- simpl in H0. congruence.
+        -- simpl in H0. injection H0 as H1 H2. subst. simpl. reflexivity.
+      + simpl in H0. injection H0 as H1 H2. subst. simpl. specialize (IHgenerates _ _ eq_refl).
+        apply IHgenerates.
+  Qed.
+    
   Definition filterio (t : trace) : io_trace :=
     flat_map (fun e =>
                 match e with
