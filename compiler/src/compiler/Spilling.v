@@ -198,10 +198,37 @@ Section Spilling.
 
    (* for a constant-time program, we should have a function which, given all compiler decisions that have
       happened so far, returns the next element of the trace.*)
-   Print Semantics.event.
+  Print Semantics.event.
+  (* *)
+  Notation event := Semantics.event.
+  
+  Fixpoint pop_elts (start : trace) (t : trace) : event(*first elt of start not exhausted*) + trace(*remaining part of trace after start exhausted*) :=
+    match start, t with
+    | _ :: start', _ :: t' => pop_elts start' t'
+    | e :: start', nil => inl e
+    | nil, _ => inr t
+    end. Check Semantics.qevent.
 
-   Fixpoint predict_next {env: map.map String.string (list Z * list Z * stmt)}
-     (e: env) (fuel : nat) (fpval: word) (s : stmt) (t : abstract_trace) : qevent :=...
+  Notation qevent := Semantics.qevent. Search qevent.
+  
+   Fixpoint snext {env: map.map String.string (list Z * list Z * stmt)}
+     (e: env) (fuel : nat) (next : trace -> option qevent) (fpval: word) (t : trace) (s : stmt) (st_so_far : trace)
+     (f : forall (next : trace -> option qevent) (t : trace) (st_so_far : trace), option qevent) : option qevent :=
+     match fuel with
+     | O => None
+     | S fuel' =>
+         let next_spilled := next_spilled e fuel' in
+         match s with
+         | SLoad sz x y o =>
+             match th with
+             | read sz a t' =>
+                 match pop_elts (leak_load_iarg_reg fpval y ++ [read sz a] ++ leak_save_ires_reg fpval x) st_so_far with
+                 | inl e => q e
+                 | inr st_so_far' => f (fun t_so_far => next (read sz a th' :: t_so_far)) t' st_so_far'
+                 end
+             | _ => None
+             end
+         |
 
      
    Fixpoint transform_stmt_trace {env: map.map String.string (list Z * list Z * stmt)}
