@@ -218,130 +218,130 @@ Section Spilling.
   Notation qIO := Semantics.qIO.
   Notation qend := Semantics.qend.
   
-   Fixpoint snext_stmt' {env: map.map String.string (list Z * list Z * stmt)}
-     (e: env) (fuel : nat) (next : trace -> nat -> option qevent) (fpval: word) (s : stmt) (st_so_far : trace)
-     (f : forall (next : trace -> nat -> option qevent) (st_so_far : trace), option qevent) : option qevent :=
-     match fuel with
-     | O => None
-     | S fuel' =>
-         let snext_stmt' := snext_stmt' e fuel' in
-         match s with
-         | SLoad sz x y o =>
-             match next [] fuel with
-             | Some (qread sz a) =>
-                 match pop_elts (leak_load_iarg_reg fpval y ++ [read sz a] ++ leak_save_ires_reg fpval x) st_so_far with
+  Fixpoint snext_stmt' {env: map.map String.string (list Z * list Z * stmt)}
+    (e: env) (fuel : nat) (next : trace -> nat -> option qevent) (fpval: word) (s : stmt) (st_so_far : trace)
+    (f : forall (next : trace -> nat -> option qevent) (st_so_far : trace), option qevent) : option qevent :=
+    match fuel with
+    | O => None
+    | S fuel' =>
+        let snext_stmt' := snext_stmt' e fuel' in
+        match s with
+        | SLoad sz x y o =>
+            match next [] fuel with
+            | Some (qread sz a) =>
+                match pop_elts (leak_load_iarg_reg fpval y ++ [read sz a] ++ leak_save_ires_reg fpval x) st_so_far with
+                | inl e => Some (q e)
+                | inr st_so_far' => f (fun t_so_far => next (read sz a :: t_so_far)) st_so_far'
+                end
+            | _ => None
+            end
+        | SStore sz x y o =>
+            match next [] fuel with
+            | Some (qwrite sz a) =>
+                match pop_elts (leak_load_iarg_reg fpval x ++ leak_load_iarg_reg fpval y ++ [write sz a]) st_so_far with
+                | inl e => Some (q e)
+                | inr st_so_far' => f (fun t_so_far => next (write sz a :: t_so_far)) st_so_far'
+                end
+            | _ => None
+            end
+        | SInlinetable _ x _ i =>
+            match pop_elts (leak_load_iarg_reg fpval i ++ leak_save_ires_reg fpval x) st_so_far with
+            | inl e => Some (q e)
+            | inr st_so_far' => f next st_so_far'
+            end
+        | SStackalloc x _ body =>
+            match st_so_far with (*could generalize pop_elts so it does this for us?*)
+            | salloc a :: st_so_far' =>
+                match pop_elts (leak_save_ires_reg fpval x) st_so_far' with
+                | inl e => Some (q e)
+                | inr st_so_far'' => snext_stmt' (fun t_so_far => next (salloc a :: t_so_far)) fpval body st_so_far'' f
+                end
+            | nil => Some qsalloc
+            | _ => None
+            end
+        | SLit x _ =>
+            match pop_elts (leak_save_ires_reg fpval x) st_so_far with
+            | inl e => Some (q e)
+            | inr st_so_far' => f next st_so_far'
+            end
+        | SOp x op y oz =>
+            let to_pop :=
+              (match oz with 
+               | Var z => leak_load_iarg_reg fpval z
+               | Const _ => []
+               end)
+                ++ leak_save_ires_reg fpval x in
+            match pop_elts to_pop st_so_far with
+            | inl e => Some (q e)
+            | inr st_so_far' => f next st_so_far
+            end
+        | SSet x y =>
+            match pop_elts (leak_load_iarg_reg fpval y ++ leak_save_ires_reg fpval x) st_so_far with
+            | inl e => Some (q e)
+            | inr st_so_far' => f next st_so_far'
+            end
+        | SIf c thn els =>
+            match next [] fuel with
+            | Some (qbranch b) =>
+                match pop_elts (leak_prepare_bcond fpval c ++ leak_spill_bcond ++ [branch b]) st_so_far with
+                | inl e => Some (q e)
+                | inr st_so_far' => f (fun t_so_far => next (branch b :: t_so_far)) st_so_far'
+                end
+            | _ => None
+            end
+        | SLoop s1 c s2 =>
+            snext_stmt' next fpval s1 st_so_far
+              (fun next' st_so_far' =>
+                 match pop_elts (leak_prepare_bcond fpval c ++ leak_spill_bcond) st_so_far' with
                  | inl e => Some (q e)
-                 | inr st_so_far' => f (fun t_so_far => next (read sz a :: t_so_far)) st_so_far'
-                 end
-             | _ => None
-             end
-         | SStore sz x y o =>
-             match next [] fuel with
-             | Some (qwrite sz a) =>
-                 match pop_elts (leak_load_iarg_reg fpval x ++ leak_load_iarg_reg fpval y ++ [write sz a]) st_so_far with
-                 | inl e => Some (q e)
-                 | inr st_so_far' => f (fun t_so_far => next (write sz a :: t_so_far)) st_so_far'
-                 end
-             | _ => None
-             end
-         | SInlinetable _ x _ i =>
-             match pop_elts (leak_load_iarg_reg fpval i ++ leak_save_ires_reg fpval x) st_so_far with
-             | inl e => Some (q e)
-             | inr st_so_far' => f next st_so_far'
-             end
-         | SStackalloc x _ body =>
-             match st_so_far with (*could generalize pop_elts so it does this for us?*)
-             | salloc a :: st_so_far' =>
-                 match pop_elts (leak_save_ires_reg fpval x) st_so_far' with
-                 | inl e => Some (q e)
-                 | inr st_so_far'' => snext_stmt' (fun t_so_far => next (salloc a :: t_so_far)) fpval body st_so_far'' f
-                 end
-             | nil => Some qsalloc
-             | _ => None
-             end
-         | SLit x _ =>
-             match pop_elts (leak_save_ires_reg fpval x) st_so_far with
-             | inl e => Some (q e)
-             | inr st_so_far' => f next st_so_far'
-             end
-         | SOp x op y oz =>
-             let to_pop :=
-               (match oz with 
-                | Var z => leak_load_iarg_reg fpval z
-                | Const _ => []
-                end)
-                 ++ leak_save_ires_reg fpval x in
-             match pop_elts to_pop st_so_far with
-             | inl e => Some (q e)
-             | inr st_so_far' => f next st_so_far
-             end
-         | SSet x y =>
-             match pop_elts (leak_load_iarg_reg fpval y ++ leak_save_ires_reg fpval x) st_so_far with
-             | inl e => Some (q e)
-             | inr st_so_far' => f next st_so_far'
-             end
-         | SIf c thn els =>
-             match next [] fuel with
-             | Some (qbranch b) =>
-                 match pop_elts (leak_prepare_bcond fpval c ++ leak_spill_bcond ++ [branch b]) st_so_far with
-                 | inl e => Some (q e)
-                 | inr st_so_far' => f (fun t_so_far => next (branch b :: t_so_far)) st_so_far'
-                 end
-             | _ => None
-             end
-         | SLoop s1 c s2 =>
-             snext_stmt' next fpval s1 st_so_far
-               (fun next' st_so_far' =>
-                  match pop_elts (leak_prepare_bcond fpval c ++ leak_spill_bcond) st_so_far' with
-                  | inl e => Some (q e)
-                  | inr st_so_far'' =>
-                      match next' [] fuel with
-                      | Some (qbranch true) =>
-                          snext_stmt' (fun t_so_far => next' (branch true :: t_so_far)) fpval s2 st_so_far''
-                            (fun next'' st_so_far''' => snext_stmt' next'' fpval s st_so_far''' f)
-                      | Some (qbranch false) =>
-                          f (fun t_so_far => next' (branch false :: t_so_far)) st_so_far''
-                      | _ => None
-                      end
-                  end)
-         | SSeq s1 s2 =>
-             snext_stmt' next fpval s1 st_so_far (fun next' st_so_far' => snext_stmt' next' fpval s2 st_so_far f)
-         | SSkip => f next st_so_far
-         | SCall resvars fname argvars =>
-             match @map.get _ _ env e fname with
-             | Some (params, rets, fbody) =>
-                 match pop_elts (leak_set_reg_range_to_vars fpval argvars) st_so_far with
-                 | inl e => Some (q e)
-                 | inr st_so_far' =>
-                     match st_so_far' with (* would be nice if pop_elts would do this *)
-                     | salloc fpval' :: st_so_far'' =>
-                         match pop_elts (leak_set_vars_to_reg_range fpval' params) st_so_far'' with
-                         | inl e => Some (q e)
-                         | inr st_so_far''' =>
-                             snext_stmt' next fpval' fbody st_so_far'''
-                               (fun next' st_so_far'''' =>
-                                  match pop_elts (leak_set_reg_range_to_vars fpval' rets ++ leak_set_vars_to_reg_range fpval resvars) st_so_far'''' with
-                                  | inl e => Some (q e)
-                                  | inr st_so_far''''' => f next' st_so_far'''''
-                                  end)
-                         end
-                     | nil => Some qsalloc
+                 | inr st_so_far'' =>
+                     match next' [] fuel with
+                     | Some (qbranch true) =>
+                         snext_stmt' (fun t_so_far => next' (branch true :: t_so_far)) fpval s2 st_so_far''
+                           (fun next'' st_so_far''' => snext_stmt' next'' fpval s st_so_far''' f)
+                     | Some (qbranch false) =>
+                         f (fun t_so_far => next' (branch false :: t_so_far)) st_so_far''
                      | _ => None
                      end
-                 end
-             | None => None
-             end
-         | SInteract resvars _ argvars =>
-             match next [] fuel with
-             | Some (qIO i) =>
-                 match pop_elts (leak_set_reg_range_to_vars fpval argvars ++ [IO i] ++ leak_set_vars_to_reg_range fpval resvars) st_so_far with
-                 | inl e => Some (q e)
-                 | inr st_so_far' => f (fun t_so_far => next (IO i :: t_so_far)) st_so_far'
-                 end
-             | _ => None
-             end
-         end
-     end.
+                 end)
+        | SSeq s1 s2 =>
+            snext_stmt' next fpval s1 st_so_far (fun next' st_so_far' => snext_stmt' next' fpval s2 st_so_far f)
+        | SSkip => f next st_so_far
+        | SCall resvars fname argvars =>
+            match @map.get _ _ env e fname with
+            | Some (params, rets, fbody) =>
+                match pop_elts (leak_set_reg_range_to_vars fpval argvars) st_so_far with
+                | inl e => Some (q e)
+                | inr st_so_far' =>
+                    match st_so_far' with (* would be nice if pop_elts would do this *)
+                    | salloc fpval' :: st_so_far'' =>
+                        match pop_elts (leak_set_vars_to_reg_range fpval' params) st_so_far'' with
+                        | inl e => Some (q e)
+                        | inr st_so_far''' =>
+                            snext_stmt' next fpval' fbody st_so_far'''
+                              (fun next' st_so_far'''' =>
+                                 match pop_elts (leak_set_reg_range_to_vars fpval' rets ++ leak_set_vars_to_reg_range fpval resvars) st_so_far'''' with
+                                 | inl e => Some (q e)
+                                 | inr st_so_far''''' => f next' st_so_far'''''
+                                 end)
+                        end
+                    | nil => Some qsalloc
+                    | _ => None
+                    end
+                end
+            | None => None
+            end
+        | SInteract resvars _ argvars =>
+            match next [] fuel with
+            | Some (qIO i) =>
+                match pop_elts (leak_set_reg_range_to_vars fpval argvars ++ [IO i] ++ leak_set_vars_to_reg_range fpval resvars) st_so_far with
+                | inl e => Some (q e)
+                | inr st_so_far' => f (fun t_so_far => next (IO i :: t_so_far)) st_so_far'
+                end
+            | _ => None
+            end
+        end
+    end.
 
    Check snext_stmt'. Print Semantics.qevent.
    Definition snext_stmt {env : map.map string (list Z * list Z * stmt)} e next fpval s st_so_far fuel :=
