@@ -210,173 +210,144 @@ Section Spilling.
     end. Check Semantics.qevent.
 
   Notation qevent := Semantics.qevent. Search qevent.
+  Notation q := Semantics.q. Print SInlinetable.
+  Notation qread := Semantics.qread.
+  Notation qwrite := Semantics.qwrite.
+  Notation qsalloc := Semantics.qsalloc.
+  Notation qbranch := Semantics.qbranch.
+  Notation qIO := Semantics.qIO.
+  Notation qend := Semantics.qend.
   
-   Fixpoint snext {env: map.map String.string (list Z * list Z * stmt)}
-     (e: env) (fuel : nat) (next : trace -> option qevent) (fpval: word) (t : trace) (s : stmt) (st_so_far : trace)
-     (f : forall (next : trace -> option qevent) (t : trace) (st_so_far : trace), option qevent) : option qevent :=
+   Fixpoint snext_stmt' {env: map.map String.string (list Z * list Z * stmt)}
+     (e: env) (fuel : nat) (next : trace -> nat -> option qevent) (fpval: word) (s : stmt) (st_so_far : trace)
+     (f : forall (next : trace -> nat -> option qevent) (st_so_far : trace), option qevent) : option qevent :=
      match fuel with
      | O => None
      | S fuel' =>
-         let next_spilled := next_spilled e fuel' in
+         let snext_stmt' := snext_stmt' e fuel' in
          match s with
          | SLoad sz x y o =>
-             match th with
-             | read sz a t' =>
+             match next [] fuel with
+             | Some (qread sz a) =>
                  match pop_elts (leak_load_iarg_reg fpval y ++ [read sz a] ++ leak_save_ires_reg fpval x) st_so_far with
-                 | inl e => q e
-                 | inr st_so_far' => f (fun t_so_far => next (read sz a th' :: t_so_far)) t' st_so_far'
+                 | inl e => Some (q e)
+                 | inr st_so_far' => f (fun t_so_far => next (read sz a :: t_so_far)) st_so_far'
                  end
              | _ => None
              end
-         |
+         | SStore sz x y o =>
+             match next [] fuel with
+             | Some (qwrite sz a) =>
+                 match pop_elts (leak_load_iarg_reg fpval x ++ leak_load_iarg_reg fpval y ++ [write sz a]) st_so_far with
+                 | inl e => Some (q e)
+                 | inr st_so_far' => f (fun t_so_far => next (write sz a :: t_so_far)) st_so_far'
+                 end
+             | _ => None
+             end
+         | SInlinetable _ x _ i =>
+             match pop_elts (leak_load_iarg_reg fpval i ++ leak_save_ires_reg fpval x) st_so_far with
+             | inl e => Some (q e)
+             | inr st_so_far' => f next st_so_far'
+             end
+         | SStackalloc x _ body =>
+             match st_so_far with (*could generalize pop_elts so it does this for us?*)
+             | salloc a :: st_so_far' =>
+                 match pop_elts (leak_save_ires_reg fpval x) st_so_far' with
+                 | inl e => Some (q e)
+                 | inr st_so_far'' => snext_stmt' (fun t_so_far => next (salloc a :: t_so_far)) fpval body st_so_far'' f
+                 end
+             | nil => Some qsalloc
+             | _ => None
+             end
+         | SLit x _ =>
+             match pop_elts (leak_save_ires_reg fpval x) st_so_far with
+             | inl e => Some (q e)
+             | inr st_so_far' => f next st_so_far'
+             end
+         | SOp x op y oz =>
+             let to_pop :=
+               (match oz with 
+                | Var z => leak_load_iarg_reg fpval z
+                | Const _ => []
+                end)
+                 ++ leak_save_ires_reg fpval x in
+             match pop_elts to_pop st_so_far with
+             | inl e => Some (q e)
+             | inr st_so_far' => f next st_so_far
+             end
+         | SSet x y =>
+             match pop_elts (leak_load_iarg_reg fpval y ++ leak_save_ires_reg fpval x) st_so_far with
+             | inl e => Some (q e)
+             | inr st_so_far' => f next st_so_far'
+             end
+         | SIf c thn els =>
+             match next [] fuel with
+             | Some (qbranch b) =>
+                 match pop_elts (leak_prepare_bcond fpval c ++ leak_spill_bcond ++ [branch b]) st_so_far with
+                 | inl e => Some (q e)
+                 | inr st_so_far' => f (fun t_so_far => next (branch b :: t_so_far)) st_so_far'
+                 end
+             | _ => None
+             end
+         | SLoop s1 c s2 =>
+             snext_stmt' next fpval s1 st_so_far
+               (fun next' st_so_far' =>
+                  match pop_elts (leak_prepare_bcond fpval c ++ leak_spill_bcond) st_so_far' with
+                  | inl e => Some (q e)
+                  | inr st_so_far'' =>
+                      match next' [] fuel with
+                      | Some (qbranch true) =>
+                          snext_stmt' (fun t_so_far => next' (branch true :: t_so_far)) fpval s2 st_so_far''
+                            (fun next'' st_so_far''' => snext_stmt' next'' fpval s st_so_far''' f)
+                      | Some (qbranch false) =>
+                          f (fun t_so_far => next' (branch false :: t_so_far)) st_so_far''
+                      | _ => None
+                      end
+                  end)
+         | SSeq s1 s2 =>
+             snext_stmt' next fpval s1 st_so_far (fun next' st_so_far' => snext_stmt' next' fpval s2 st_so_far f)
+         | SSkip => f next st_so_far
+         | SCall resvars fname argvars =>
+             match @map.get _ _ env e fname with
+             | Some (params, rets, fbody) =>
+                 match pop_elts (leak_set_reg_range_to_vars fpval argvars) st_so_far with
+                 | inl e => Some (q e)
+                 | inr st_so_far' =>
+                     match st_so_far' with (* would be nice if pop_elts would do this *)
+                     | salloc fpval' :: st_so_far'' =>
+                         match pop_elts (leak_set_vars_to_reg_range fpval' params) st_so_far'' with
+                         | inl e => Some (q e)
+                         | inr st_so_far''' =>
+                             snext_stmt' next fpval' fbody st_so_far'''
+                               (fun next' st_so_far'''' =>
+                                  match pop_elts (leak_set_reg_range_to_vars fpval' rets ++ leak_set_vars_to_reg_range fpval resvars) st_so_far'''' with
+                                  | inl e => Some (q e)
+                                  | inr st_so_far''''' => f next' st_so_far'''''
+                                  end)
+                         end
+                     | nil => Some qsalloc
+                     | _ => None
+                     end
+                 end
+             | None => None
+             end
+         | SInteract resvars _ argvars =>
+             match next [] fuel with
+             | Some (qIO i) =>
+                 match pop_elts (leak_set_reg_range_to_vars fpval argvars ++ [IO i] ++ leak_set_vars_to_reg_range fpval resvars) st_so_far with
+                 | inl e => Some (q e)
+                 | inr st_so_far' => f (fun t_so_far => next (IO i :: t_so_far)) st_so_far'
+                 end
+             | _ => None
+             end
+         end
+     end.
 
-     
-   Fixpoint transform_stmt_trace {env: map.map String.string (list Z * list Z * stmt)}
-     (* maps the abstract trace of an unspilled program to the abstract trace of the spilled program.
-        executes s, guided by t, popping events off of t and adding events to st as it goes.
-        returns the final abstract trace st.
-        may (but will not necessarily) return empty if input is garbage.
-      *)
-      (e: env) (fuel : nat) (fpval: word) (s : stmt) (t : abstract_trace) (f : abstract_trace(*remaining part of t*) -> abstract_trace(*rest of st*)) :
-    abstract_trace :=
-    match fuel with
-    | O => empty
-    | S fuel' =>
-        let transform_stmt_trace := transform_stmt_trace e in
-        match s with
-        | SLoad sz x y o =>
-            match t with
-            | cons_read _(*sz*) a t' =>
-                abs_leak_load_iarg_reg fpval y
-                  (cons_read sz a
-                     (abs_leak_save_ires_reg fpval x
-                        (f t')))
-            | _ => empty
-            end
-        | SStore sz x y o =>
-            match t with
-            | cons_write _(*sz*) a t' =>
-                abs_leak_load_iarg_reg fpval x
-                  (abs_leak_load_iarg_reg fpval y
-                     (cons_write sz a
-                        (f t')))
-            | _ => empty
-            end
-        | SInlinetable _ x _ i =>
-            abs_leak_load_iarg_reg fpval i
-              (abs_leak_save_ires_reg fpval x
-                 (f t))
-        | SStackalloc x _ body =>
-            match t with
-            | cons_salloc g =>
-                cons_salloc (fun a =>
-                               let t' := g a in
-                               abs_leak_save_ires_reg fpval x
-                                 (transform_stmt_trace fuel' fpval body t' f))
-            | _ => empty
-            end
-        | SLit x _ => abs_leak_save_ires_reg fpval x (f t)
-        | SOp x op y oz =>
-            let rest := abs_leak_save_ires_reg fpval x (f t) in
-            abs_leak_load_iarg_reg fpval y
-              (match oz with 
-               | Var z => abs_leak_load_iarg_reg fpval z rest
-               | Const _ => rest
-               end)
-        | SSet x y =>
-            abs_leak_load_iarg_reg fpval y
-              (abs_leak_save_ires_reg fpval x
-                 (f t))
-        | SIf c thn els =>
-            match t with
-            | cons_branch b t' =>
-                abs_leak_prepare_bcond fpval c
-                  (abs_leak_spill_bcond
-                     (cons_branch b
-                        (transform_stmt_trace fuel' fpval (if b then thn else els) t' f)))
-            | _ => empty
-            end
-        | SLoop s1 c s2 =>
-            transform_stmt_trace fuel' fpval s1 t
-              (fun t' =>
-                 abs_leak_prepare_bcond fpval c
-                   (abs_leak_spill_bcond
-                      (match t' with
-                       | cons_branch true t'' =>
-                           transform_stmt_trace fuel' fpval s2 t''
-                             (fun t''' => transform_stmt_trace fuel' fpval s t''' f)
-                       | cons_branch false t'' => f t''
-                       | _ => empty
-                       end)))
-        | SSeq s1 s2 => transform_stmt_trace fuel' fpval s1 t (fun t' => transform_stmt_trace fuel' fpval s2 t' f)
-        | SSkip => f t
-        (* map.get e2 fname =
-           Some
-           (List.firstn (Datatypes.length params) (reg_class.all reg_class.arg),
-           List.firstn (Datatypes.length rets) (reg_class.all reg_class.arg),
-           SStackalloc fp (bytes_per_word * Z.of_nat (Z.to_nat (maxvar' - 31)))
-           (set_vars_to_reg_range params a0;; spill_stmt fbody;; set_reg_range_to_vars a0 rets)) *)
-        | SCall resvars fname argvars =>
-            match @map.get _ _ env e fname with
-            | Some (params, rets, fbody) =>
-                abs_leak_set_reg_range_to_vars fpval argvars
-                  (cons_salloc
-                     (fun fpval' =>
-                        abs_leak_set_vars_to_reg_range fpval' params
-                          (transform_stmt_trace fuel' fpval' fbody t
-                             (fun t' =>
-                                abs_leak_set_reg_range_to_vars fpval' rets
-                                  (abs_leak_set_vars_to_reg_range fpval resvars
-                                     (f t'))))))
-            | _ => empty
-            end
-        | SInteract resvars _ argvars =>
-            match t with
-            | cons_IO i t' =>
-                abs_leak_set_reg_range_to_vars fpval argvars
-                  (cons_IO i
-                     (abs_leak_set_vars_to_reg_range fpval resvars
-                        (f t')))
-            | _ => empty
-            end
-        end
-    end. Check transform_stmt_trace.
-
-   Lemma something {env: map.map string (list Z * list Z * stmt)} e1 fpval s a1 f : exists a2,
-     forall F t2 a2',
-       (forall fuel, Nat.le F fuel ->
-       Semantics.generates_with_rem (transform_stmt_trace e1 fuel fpval s a1 f) t2 a2') ->
-       Semantics.generates_with_rem a2 t2 a2'.
-   Proof.
-     induction a1;
-     eexists (match s with
-              | SLoad a b c d => _
-              | SStore a b c d => _
-              | SInlinetable a b c d => _
-              | SStackalloc a b c => _
-              | SLit a b => _
-              | SOp a b c d => _
-              | SSet a b => _
-              | SIf a b c => _
-              | SLoop a b c => _
-              | SSeq a b => _
-              | SSkip => _
-              | SCall a b c => _
-              | SInteract a b c => _ end); induction s.     
-     all: try (intros; specialize (H (S F)%nat ltac:(blia)); simpl in H; apply H).
-     { intros. destruct F as [|F'].
-       - specialize (H 0%nat ltac:(blia)). simpl in H. specialize (H (S F)%nat ltac:(blia)); simpl in H. apply H.
-     { intros. specialize (H (S F)%nat ltac:(blia)). simpl in H.
-
-       - exists empty. intros. specialize (H (S F)%nat ltac:(blia)).
-       simpl in H. assumption.
-     - exists empty. intros. specialize (H (S F)%nat ltac:(blia)).
-       simpl in H. assumption. specialdestruct s; auto.
-       destruct F as [|F'].
-       + specialize (H (S F)%nat ltac:(blia)). simpl in H. apply H.
-       + specialize (H 1%nat ltac:(blia)).
-         simpl in H0, H1.       simpl in H.
-       
+   Check snext_stmt'. Print Semantics.qevent.
+   Definition snext_stmt {env : map.map string (list Z * list Z * stmt)} e next fpval s st_so_far fuel :=
+     snext_stmt' e fuel next fpval s st_so_far
+       (fun next' t_so_far => Some qend).
+   
   Fixpoint spill_stmt(s: stmt): stmt :=
     match s with
     | SLoad sz x y o =>
@@ -541,15 +512,14 @@ Section Spilling.
           error:("Number of function arguments and return values must not exceed 8")
       else
         error:("Spilling got input program with invalid var names (please report as a bug)").
-  Print transform_stmt_trace.
 
-  Definition transform_fun_trace {env : map.map string (list Z * list Z * stmt)} (magicFuel : nat) (e : env) (f : list Z * list Z * stmt) (t : Semantics.abstract_trace) : Semantics.abstract_trace :=
+  (*Definition transform_fun_trace {env : map.map string (list Z * list Z * stmt)} (magicFuel : nat) (e : env) (f : list Z * list Z * stmt) (t : Semantics.abstract_trace) : Semantics.abstract_trace :=
     let '(argnames, resnames, body) := f in
     Semantics.cons_salloc (fun fpval =>
                              leak_set_vars_to_reg_range fpval argnames
                                (Semantics.abstract_app
                                   (transform_stmt_trace e magicFuel fpval body t (fun x => x))
-                                  (leak_set_reg_range_to_vars fpval resnames empty))).
+                                  (leak_set_reg_range_to_vars fpval resnames empty))).*)
 
   Lemma firstn_min_absorb_length_r{A: Type}: forall (l: list A) n,
       List.firstn (Nat.min n (length l)) l = List.firstn n l.
@@ -1444,7 +1414,7 @@ Section Spilling.
     exec e s t m l mc (fun t' _ _ _ =>
                          exists t'', Semantics.generates a t'' /\ t' = t'' ++ t).
 
-  Definition spilling_correct_for(e1 e2 : env)(s1 : stmt)(a1 : option Semantics.abstract_trace)(f : Semantics.abstract_trace -> Semantics.abstract_trace): Prop :=
+  (*Definition spilling_correct_for(e1 e2 : env)(s1 : stmt)(a1 : option Semantics.abstract_trace)(f : Semantics.abstract_trace -> Semantics.abstract_trace): Prop :=
       forall (t1 : Semantics.trace) (m1 : mem) (l1 : locals) (mc1 : MetricLog)
              (post : Semantics.trace -> mem -> locals -> MetricLog -> Prop),
         exec e1 s1 t1 m1 l1 mc1 (fun t1' m1' l1' mc1' =>
@@ -1469,7 +1439,7 @@ Section Spilling.
                                Semantics.generates_with_rem a1 (rev t1'') a1' /\
                                  t1' = t1'' ++ t1 /\
                                  Semantics.generates_with_rem (transform_stmt_trace fuel e2 fpval s1 a1 f) (rev t2'') (f a1') /\
-                                 t2' = t2'' ++ t2 end)).
+                                 t2' = t2'' ++ t2 end)).*)
               
 
   Definition call_spec(e: env) '(argnames, retnames, fbody)
@@ -1479,21 +1449,6 @@ Section Spilling.
                  exec e fbody t m l mc (fun t' m' l' mc' =>
                    exists retvals, map.getmany_of_list l' retnames = Some retvals /\
                    post (Semantics.filterio t') m' retvals).
-
-  Definition fun_has_abstract_trace
-    (e: env) (argnames : list Z) (fbody : stmt) (a: Semantics.abstract_trace)
-    (t: Semantics.trace)(m: mem)(argvals: list word): Prop :=
-    forall l mc, map.of_list_zip argnames argvals = Some l ->
-                 exec e fbody t m l mc (fun t' m' l' mc' =>
-                                          exists t'', Semantics.generates a t'' /\ t' = t'' ++ t).
-  
-  Lemma transform_trace_correct argnames argvals retnames argnames' resnames' fbody fbody' e1 e2 t m a :
-    spill_functions e1 = Success e2 ->
-    fun_has_abstract_trace e1 argnames fbody a t m argvals ->
-    spill_fun (argnames, retnames, fbody) = Success (argnames', resnames', fbody') ->
-    exists fuel,
-      fun_has_abstract_trace e2 argnames' fbody' (transform_fun_trace fuel e2 (argnames', resnames', fbody') a) t m argvals. Abort.
-
 
   (* In exec.call, there are many maps of locals involved:
 
@@ -1759,8 +1714,10 @@ Section Spilling.
       (Semantics.abstract_app a1 (Semantics.abstract_app a2 a3))
       (Semantics.abstract_app (Semantics.abstract_app a1 a2) a3).
   Proof. Admitted. Print Semantics.generates_with_rem.
-  Print transform_stmt_trace.
-    
+  Print Semantics.predicts. Check snext_stmt.
+  Notation predicts := Semantics.predicts.
+  Check snext_stmt'. Print Semantics.predicts.
+  
   Lemma spilling_correct : forall
       (e1 e2 : env)
       (Ev : spill_functions e1 = Success e2)
@@ -1777,22 +1734,23 @@ Section Spilling.
           related maxvar frame fpval (fio t1) m1 l1 (fio t2) m2 l2 ->
           exec e2 (spill_stmt s1) t2 m2 l2 mc2
             (fun (t2' : Semantics.trace) (m2' : mem) (l2' : locals) (mc2' : MetricLog) =>
-               exists t1' m1' l1' mc1',
-                 related maxvar frame fpval (fio t1') m1' l1' (fio t2') m2' l2' /\
-                   post t1' m1' l1' mc1' /\
-                   exists F,
-                   forall fuel,
-                     Nat.le F fuel ->
-                     forall a a' f,
-                       Semantics.generates_with_rem a t1' a' ->
-                       Semantics.generates_with_rem (transform_stmt_trace fuel e1 fpval s1 a f) t2' (f a')).
+               exists t1'' m1' l1' mc1' t2'',
+                 related maxvar frame fpval (fio (rev t1'' ++ t1)) m1' l1' (fio t2') m2' l2' /\
+                   post (rev t1'' ++ t1) m1' l1' mc1' /\
+                   t2' = rev t2'' ++ t2 /\
+                   forall next t1''' t2''' f,
+                     (forall next',
+                         (exists F : nat, predicts (fun t => next' t F) t1''') ->
+                         predicts (f next') t2''') ->
+                     (exists F, predicts (fun t => next t F) t1'') ->
+                     (exists F, predicts (fun t => snext_stmt' e1 F next fpval s1 t f) t2'')).
   Proof.
     intros e1 e2 Ev. intros s1 t1 m1 l1 mc1 post.
     induction 1; intros; cbn [spill_stmt valid_vars_src Forall_vars_stmt] in *; fwd.
     - (* exec.interact *)
       eapply exec.seq_cps.
       eapply set_reg_range_to_vars_correct; try eassumption; try (unfold a0, a7; blia).
-      intros *. intros R GM. clear l2 mc2 H5.
+      intros *. intros R GM. clear l2 mc2 H4.
       unfold related in R. fwd.
       spec (subst_split (ok := mem_ok) m) as A.
       1: eassumption. 1: ecancel_assumption.
@@ -1830,7 +1788,7 @@ Section Spilling.
         { reflexivity. }
         { unfold a0, a7. blia. }
         { eassumption. }
-        { intros. do 4 eexists.
+        { intros. do 5 eexists.
           split. 1: eassumption.
           eenough _ as Hpost.
           2: { eapply H2p1.
@@ -1840,9 +1798,14 @@ Section Spilling.
                move H2 at bottom. unfold map.split in H2. fwd.
                eapply map.shrink_disjoint_l; eassumption. }
           clear H2p1.
-          split. 1: eassumption.
+          split.
+          { instantiate (3 := rev [_]). rewrite rev_involutive. eassumption. }
+          split.
+          { subst t2'0. subst t2'. instantiate (1 := rev _). rewrite rev_involutive.
+            rewrite app_one_cons. repeat rewrite app_assoc. reflexivity. }
           (*begin ct stuff for interact*)
-          destruct is_ct; [|reflexivity].
+          intros.
+          exists 
           Search post.
           apply H3 in Hpost.
           2: { eexists. rewrite app_one_cons. reflexivity. }
