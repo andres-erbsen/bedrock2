@@ -23,19 +23,6 @@ Notation read := Semantics.read.
 Notation branch := Semantics.branch.
 Notation IO := Semantics.IO.
 
-(*Definition step A B := A -> (list A * (list B -> B)) + B.*)
-
-(*https://www.cs.yale.edu/homes/wilke-pierre/jar18/doc/html/Iteration.html*)
-(*Fixpoint iterate {A B : Type} (n : nat) (default : B) (step : step A B) (a : A) : B :=
-  match n with
-  | O => default
-  | S n' =>
-      match (step a) with
-      | inr b => b
-      | inl (l, f) => f (map (iterate n' default step) l)
-      end
-  end.*)
-
 Open Scope Z_scope.
 
 Section Spilling.
@@ -188,27 +175,19 @@ Section Spilling.
     information. similarly, we could replace separate read/writes with just one rw constructor. 
     maybe that's too much though. we could be sillier yet and say that every element of the trace is an integer (word.unsigned for r/w/salloc, 1/0 for branches)*)
 
-   (*Inductive weird_trace : Type :=
-   | empty
-   | cons_IO (e: Semantics.io_event) (after : weird_trace)
-   | cons_branch (b : bool) (after : weird_trace)
-   | cons_read (sz : Syntax.access_size.access_size) (a : word) (after : weird_trace)
-   | cons_write (sz : Syntax.access_size.access_size) (a : word) (after : weird_trace)
-   | cons_salloc (T S : Type) (interpret : S -> weird_trace) (after : word -> step T S).*)
-
    (* for a constant-time program, we should have a function which, given all compiler decisions that have
       happened so far, returns the next element of the trace.*)
   Print Semantics.event.
   (* *)
   Notation event := Semantics.event.
   
-  Fixpoint pop_elts (start : trace) (t : trace) : event(*first elt of start not exhausted*) + trace(*remaining part of trace after start exhausted*) :=
+  (*Fixpoint pop_elts (start : trace) (t : trace) : event(*first elt of start not exhausted*) + trace(*remaining part of trace after start exhausted*) :=
     match start, t with
     | _ :: start', _ :: t' => pop_elts start' t'
     | e :: start', nil => inl e
     | nil, _ => inr t
-    end. Check Semantics.qevent.
-
+    end.*)
+  
   Notation qevent := Semantics.qevent. Search qevent.
   Notation q := Semantics.q. Print SInlinetable.
   Notation qread := Semantics.qread.
@@ -217,6 +196,24 @@ Section Spilling.
   Notation qbranch := Semantics.qbranch.
   Notation qIO := Semantics.qIO.
   Notation qend := Semantics.qend.
+
+  Notation predicts := Semantics.predicts.
+
+  Fixpoint predict_with_prefix (prefix : trace) (predict_rest : trace -> option qevent) (t : trace) : option qevent :=
+    match prefix, t with
+    | _ :: prefix', _ :: t' => predict_with_prefix prefix' predict_rest t'
+    | e :: start', nil => Some (q e)
+    | nil, _ => predict_rest t
+    end.
+
+  Lemma predict_with_prefix_works prefix predict_rest rest :
+    predicts predict_rest rest ->
+    predicts (predict_with_prefix prefix predict_rest) (prefix ++ rest).
+  Proof.
+    intros H. induction prefix.
+    - simpl. apply H.
+    - simpl. econstructor; auto.
+  Qed.
   
   Fixpoint snext_stmt' {env: map.map String.string (list Z * list Z * stmt)}
     (e: env) (fuel : nat) (next : trace -> nat -> option qevent) (fpval: word) (s : stmt) (st_so_far : trace)
@@ -229,124 +226,121 @@ Section Spilling.
         | SLoad sz x y o =>
             match next [] fuel with
             | Some (qread sz a) =>
-                match pop_elts (leak_load_iarg_reg fpval y ++ [read sz a] ++ leak_save_ires_reg fpval x) st_so_far with
-                | inl e => Some (q e)
-                | inr st_so_far' => f (fun t_so_far => next (read sz a :: t_so_far)) st_so_far'
-                end
+                predict_with_prefix
+                  (leak_load_iarg_reg fpval y ++ [read sz a] ++ leak_save_ires_reg fpval x)
+                  (f (fun t_so_far => next (read sz a :: t_so_far)))
+                  st_so_far
             | _ => None
             end
         | SStore sz x y o =>
             match next [] fuel with
             | Some (qwrite sz a) =>
-                match pop_elts (leak_load_iarg_reg fpval x ++ leak_load_iarg_reg fpval y ++ [write sz a]) st_so_far with
-                | inl e => Some (q e)
-                | inr st_so_far' => f (fun t_so_far => next (write sz a :: t_so_far)) st_so_far'
-                end
+                predict_with_prefix
+                  (leak_load_iarg_reg fpval x ++ leak_load_iarg_reg fpval y ++ [write sz a])
+                  (f (fun t_so_far => next (write sz a :: t_so_far)))
+                  st_so_far
             | _ => None
             end
         | SInlinetable _ x _ i =>
-            match pop_elts (leak_load_iarg_reg fpval i ++ leak_save_ires_reg fpval x) st_so_far with
-            | inl e => Some (q e)
-            | inr st_so_far' => f next st_so_far'
-            end
+            predict_with_prefix
+              (leak_load_iarg_reg fpval i ++ leak_save_ires_reg fpval x)
+              (f next)
+              st_so_far
         | SStackalloc x _ body =>
-            match st_so_far with (*could generalize pop_elts so it does this for us?*)
+            match st_so_far with (*could generalize predict_with_prefix so it does this for me?*)
             | salloc a :: st_so_far' =>
-                match pop_elts (leak_save_ires_reg fpval x) st_so_far' with
-                | inl e => Some (q e)
-                | inr st_so_far'' => snext_stmt' (fun t_so_far => next (salloc a :: t_so_far)) fpval body st_so_far'' f
-                end
+                predict_with_prefix
+                  (leak_save_ires_reg fpval x)
+                  (fun st_so_far'' => snext_stmt' (fun t_so_far => next (salloc a :: t_so_far)) fpval body st_so_far'' f)
+                  st_so_far'
             | nil => Some qsalloc
             | _ => None
             end
         | SLit x _ =>
-            match pop_elts (leak_save_ires_reg fpval x) st_so_far with
-            | inl e => Some (q e)
-            | inr st_so_far' => f next st_so_far'
-            end
+            predict_with_prefix
+              (leak_save_ires_reg fpval x)
+              (f next)
+              st_so_far
         | SOp x op y oz =>
-            let to_pop :=
-              (match oz with 
-               | Var z => leak_load_iarg_reg fpval z
-               | Const _ => []
-               end)
-                ++ leak_save_ires_reg fpval x in
-            match pop_elts to_pop st_so_far with
-            | inl e => Some (q e)
-            | inr st_so_far' => f next st_so_far
-            end
+            predict_with_prefix
+              ((match oz with 
+                | Var z => leak_load_iarg_reg fpval z
+                | Const _ => []
+                end)
+                 ++ leak_save_ires_reg fpval x)
+              (f next)
+              st_so_far
         | SSet x y =>
-            match pop_elts (leak_load_iarg_reg fpval y ++ leak_save_ires_reg fpval x) st_so_far with
-            | inl e => Some (q e)
-            | inr st_so_far' => f next st_so_far'
-            end
+            predict_with_prefix
+              (leak_load_iarg_reg fpval y ++ leak_save_ires_reg fpval x)
+              (f next)
+              st_so_far
         | SIf c thn els =>
             match next [] fuel with
             | Some (qbranch b) =>
-                match pop_elts (leak_prepare_bcond fpval c ++ leak_spill_bcond ++ [branch b]) st_so_far with
-                | inl e => Some (q e)
-                | inr st_so_far' => f (fun t_so_far => next (branch b :: t_so_far)) st_so_far'
-                end
+                predict_with_prefix
+                  (leak_prepare_bcond fpval c ++ leak_spill_bcond ++ [branch b])
+                  (f (fun t_so_far => next (branch b :: t_so_far)))
+                  st_so_far
             | _ => None
             end
         | SLoop s1 c s2 =>
             snext_stmt' next fpval s1 st_so_far
               (fun next' st_so_far' =>
-                 match pop_elts (leak_prepare_bcond fpval c ++ leak_spill_bcond) st_so_far' with
-                 | inl e => Some (q e)
-                 | inr st_so_far'' =>
-                     match next' [] fuel with
-                     | Some (qbranch true) =>
-                         snext_stmt' (fun t_so_far => next' (branch true :: t_so_far)) fpval s2 st_so_far''
-                           (fun next'' st_so_far''' => snext_stmt' next'' fpval s st_so_far''' f)
-                     | Some (qbranch false) =>
-                         f (fun t_so_far => next' (branch false :: t_so_far)) st_so_far''
-                     | _ => None
-                     end
-                 end)
+                 predict_with_prefix
+                   (leak_prepare_bcond fpval c ++ leak_spill_bcond)
+                   (fun st_so_far'' =>
+                      match next' [] fuel with
+                      | Some (qbranch true) =>
+                          snext_stmt' (fun t_so_far => next' (branch true :: t_so_far)) fpval s2 st_so_far''
+                            (fun next'' st_so_far''' => snext_stmt' next'' fpval s st_so_far''' f)
+                      | Some (qbranch false) =>
+                          f (fun t_so_far => next' (branch false :: t_so_far)) st_so_far''
+                      | _ => None
+                      end) 
+                   st_so_far')
         | SSeq s1 s2 =>
             snext_stmt' next fpval s1 st_so_far (fun next' st_so_far' => snext_stmt' next' fpval s2 st_so_far f)
         | SSkip => f next st_so_far
         | SCall resvars fname argvars =>
             match @map.get _ _ env e fname with
             | Some (params, rets, fbody) =>
-                match pop_elts (leak_set_reg_range_to_vars fpval argvars) st_so_far with
-                | inl e => Some (q e)
-                | inr st_so_far' =>
-                    match st_so_far' with (* would be nice if pop_elts would do this *)
-                    | salloc fpval' :: st_so_far'' =>
-                        match pop_elts (leak_set_vars_to_reg_range fpval' params) st_so_far'' with
-                        | inl e => Some (q e)
-                        | inr st_so_far''' =>
-                            snext_stmt' next fpval' fbody st_so_far'''
-                              (fun next' st_so_far'''' =>
-                                 match pop_elts (leak_set_reg_range_to_vars fpval' rets ++ leak_set_vars_to_reg_range fpval resvars) st_so_far'''' with
-                                 | inl e => Some (q e)
-                                 | inr st_so_far''''' => f next' st_so_far'''''
-                                 end)
-                        end
-                    | nil => Some qsalloc
-                    | _ => None
-                    end
-                end
+                predict_with_prefix
+                  (leak_set_reg_range_to_vars fpval argvars)
+                  (fun st_so_far' =>
+                     match st_so_far' with (* would be nice if predict_with_prefix would do this *)
+                     | salloc fpval' :: st_so_far'' =>
+                         predict_with_prefix
+                           (leak_set_vars_to_reg_range fpval' params)
+                           (fun st_so_far''' =>
+                             snext_stmt' next fpval' fbody st_so_far'''
+                               (fun next' st_so_far'''' =>
+                                  predict_with_prefix
+                                    (leak_set_reg_range_to_vars fpval' rets ++ leak_set_vars_to_reg_range fpval resvars)
+                                    (f next')
+                                    st_so_far'''')) 
+                           st_so_far''
+                     | nil => Some qsalloc
+                     | _ => None
+                     end)
+                  st_so_far
             | None => None
             end
         | SInteract resvars _ argvars =>
             match next [] fuel with
             | Some (qIO i) =>
-                match pop_elts (leak_set_reg_range_to_vars fpval argvars ++ [IO i] ++ leak_set_vars_to_reg_range fpval resvars) st_so_far with
-                | inl e => Some (q e)
-                | inr st_so_far' => f (fun t_so_far => next (IO i :: t_so_far)) st_so_far'
-                end
+                predict_with_prefix
+                  (leak_set_reg_range_to_vars fpval argvars ++ [IO i] ++ leak_set_vars_to_reg_range fpval resvars)
+                  (f (fun t_so_far => next (IO i :: t_so_far)))
+                  st_so_far
             | _ => None
             end
         end
     end.
 
-   Check snext_stmt'. Print Semantics.qevent.
-   Definition snext_stmt {env : map.map string (list Z * list Z * stmt)} e next fpval s st_so_far fuel :=
-     snext_stmt' e fuel next fpval s st_so_far
-       (fun next' t_so_far => Some qend).
+  Definition snext_stmt {env : map.map string (list Z * list Z * stmt)} e next fpval s st_so_far fuel :=
+    snext_stmt' e fuel next fpval s st_so_far
+      (fun next' t_so_far => Some qend).
    
   Fixpoint spill_stmt(s: stmt): stmt :=
     match s with
@@ -1715,7 +1709,6 @@ Section Spilling.
       (Semantics.abstract_app (Semantics.abstract_app a1 a2) a3).
   Proof. Admitted. Print Semantics.generates_with_rem.
   Print Semantics.predicts. Check snext_stmt.
-  Notation predicts := Semantics.predicts.
   Check snext_stmt'. Print Semantics.predicts.
   
   Lemma spilling_correct : forall
@@ -1738,12 +1731,15 @@ Section Spilling.
                  related maxvar frame fpval (fio (rev t1'' ++ t1)) m1' l1' (fio t2') m2' l2' /\
                    post (rev t1'' ++ t1) m1' l1' mc1' /\
                    t2' = rev t2'' ++ t2 /\
-                   forall next t1''' t2''' f,
-                     (forall next',
-                         (exists F : nat, predicts (fun t => next' t F) t1''') ->
-                         predicts (f next') t2''') ->
-                     (exists F, predicts (fun t => next t F) t1'') ->
-                     (exists F, predicts (fun t => snext_stmt' e1 F next fpval s1 t f) t2'')).
+                   forall F,
+                   exists F',
+                     forall next t1''' t2''' fuel' f,
+                       (forall fuel,
+                           Nat.le F fuel ->
+                           predicts (fun t => next t fuel) (t1'' ++ t1''')) ->
+                       predicts (fun t => f (fun t' => next (t1'' ++ t')) t) t2''' ->
+                       Nat.le F' fuel' ->
+                       predicts (fun t => snext_stmt' e1 fuel' next fpval s1 t f) (t2'' ++ t2''')).
   Proof.
     intros e1 e2 Ev. intros s1 t1 m1 l1 mc1 post.
     induction 1; intros; cbn [spill_stmt valid_vars_src Forall_vars_stmt] in *; fwd.
@@ -1804,36 +1800,17 @@ Section Spilling.
           { subst t2'0. subst t2'. instantiate (1 := rev _). rewrite rev_involutive.
             rewrite app_one_cons. repeat rewrite app_assoc. reflexivity. }
           (*begin ct stuff for interact*)
-          intros.
-          exists 
-          Search post.
-          apply H3 in Hpost.
-          2: { eexists. rewrite app_one_cons. reflexivity. }
-          clear H3. destruct Hpost as [HP [a1' [t1'' [CTp1 CTp2]]]].
-          rewrite app_one_cons in CTp1. apply app_inv_tail in CTp1. subst.
-          exists 1%nat.
-          split. 1: eassumption. clear HP.
-          do 3 eexists.
-          split.
-          { rewrite app_one_cons. reflexivity. }
-          split. 1: eassumption.
-          split.
-          { subst t2'0. subst t2'. rewrite app_one_cons. repeat rewrite app_assoc. reflexivity. }
+          intros. exists (S F). intros.
           repeat (rewrite rev_app_distr || rewrite rev_involutive || cbn [rev List.app]).
-          cbn [rev List.app] in CTp2.
-          inversion CTp2. subst. inversion H9. subst. clear CTp2 H9.
-          intros f fuel Hf Hfuel.
-          destruct fuel as [|fuel']; [blia|]. clear Hfuel.
-          cbn [transform_stmt_trace].
-          eapply Semantics.abs_tr_eq_correct1.
-          { eapply Semantics.generates_with_empty_rem_app.
-            apply Semantics.generates_generates_with_empty_rem.
-            cbn [List.app]. apply Semantics.generator_generates. }
-          auto. }
+          destruct fuel' as [|fuel']; [blia|]. simpl. 
+          simpl in H5. specialize (H5 (S fuel') ltac:(blia)). inversion H5. subst.
+          rewrite H10. simpl. apply predict_with_prefix_works. apply H6.
+          (*end ct stuff for interact*)
+        }
         (* related for set_vars_to_reg_range_correct: *)
         unfold related.
         eexists _, _, _. ssplit.
-        * repeat rewrite ProgramLogic.filterio_cons. f_equal. assumption.
+        * rewrite rev_involutive. simpl. f_equal. assumption.
         * eenough ((eq _ * (word_array fpval stackwords * frame))%sep m') as En.
           1: ecancel_assumption.
           move C at bottom.
@@ -1845,8 +1822,28 @@ Section Spilling.
         * eassumption.
         * eassumption.
     - (* exec.call *)
+      (* H = High-level, L = Low-level, C = Caller, F = called Function
+
+                   H                                       L
+
+                  lCH1                                    lCL1
+                                                   set_reg_range_to_vars
+                                                          lCL2
+             get/putmany_of_list                    get/putmany_of_list
+                                                          lFL3
+                                                   set_vars_to_reg_range
+                  lFH4                                    lFL4
+             function body                           function body
+                  lFH5                                    lFL5
+                                                   set_reg_range_to_vars
+                                                          lFL6
+           get/putmany_of_list                      get/putmany_of_list
+                                                          lCL7
+                                                   set_vars_to_reg_range
+                  lCH8                                    lCL8
+      *)
       rename l into lCH1, l2 into lCL1, st0 into lFH4.
-      rename H5p0 into FR, H5p1 into FA.
+      rename H4p0 into FR, H4p1 into FA.
       unfold spill_functions in Ev.
       eapply map.try_map_values_fw in Ev. 2: eassumption.
       unfold spill_fun in Ev. fwd.
@@ -1864,7 +1861,7 @@ Section Spilling.
         rewrite List.firstn_length. change (length (reg_class.all reg_class.arg)) with 8%nat. blia.
       }
       eapply map.sameLength_putmany_of_list in L.
-      destruct L as (lFL3 & Q).
+      destruct L as (lFL3 & P).
       rewrite !arg_regs_alt by blia.
       eapply exec.call_cps; try eassumption.
       set (maxvar' := (Z.max (max_var fbody)
@@ -1890,7 +1887,7 @@ Section Spilling.
         Z.to_euclidean_division_equations; blia.
       }
       eapply exec.seq_cps.
-      unfold related in H5. fwd. rename lStack into lStack1, lRegs into lRegs1.
+      unfold related in H4. fwd. rename lStack into lStack1, lRegs into lRegs1.
       eapply set_vars_to_reg_range_correct.
       { eapply fresh_related with (m1 := m) (frame := (word_array fpval stackwords * frame)%sep).
         - eassumption.
@@ -1906,7 +1903,7 @@ Section Spilling.
           eapply List.not_In_Z_seq. unfold fp, a0. blia.
         }
         eapply map.putmany_of_list_zip_to_getmany_of_list.
-        - rewrite <- arg_regs_alt by blia. exact Q.
+        - rewrite <- arg_regs_alt by blia. exact P.
         - eapply List.NoDup_unfoldn_Z_seq.
       }
       { blia. }
@@ -1926,36 +1923,24 @@ Section Spilling.
       intros mL4 lFL4 mcL4 tL4 R.
       eapply exec.seq_cps.
       eapply exec.weaken. {
-        eapply IHexec with (is_ct := is_ct).
-        3: { Search (fio t). rewrite H5p0. exact R. }
+        eapply IHexec.
+        2: { Search (fio t). rewrite H4p0. exact R. }
+        unfold valid_vars_src.
+        eapply Forall_vars_stmt_impl.
+        2: eapply max_var_sound.
+        2: eapply forallb_vars_stmt_correct.
+        3: eassumption.
         2: {
-          unfold valid_vars_src.
-          eapply Forall_vars_stmt_impl.
-          2: eapply max_var_sound.
-          2: eapply forallb_vars_stmt_correct.
-          3: eassumption.
-          2: {
-            unfold is_valid_src_var.
-            intros *.
-            rewrite ?Bool.andb_true_iff, ?Bool.orb_true_iff, ?Z.ltb_lt. reflexivity.
-          }
-          cbv beta. subst maxvar'. blia. }
-        destruct is_ct; [|reflexivity].
-        intros.
-        destruct H8 as [t1'' H8]. subst.
-        apply H3 in H5. destruct H5 as [retvs [l' [Hget [Hput Hpost]]]].
-        Search post. apply H4 in Hpost.
-        2: { eexists. reflexivity. }
-        destruct Hpost as [HP [a1' [t1''0 [CTp1 CTp2]]]].
-        apply app_inv_tail in CTp1. subst.
-        split. { instantiate (1 := fun _ => True). apply I. }
-        eexists. eexists.
-        split; [reflexivity|].
-        exact CTp2. }
-      cbv beta. intros tL5 mL5 lFL5 mcL5 (tH5 & mH5 & lFH5 & mcH5 & R5 & OC & CT).
+          unfold is_valid_src_var.
+          intros *.
+          rewrite ?Bool.andb_true_iff, ?Bool.orb_true_iff, ?Z.ltb_lt. reflexivity.
+        }
+        cbv beta. subst maxvar'. blia.
+      }
+      cbv beta. intros tL5 mL5 lFL5 mcL5 (tH5 & mH5 & lFH5 & mcH5 & tL5' & R5 & OC & EtL5 & CT).
       match goal with
       | H: context[outcome], A: context[outcome] |- _ =>
-        specialize H with (1 := A); move H at bottom; rename H into S
+        specialize H with (1 := A); move H at bottom; rename H into Q
       end.
       fwd. rename l' into lCH8.
       eapply set_reg_range_to_vars_correct.
@@ -1976,7 +1961,7 @@ Section Spilling.
         subst maxvar'. clear. blia. }
       { eassumption. }
       rename R into R0.
-      intros lFL6 mcL6 tL6 R GM.
+      intros lFL6 mcL6 t2L6 R GM.
       (* prove that if we remove the additional stack provided by exec.stackalloc
          and store the result vars back into the caller's registers,
          states are still related and postcondition holds *)
@@ -2035,50 +2020,28 @@ Section Spilling.
       { reflexivity. }
       { unfold a0, a7. blia. }
       { eassumption. }
-      { intros m22 l22 mc22 t22 R22. do 4 eexists.
-        split; [|split]. 2: eassumption.
-        { rewrite Rp0. assumption. }
-        destruct is_ct; [|reflexivity].
-        destruct CT as [F [_ [a1' [t1'' [t2'' [CTp1 [CTp2 [CTp3 CTp4]]]]]]]].
-        subst.
-        apply H4 in Sp2.
-        2: { eexists. reflexivity. }
-        destruct Sp2 as [HP [a1'0 [t1''0 [CTp5 CTp6]]]].
-        apply app_inv_tail in CTp5. subst.
-        exists (S F).
-        split; [assumption|].
-        do 3 eexists.
-        split. { reflexivity. }
-        split. { eassumption. }
+      { intros m22 l22 mc22 t22 R22. do 5 eexists. split.
+        { Search t2L6. rewrite <- Rp0 in R22. eassumption. }
         split.
-        { subst t22. subst tL6. subst tL4. subst t2'.
-          rewrite app_one_cons. repeat rewrite app_assoc. reflexivity. }
-        intros f fuel Hf Hfuel.
-        destruct fuel as [|fuel']; [blia|].
-        repeat (rewrite rev_app_distr || rewrite rev_involutive || cbn [List.app rev]).
-        cbn [transform_stmt_trace].
-        rewrite H.
-        eapply Semantics.generates_with_rem_trans.
-        { eapply Semantics.generates_with_empty_rem_app.
-          apply Semantics.generates_generates_with_empty_rem.
-          apply Semantics.generator_generates. }
-        constructor.
-        eapply Semantics.generates_with_rem_trans.
-        { eapply Semantics.generates_with_empty_rem_app.
-          apply Semantics.generates_generates_with_empty_rem.
-          apply Semantics.generator_generates. }
-        eapply Semantics.generates_with_rem_trans.
-        { eapply CTp4.
-          { intros. apply Semantics.abs_tr_eq_app.
-            { apply Semantics.abs_tr_eq_self. }
-            { auto. } }
-          blia. }
-        eapply Semantics.abs_tr_eq_correct1. Search a1'.
-        { eapply Semantics.generates_with_rem_app.
-          apply Semantics.generates_generates_with_empty_rem.
-          apply Semantics.generator_generates. }
-        apply Hf.
-        eapply Semantics.rem_unique; eassumption. }
+        { eassumption. }
+        (* begin ct stuff for call*)
+        split.
+        { subst t22. subst t2L6. subst tL5. subst tL4. subst t2'. instantiate (1 := rev _).
+          rewrite rev_involutive. rewrite app_one_cons. repeat rewrite app_assoc. reflexivity. }
+        intros.
+        Check CT. specialize (CT F).
+        Check CT. destruct CT as [F' CT].
+        exists (S F'). intros. destruct fuel' as [|fuel']; [blia|].
+        repeat (rewrite rev_app_distr || rewrite rev_involutive || cbn [rev List.app]).
+        simpl. rewrite H. repeat rewrite <- app_assoc. apply predict_with_prefix_works.
+        simpl. econstructor; auto. repeat rewrite <- app_assoc. apply predict_with_prefix_works.
+        Check CT. eapply CT.
+        { apply H3. }
+        { rewrite app_assoc. apply predict_with_prefix_works. apply H8. }
+        blia.
+        (* end ct stuff for call*)
+      }
+
     - (* SLoad *)
       eapply exec.seq_cps. Check load_iarg_reg_correct.
       eapply load_iarg_reg_correct; (blia || eassumption || idtac). Search related.

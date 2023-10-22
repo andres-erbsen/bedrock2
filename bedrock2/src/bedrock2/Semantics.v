@@ -226,53 +226,27 @@ Section WithIOEvent.
     | a :: _ => q a
     | nil => qend
     end.
-  Definition predicts (f : trace -> option qevent) (t : trace) :=
+  (*Definition predicts (f : trace -> option qevent) (t : trace) :=
     forall t1 t2,
       t = t1 ++ t2 ->
-      f t1 = Some (nextq t2).
+      f t1 = Some (nextq t2).*)
+  Inductive predicts : (trace -> option qevent) -> trace -> Prop :=
+  | predicts_cons :
+    forall f g e t,
+      f [] = Some (q e) ->
+      (forall t', f (e :: t') = g t') ->
+      predicts g t ->
+      predicts f (e :: t)
+  | predicts_nil :
+    forall f,
+      f [] = Some qend ->
+      predicts f [].  
 
   Lemma predictor_works a t :
     generates a t ->
     predicts (predictor a) t.
-  Proof.
-    intros H. cbv [predicts]. induction H; intros.
-    - destruct t1.
-      + destruct t2.
-        -- reflexivity.
-        -- simpl in H. congruence.
-      + simpl in H. congruence.
-    - destruct t1.
-      + destruct t2.
-        -- simpl in H0. congruence.
-        -- simpl in H0. injection H0 as H1 H2. subst. simpl. reflexivity.
-      + simpl in H0. injection H0 as H1 H2. subst. simpl. specialize (IHgenerates _ _ eq_refl).
-        apply IHgenerates.
-    - destruct t1.
-      + destruct t2.
-        -- simpl in H0. congruence.
-        -- simpl in H0. injection H0 as H1 H2. subst. simpl. reflexivity.
-      + simpl in H0. injection H0 as H1 H2. subst. simpl. specialize (IHgenerates _ _ eq_refl).
-        apply IHgenerates.
-    - destruct t1.
-      + destruct t2.
-        -- simpl in H0. congruence.
-        -- simpl in H0. injection H0 as H1 H2. subst. simpl. reflexivity.
-      + simpl in H0. injection H0 as H1 H2. subst. simpl. specialize (IHgenerates _ _ eq_refl).
-        apply IHgenerates.
-    - destruct t1.
-      + destruct t2.
-        -- simpl in H0. congruence.
-        -- simpl in H0. injection H0 as H1 H2. subst. simpl. reflexivity.
-      + simpl in H0. injection H0 as H1 H2. subst. simpl. specialize (IHgenerates _ _ eq_refl).
-        apply IHgenerates.
-    - destruct t1.
-      + destruct t2.
-        -- simpl in H0. congruence.
-        -- simpl in H0. injection H0 as H1 H2. subst. simpl. reflexivity.
-      + simpl in H0. injection H0 as H1 H2. subst. simpl. specialize (IHgenerates _ _ eq_refl).
-        apply IHgenerates.
-  Qed.
-    
+  Proof. intros H. induction H; intros; econstructor; simpl; eauto. Qed.
+  
   Definition filterio (t : trace) : io_trace :=
     flat_map (fun e =>
                 match e with
