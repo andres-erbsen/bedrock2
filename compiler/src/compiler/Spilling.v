@@ -2283,7 +2283,6 @@ Section Spilling.
         rewrite H8. simpl. rewrite (app_one_cons _ (rev t2'')). repeat rewrite app_assoc. rewrite <- (app_assoc _ _ t2''').
         apply predict_with_prefix_works. clear IHexec. Search snext_stmt'. Search t2''.
         eapply CT.
-        (*{ intros. auto. }*)
         { intros. simpl. simpl in H5. eapply Semantics.predicts_ext.
           { eassumption. }
           { intros. simpl. rewrite H10. reflexivity. } }
@@ -2291,6 +2290,35 @@ Section Spilling.
           { eassumption. }
           { auto. } }
         { blia. }
+      + eapply exec.seq_cps. eapply load_iarg_reg_correct; (blia || eassumption || idtac).
+        clear mc2 H2. intros.
+        eapply exec.if_true. {
+          cbn. rewrite map.get_put_same. rewrite word.eqb_ne by assumption. reflexivity.
+        }
+        eapply exec.weaken.
+        { eapply IHexec; eassumption. }
+        cbv beta. intros t' m' l' mc' (t1' & m1' & l1' & mc1' & t1'' & t2'' & R & Hpost & Et1'' & Et2'' & CT). subst.
+        do 6 eexists.
+        split; [eassumption|]. split; [eassumption|]. split.
+        { rewrite app_one_cons. rewrite app_assoc. reflexivity. } split.
+        { subst t2'. rewrite app_one_cons. repeat rewrite app_assoc. reflexivity. }
+        intros F. specialize (CT F). destruct CT as [F' CT].
+        intros. exists (S (plus F' F)). intros.
+        repeat (rewrite rev_app_distr || rewrite rev_involutive || cbn [rev List.app]).
+        destruct fuel' as [|fuel']; [blia|]. simpl. 
+        simpl in H2. specialize (H2 (S fuel') ltac:(blia)). rewrite rev_app_distr in H2, H3. inversion H2. subst.
+        rewrite H7. simpl. rewrite (app_one_cons _ (rev t2'')). repeat rewrite app_assoc. rewrite <- (app_assoc _ _ t2''').
+        apply predict_with_prefix_works. clear IHexec. Search snext_stmt'. Search t2''.
+        eapply CT.
+        { intros. simpl. simpl in H5. eapply Semantics.predicts_ext.
+          { eassumption. }
+          { intros. simpl. rewrite H9. reflexivity. } }
+        { simpl. eapply Semantics.predicts_ext.
+          { eassumption. }
+          { auto. } }
+        { blia. }
+    - 
+        
         
     - (* SOp *)
       inversion H. subst.
