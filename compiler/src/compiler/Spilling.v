@@ -216,15 +216,15 @@ Section Spilling.
   Qed.
   
   Fixpoint snext_stmt' {env: map.map String.string (list Z * list Z * stmt)}
-    (e: env) (fuel : nat) (next : trace -> nat -> option qevent) (fpval: word) (s : stmt) (st_so_far : trace)
-    (f : forall (next : trace -> nat -> option qevent) (st_so_far : trace), option qevent) : option qevent :=
+    (e: env) (fuel : nat) (next : trace -> option qevent) (fpval: word) (s : stmt) (st_so_far : trace)
+    (f : forall (next : trace -> option qevent) (st_so_far : trace), option qevent) : option qevent :=
     match fuel with
     | O => None
     | S fuel' =>
         let snext_stmt' := snext_stmt' e fuel' in
         match s with
         | SLoad sz x y o =>
-            match next [] fuel with
+            match next [] with
             | Some (qread sz a) =>
                 predict_with_prefix
                   (leak_load_iarg_reg fpval y ++ [read sz a] ++ leak_save_ires_reg fpval x)
@@ -233,7 +233,7 @@ Section Spilling.
             | _ => None
             end
         | SStore sz x y o =>
-            match next [] fuel with
+            match next [] with
             | Some (qwrite sz a) =>
                 predict_with_prefix
                   (leak_load_iarg_reg fpval x ++ leak_load_iarg_reg fpval y ++ [write sz a])
@@ -263,10 +263,11 @@ Section Spilling.
               st_so_far
         | SOp x op y oz =>
             predict_with_prefix
-              ((match oz with 
-                | Var z => leak_load_iarg_reg fpval z
-                | Const _ => []
-                end)
+              (leak_load_iarg_reg fpval y ++
+                 match oz with 
+                 | Var z => leak_load_iarg_reg fpval z
+                 | Const _ => []
+                 end
                  ++ leak_save_ires_reg fpval x)
               (f next)
               st_so_far
@@ -276,11 +277,11 @@ Section Spilling.
               (f next)
               st_so_far
         | SIf c thn els =>
-            match next [] fuel with
+            match next [] with
             | Some (qbranch b) =>
                 predict_with_prefix
                   (leak_prepare_bcond fpval c ++ leak_spill_bcond ++ [branch b])
-                  (f (fun t_so_far => next (branch b :: t_so_far)))
+                  (fun st_so_far' => snext_stmt' (fun t_so_far => next (branch b :: t_so_far)) fpval (if b then thn else els) st_so_far' f)
                   st_so_far
             | _ => None
             end
@@ -290,7 +291,7 @@ Section Spilling.
                  predict_with_prefix
                    (leak_prepare_bcond fpval c ++ leak_spill_bcond)
                    (fun st_so_far'' =>
-                      match next' [] fuel with
+                      match next' [] with
                       | Some (qbranch true) =>
                           snext_stmt' (fun t_so_far => next' (branch true :: t_so_far)) fpval s2 st_so_far''
                             (fun next'' st_so_far''' => snext_stmt' next'' fpval s st_so_far''' f)
@@ -327,7 +328,7 @@ Section Spilling.
             | None => None
             end
         | SInteract resvars _ argvars =>
-            match next [] fuel with
+            match next [] with
             | Some (qIO i) =>
                 predict_with_prefix
                   (leak_set_reg_range_to_vars fpval argvars ++ [IO i] ++ leak_set_vars_to_reg_range fpval resvars)
@@ -1710,6 +1711,36 @@ Section Spilling.
   Proof. Admitted. Print Semantics.generates_with_rem.
   Print Semantics.predicts. Check snext_stmt.
   Check snext_stmt'. Print Semantics.predicts.
+  Print predict_with_prefix. Print predicts.
+
+  Lemma predict_with_prefix_ext prefix predict_rest1 predict_rest2 t :
+    (forall t0, predict_rest1 t0 = predict_rest2 t0) ->
+    predict_with_prefix prefix predict_rest1 t = predict_with_prefix prefix predict_rest2 t.
+  Proof.
+    intros. generalize dependent t. induction prefix.
+    - simpl. apply H.
+    - destruct t; simpl.
+      + reflexivity.
+      + apply IHprefix.
+  Qed.
+
+  (*Lemma predicts_ext' f g t :
+    predicts f t ->
+    (forall x, f x = g x) ->
+    predicts g t.
+  Proof.
+    intros. generalize dependent g. induction H.
+    - econstructor.
+      + rewrite <- H. rewrite H2. reflexivity.
+      + intros t'. rewrite <- H2. apply H0.
+      + eapply IHpredicts. reflexivity.
+    - intros. constructor. rewrite <- H0. apply H.
+  Qed.*)
+
+  (*Lemma predicts_sth :
+    predicts f t ->*)
+    
+    
   
   Lemma spilling_correct : forall
       (e1 e2 : env)
@@ -1727,19 +1758,23 @@ Section Spilling.
           related maxvar frame fpval (fio t1) m1 l1 (fio t2) m2 l2 ->
           exec e2 (spill_stmt s1) t2 m2 l2 mc2
             (fun (t2' : Semantics.trace) (m2' : mem) (l2' : locals) (mc2' : MetricLog) =>
-               exists t1'' m1' l1' mc1' t2'',
-                 related maxvar frame fpval (fio (rev t1'' ++ t1)) m1' l1' (fio t2') m2' l2' /\
-                   post (rev t1'' ++ t1) m1' l1' mc1' /\
-                   t2' = rev t2'' ++ t2 /\
+               exists t1' m1' l1' mc1' t1'' t2'',
+                 related maxvar frame fpval (fio t1') m1' l1' (fio t2') m2' l2' /\
+                   post t1' m1' l1' mc1' /\
+                   t1' = t1'' ++ t1 /\
+                   t2' = t2'' ++ t2 /\
                    forall F,
                    exists F',
-                     forall next t1''' t2''' fuel' f,
+                   forall next t1''' t2''' fuel' f,
+                     ((forall next1 next2,
+                          (forall x, next1 x = next2 x) ->
+                          forall z, f next1 z = f next2 z)) ->
                        (forall fuel,
                            Nat.le F fuel ->
-                           predicts (fun t => next t fuel) (t1'' ++ t1''')) ->
-                       predicts (fun t => f (fun t' => next (t1'' ++ t')) t) t2''' ->
+                           predicts next (rev t1'' ++ t1''')) ->
+                       predicts (fun t => f (fun t' => next (rev t1'' ++ t')) t) t2''' ->
                        Nat.le F' fuel' ->
-                       predicts (fun t => snext_stmt' e1 fuel' next fpval s1 t f) (t2'' ++ t2''')).
+                       predicts (fun t => snext_stmt' e1 fuel' next fpval s1 t f) (rev t2'' ++ t2''')).
   Proof.
     intros e1 e2 Ev. intros s1 t1 m1 l1 mc1 post.
     induction 1; intros; cbn [spill_stmt valid_vars_src Forall_vars_stmt] in *; fwd.
@@ -1784,7 +1819,7 @@ Section Spilling.
         { reflexivity. }
         { unfold a0, a7. blia. }
         { eassumption. }
-        { intros. do 5 eexists.
+        { intros. do 6 eexists.
           split. 1: eassumption.
           eenough _ as Hpost.
           2: { eapply H2p1.
@@ -1794,23 +1829,23 @@ Section Spilling.
                move H2 at bottom. unfold map.split in H2. fwd.
                eapply map.shrink_disjoint_l; eassumption. }
           clear H2p1.
+          split. 1: eassumption.
           split.
-          { instantiate (3 := rev [_]). rewrite rev_involutive. eassumption. }
+          { instantiate (1 := [_]). reflexivity. }
           split.
-          { subst t2'0. subst t2'. instantiate (1 := rev _). rewrite rev_involutive.
-            rewrite app_one_cons. repeat rewrite app_assoc. reflexivity. }
+          { subst t2'0 t2'. rewrite app_one_cons. repeat rewrite app_assoc. reflexivity. }
           (*begin ct stuff for interact*)
           intros. exists (S F). intros.
           repeat (rewrite rev_app_distr || rewrite rev_involutive || cbn [rev List.app]).
           destruct fuel' as [|fuel']; [blia|]. simpl. 
-          simpl in H5. specialize (H5 (S fuel') ltac:(blia)). inversion H5. subst.
-          rewrite H10. simpl. apply predict_with_prefix_works. apply H6.
+          simpl in H6. specialize (H6 (S fuel') ltac:(blia)). inversion H6. subst.
+          rewrite H11. apply predict_with_prefix_works. apply H7.
           (*end ct stuff for interact*)
         }
         (* related for set_vars_to_reg_range_correct: *)
         unfold related.
         eexists _, _, _. ssplit.
-        * rewrite rev_involutive. simpl. f_equal. assumption.
+        * simpl. f_equal. assumption.
         * eenough ((eq _ * (word_array fpval stackwords * frame))%sep m') as En.
           1: ecancel_assumption.
           move C at bottom.
@@ -1937,7 +1972,7 @@ Section Spilling.
         }
         cbv beta. subst maxvar'. blia.
       }
-      cbv beta. intros tL5 mL5 lFL5 mcL5 (tH5 & mH5 & lFH5 & mcH5 & tL5' & R5 & OC & EtL5 & CT).
+      cbv beta. intros tL5 mL5 lFL5 mcL5 (tH5 & mH5 & lFH5 & mcH5 & tH5' & tL5' & R5 & OC & EtH5 & EtL5 & CT).
       match goal with
       | H: context[outcome], A: context[outcome] |- _ =>
         specialize H with (1 := A); move H at bottom; rename H into Q
@@ -2020,14 +2055,15 @@ Section Spilling.
       { reflexivity. }
       { unfold a0, a7. blia. }
       { eassumption. }
-      { intros m22 l22 mc22 t22 R22. do 5 eexists. split.
+      { intros m22 l22 mc22 t22 R22. do 6 eexists. split.
         { Search t2L6. rewrite <- Rp0 in R22. eassumption. }
-        split.
-        { eassumption. }
+        split; [eassumption|].
         (* begin ct stuff for call*)
         split.
-        { subst t22. subst t2L6. subst tL5. subst tL4. subst t2'. instantiate (1 := rev _).
-          rewrite rev_involutive. rewrite app_one_cons. repeat rewrite app_assoc. reflexivity. }
+        { subst tH5. reflexivity. }
+        split.
+        { subst t22. subst t2L6. subst tL5. subst tL4. subst t2'.
+          rewrite app_one_cons. repeat rewrite app_assoc. reflexivity. }
         intros.
         Check CT. specialize (CT F).
         Check CT. destruct CT as [F' CT].
@@ -2036,8 +2072,9 @@ Section Spilling.
         simpl. rewrite H. repeat rewrite <- app_assoc. apply predict_with_prefix_works.
         simpl. econstructor; auto. repeat rewrite <- app_assoc. apply predict_with_prefix_works.
         Check CT. eapply CT.
-        { apply H3. }
-        { rewrite app_assoc. apply predict_with_prefix_works. apply H8. }
+        { intros. apply predict_with_prefix_ext. auto. }
+        { eauto. }
+        { rewrite app_assoc. apply predict_with_prefix_works. assumption. }
         blia.
         (* end ct stuff for call*)
       }
@@ -2059,17 +2096,17 @@ Section Spilling.
       + eassumption.
       + blia.
       + (*begin ct stuff for load*)
-        intros. do 5 eexists. split; [|split].
-        2: { Search post. instantiate (4 := [_]). simpl. eassumption. }
-        { simpl. eassumption. }
+        intros. do 6 eexists. split; [|split]. 2: eassumption. 1: eassumption.
+        split.
+        { rewrite app_one_cons. reflexivity. }
         split.
         { subst t2'0. subst t2'. rewrite app_one_cons. repeat rewrite app_assoc.
-          instantiate (1 := rev _). rewrite rev_involutive. reflexivity. }
+          reflexivity. }
         intros. exists (S F). intros.
         repeat (rewrite rev_app_distr || rewrite rev_involutive || cbn [rev List.app]).
         destruct fuel' as [|fuel']; [blia|]. simpl. 
-        simpl in H3. specialize (H3 (S fuel') ltac:(blia)). inversion H3. subst.
-        rewrite H8. simpl. apply predict_with_prefix_works. apply H4.
+        simpl in H4. specialize (H4 (S fuel') ltac:(blia)). inversion H4. subst.
+        rewrite H9. simpl. apply predict_with_prefix_works. assumption.
     (*end ct stuff for load*)
         
     - (* exec.store *)
@@ -2087,8 +2124,7 @@ Section Spilling.
       { unfold Memory.store, Memory.store_Z, Memory.store_bytes.
         unfold Memory.load_bytes in *.
         erewrite map.getmany_of_tuple_in_disjoint_putmany; eauto. }
-      do 5 eexists. split; [|split].
-      2: { Search post. instantiate (4 := [_]). simpl. eassumption. }
+      do 6 eexists. split; [|split]. 2: eassumption.
       { unfold related.
         repeat match goal with
                | |- exists _, _ => eexists
@@ -2100,12 +2136,14 @@ Section Spilling.
       (*begin ct stuff for store*)
       split.
       { subst t2'0. subst t2'. rewrite app_one_cons. repeat rewrite app_assoc.
-        instantiate (1 := rev _). rewrite rev_involutive. reflexivity. }
+        reflexivity. }
+      split.
+      { subst t2'0. subst t2'. rewrite app_one_cons. repeat rewrite app_assoc. reflexivity. }
       intros. exists (S F). intros.
       repeat (rewrite rev_app_distr || rewrite rev_involutive || cbn [rev List.app]).
       destruct fuel' as [|fuel']; [blia|]. simpl. 
-      simpl in H1. specialize (H1 (S fuel') ltac:(blia)). inversion H1. subst.
-      rewrite H9. simpl. apply predict_with_prefix_works. assumption.
+      simpl in H5. specialize (H5 (S fuel') ltac:(blia)). inversion H5. subst.
+      rewrite H10. simpl. apply predict_with_prefix_works. assumption.
       (*end ct stuff for store*)
     - (* exec.inlinetable *)
       eapply exec.seq_cps. eapply load_iarg_reg_correct; (blia || eassumption || idtac).
@@ -2118,19 +2156,14 @@ Section Spilling.
       eapply save_ires_reg_correct''.
       + eassumption.
       + blia.
-      + intros. do 5 eexists.
-        split.
-        { Search related. instantiate (3 := nil). eassumption. }
-        split; [eassumption|].
-        (*begin ct stuff for inlinetable*)
-        split.
-        { subst t2'0. subst t2'. repeat rewrite app_assoc.
-          instantiate (1 := rev _). rewrite rev_involutive. reflexivity. }
+      + intros. do 6 eexists.
+        split; [eassumption|]. split; [eassumption|]. split.
+        { instantiate (1 := nil). reflexivity. } split.
+        { subst t2'0 t2'. rewrite app_assoc. reflexivity. }
         intros. exists (S F). intros.
         repeat (rewrite rev_app_distr || rewrite rev_involutive || cbn [rev List.app]).
         destruct fuel' as [|fuel']; [blia|]. simpl. 
         apply predict_with_prefix_works. assumption.
-    (*end ct stuff for inlinetable*)
     - (* exec.stackalloc *)
       rename H1 into IH.
       eapply exec.stackalloc. 1: assumption.
@@ -2147,20 +2180,19 @@ Section Spilling.
              | |- exists _, _ => eexists
              | |- _ /\ _ => split
              end.
-      1,2: eassumption.
-      { instantiate (3 := salloc a :: t1''). simpl. rewrite <- app_assoc. simpl. eassumption. }
-      { Search post. simpl. rewrite <- app_assoc. eassumption. }
-      (*begin ct stuff for stackalloc*)
-      { subst t2'. instantiate (1 := rev _). rewrite app_one_cons. rewrite rev_involutive.
-        repeat rewrite app_assoc. reflexivity. }
-      intros. rename H7p3 into CT. specialize (CT F). destruct CT as [F' CT].
+      1,2,3,4: eassumption.
+      { rewrite app_one_cons. rewrite app_assoc. reflexivity. }
+      { subst t2'. rewrite app_one_cons. repeat rewrite app_assoc. reflexivity. }
+      intros. rename H7p4 into CT. specialize (CT F). destruct CT as [F' CT].
       exists (S F'). intros.
       repeat (rewrite rev_app_distr || rewrite rev_involutive || cbn [rev List.app]).
       destruct fuel' as [|fuel']; [blia|]. simpl. econstructor; auto.
       rewrite <- app_assoc. apply predict_with_prefix_works.
+      rewrite rev_app_distr in H10, H11. simpl in H10, H11.
       eapply CT.
-      { intros. specialize (H9 fuel ltac:(blia)). inversion H9. subst.
-        eapply Semantics.predicts_ext; [eassumption|]. auto. }
+      { auto. }
+      { intros. specialize (H10 fuel ltac:(blia)). inversion H10. subst.
+        eapply Semantics.predicts_ext; eauto. }
       { eassumption. }
       { blia. }
     (*end ct stuff for stackalloc*) 
@@ -2169,13 +2201,9 @@ Section Spilling.
       eapply save_ires_reg_correct''.
       { eassumption. }
       { blia. }
-      intros. do 5 eexists. split.
-      { instantiate (3 := nil). simpl. eassumption. }
-      split.
-      { simpl. eassumption. }
-      split.
-      (*begin ct stuff for lit*)
-      { subst t2'. instantiate (1 := rev _). rewrite rev_involutive. reflexivity. }
+      intros. do 6 eexists. split; [eassumption|]. split; [eassumption|]. split.
+      { instantiate (1 := nil). reflexivity. } split.
+      { subst t2'. reflexivity. }
       intros. exists (S F). intros.
       repeat (rewrite rev_app_distr || rewrite rev_involutive || cbn [rev List.app]).
       destruct fuel' as [|fuel']; [blia|]. simpl. 
@@ -2184,244 +2212,105 @@ Section Spilling.
     - (* exec.op *)
       unfold exec.lookup_op_locals in *.
       eapply exec.seq_cps. eapply load_iarg_reg_correct; (blia || eassumption || idtac).
-      clear mc2 H4. intros. destruct_one_match; fwd.
+      clear mc2 H3. intros. destruct_one_match; fwd.
       {
         eapply exec.seq_cps. eapply exec.seq_cps.  eapply load_iarg_reg_correct; (blia || eassumption || idtac).
-        clear mc2 H3. intros.
+        clear mc2 H2. intros.
         eapply exec.op.
         { eapply get_iarg_reg_1; eauto with zarith. }
         { unfold exec.lookup_op_locals in *. apply map.get_put_same. }
-        { eapply save_ires_reg_correct''; try (eassumption || blia).
-          intros. do 4 eexists.
-          split; [eassumption|].
-          split; [eassumption|].
-          (* begin stuff copy-pasted from load *)
-          destruct is_ct; [|reflexivity].
-          specialize (H2 _ _ _ _ H1). clear H1.
-          destruct H2 as [HP [a1' [t1'' [CTp1 CTp2]]]].
-          { exists nil. reflexivity. }
-          exists 1%nat.
-          split; [assumption|].
-          replace t with ([] ++ t) in CTp1 by reflexivity. apply app_inv_tail in CTp1. subst.
-          eexists. exists nil. eexists.
-          split; [reflexivity|].
-          split; [eassumption|].
-          split.
-          { subst t2'1. subst t2'0. subst t2'. repeat rewrite app_assoc. reflexivity. }
-          intros f fuel Hf Hfuel.
-          destruct fuel as [|fuel']; [blia|].
-          cbn [transform_stmt_trace].
-          subst t2'1. subst t2'0. subst t2'.
-          repeat (rewrite rev_app_distr || cbn [rev List.app] || rewrite rev_involutive).
-          repeat rewrite <- app_assoc.
-          cbn [rev List.app] in CTp2.
-          inversion CTp2. subst. clear CTp2.
-          eapply Semantics.abs_tr_eq_correct1.
-          { eapply Semantics.generates_with_empty_rem_app.
-            eapply Semantics.generates_generates_with_empty_rem.
-            apply Semantics.generator_generates. }
-          auto.
-          (* end stuff copy-pasted from load *)
-        }
+        eapply save_ires_reg_correct''; try (eassumption || blia).
+        (*begin ct stuff for op*)
+        intros. do 6 eexists. split; [eassumption|]. split; [eassumption|]. split.
+        { instantiate (1 := nil). reflexivity. } split.
+        { subst t2'1 t2'0 t2'. repeat rewrite app_assoc. reflexivity. }
+        intros. exists (S F). intros.
+        repeat (rewrite rev_app_distr || rewrite rev_involutive || cbn [rev List.app]).
+        destruct fuel' as [|fuel']; [blia|]. simpl. 
+        apply predict_with_prefix_works. assumption.
+      (*end ct stuff for op*)
       }
       {
         eapply exec.seq_cps. eapply exec.op.
         { apply map.get_put_same. }
         { unfold exec.lookup_op_locals in *. reflexivity. }
-        { eapply save_ires_reg_correct''; try (eassumption || blia).
-          intros. do 4 eexists.
-          split; [eassumption|].
-          split; [eassumption|].
-          (* begin stuff copy-pasted from load *)
-          destruct is_ct; [|reflexivity].
-          specialize (H2 _ _ _ _ H1). clear H1.
-          destruct H2 as [HP [a1' [t1'' [CTp1 CTp2]]]].
-          { exists nil. reflexivity. }
-          exists 1%nat.
-          split; [assumption|].
-          replace t with ([] ++ t) in CTp1 by reflexivity. apply app_inv_tail in CTp1. subst.
-          eexists. exists nil. eexists.
-          split; [reflexivity|].
-          split; [eassumption|].
-          split.
-          { subst t2'0. subst t2'. repeat rewrite app_assoc. reflexivity. }
-          intros f fuel Hf Hfuel.
-          destruct fuel as [|fuel']; [blia|].
-          cbn [transform_stmt_trace].
-          subst t2'0. subst t2'.
-          repeat (rewrite rev_app_distr || cbn [rev List.app] || rewrite rev_involutive).
-          repeat rewrite <- app_assoc.
-          cbn [rev List.app] in CTp2.
-          inversion CTp2. subst. clear CTp2.
-          eapply Semantics.abs_tr_eq_correct1.
-          { eapply Semantics.generates_with_empty_rem_app.
-            eapply Semantics.generates_generates_with_empty_rem.
-            apply Semantics.generator_generates. }
-          auto.
-          (* end stuff copy-pasted from load *)
-        }
+        eapply save_ires_reg_correct''; try (eassumption || blia).
+        (*begin ct stuff for op*)
+        intros. do 6 eexists. split; [eassumption|]. split; [eassumption|]. split.
+        { instantiate (1 := nil). reflexivity. } split.
+        { subst t2'0 t2'. repeat rewrite app_assoc. reflexivity. }
+        intros. exists (S F). intros.
+        repeat (rewrite rev_app_distr || rewrite rev_involutive || cbn [rev List.app]).
+        destruct fuel' as [|fuel']; [blia|]. simpl. 
+        apply predict_with_prefix_works. assumption.
+      (*end ct stuff for op*)
       }
     - (* exec.set *)
       eapply exec.seq_cps. eapply load_iarg_reg_correct; (blia || eassumption || idtac).
-      clear mc2 H3. intros.
+      clear mc2 H2. intros.
       eapply exec.seq_cps.
       eapply exec.set. 1: apply map.get_put_same.
-      eapply save_ires_reg_correct''; try (eassumption || blia).
-      intros. do 4 eexists.
-      split; [eassumption|].
-      split; [eassumption|].
-      (* begin stuff copy-pasted from load *)
-      destruct is_ct; [|reflexivity].
-      specialize (H1 _ _ _ _ H0). clear H0.
-      destruct H1 as [HP [a1' [t1'' [CTp1 CTp2]]]].
-      { exists nil. reflexivity. }
-      exists 1%nat.
-      split; [assumption|].
-      replace t with ([] ++ t) in CTp1 by reflexivity. apply app_inv_tail in CTp1. subst.
-      eexists. exists nil. eexists.
-      split; [reflexivity|].
-      split; [eassumption|].
-      split.
-      { subst t2'0. subst t2'. repeat rewrite app_assoc. reflexivity. }
-      intros f fuel Hf Hfuel.
-      destruct fuel as [|fuel']; [blia|].
-      cbn [transform_stmt_trace].
-      subst t2'0. subst t2'.
-      repeat (rewrite rev_app_distr || cbn [rev List.app] || rewrite rev_involutive).
-      repeat rewrite <- app_assoc.
-      cbn [rev List.app] in CTp2.
-      inversion CTp2. subst. clear CTp2.
-      eapply Semantics.abs_tr_eq_correct1.
-      { eapply Semantics.generates_with_empty_rem_app.
-        eapply Semantics.generates_generates_with_empty_rem.
-        apply Semantics.generator_generates. }
-      auto.
-      (* end stuff copy-pasted from load *)
+      eapply save_ires_reg_correct''; [eassumption|blia|].
+      intros. do 6 eexists. split; [eassumption|]. split; [eassumption|]. split.
+      { instantiate (1 := nil). reflexivity. } split.
+      { subst t2'0 t2'. repeat rewrite app_assoc. reflexivity. }
+      intros. exists (S F). intros.
+      repeat (rewrite rev_app_distr || rewrite rev_involutive || cbn [rev List.app]).
+      destruct fuel' as [|fuel']; [blia|]. simpl. 
+      apply predict_with_prefix_works. assumption.
     - (* exec.if_true *)
       unfold prepare_bcond. destr cond; cbn [ForallVars_bcond eval_bcond spill_bcond] in *; fwd.
       + eapply exec.seq_assoc.
         eapply exec.seq_cps. eapply load_iarg_reg_correct; (blia || eassumption || idtac).
-        clear mc2 H3. intros.
+        clear mc2 H2. intros.
         eapply exec.seq_cps. eapply load_iarg_reg_correct; (blia || eassumption || idtac).
         clear mc2. intros.
         eapply exec.if_true. {
           cbn. erewrite get_iarg_reg_1 by eauto with zarith. rewrite map.get_put_same. congruence.
         }
         eapply exec.weaken.
-        { eapply IHexec with (is_ct := is_ct); try eassumption.
-          destruct is_ct; [|reflexivity].
-          intros.
-          destruct H5 as [t1'' H5]. subst.
-          instantiate (2 := fun _ => match a1 with | Semantics.cons_branch true a1_0 => True | _ => False end).
-          apply H1 in H4.
-          2: { eexists. rewrite app_one_cons. rewrite app_assoc. reflexivity. }
-          clear H1.
-          destruct H4 as [HP [a1' [t1''0 [IHp1 IHp2]]]].
-          rewrite app_one_cons in IHp1. rewrite app_assoc in IHp1. apply app_inv_tail in IHp1.
-          subst.
-          rewrite rev_app_distr in IHp2. cbn [rev List.app] in IHp2.
-          instantiate (1 := match a1 with | Semantics.cons_branch true a1_0 => a1_0 | _ => Semantics.empty end).
-          inversion IHp2. subst. clear IHp2.
-          split; [reflexivity|].
-          eexists. eexists.
-          split; [reflexivity|].
-          apply H7. }
-        cbv beta. intros.
-        destruct H4 as [t1' [m1' [l1' [mc1' [HR [Hpost CT]]]]]].
-        do 4 eexists.
-        split; [eassumption|].
-        split; [eassumption|].
-        destruct is_ct; [|reflexivity].
-        destruct CT as [F [Ha1 [a1' [t1'' [t2'' [IHp1 [IHp2 [IHp3 IHp4]]]]]]]].
-        subst. destruct a1; try destruct Ha1. destruct b; destruct Ha1.
-        apply H1 in Hpost.
-        2: { eexists. rewrite app_one_cons. rewrite app_assoc. reflexivity. }
-        clear H1. destruct Hpost as [HP [a1'0 [t1''0 [CTp1 CTp2]]]].
-        rewrite app_one_cons in CTp1. rewrite app_assoc in CTp1. apply app_inv_tail in CTp1. subst.
-        exists (S F).
-        split; [assumption|].
-        do 3 eexists.
-        split.
-        { rewrite app_one_cons. rewrite app_assoc. reflexivity. }
-        split; [eassumption|].
-        split.
-        { subst t2'0. subst t2'. rewrite app_one_cons. repeat rewrite app_assoc. reflexivity. }
-        intros f fuel Hf Hfuel.
-        destruct fuel as [|fuel']; [blia|].
-        cbn [transform_stmt_trace]. cbv [leak_prepare_bcond leak_spill_bcond]. cbn [List.app].
+        { eapply IHexec; eassumption. }
+        cbv beta. intros t' m' l' mc' (t1' & m1' & l1' & mc1' & t1'' & t2'' & R & Hpost & Et1'' & Et2'' & CT). subst.
+        do 6 eexists.
+        split; [eassumption|]. split; [eassumption|]. split.
+        { rewrite app_one_cons. rewrite app_assoc. reflexivity. } split.
+        { subst t2'0 t2'. rewrite app_one_cons. repeat rewrite app_assoc. reflexivity. }
+        intros F. specialize (CT F). destruct CT as [F' CT].
+        intros. exists (S (plus F' F)). intros.
         repeat (rewrite rev_app_distr || rewrite rev_involutive || cbn [rev List.app]).
-        rewrite (app_one_cons _ (rev t2'')). repeat rewrite app_assoc.
-        eapply Semantics.generates_with_rem_trans.
-        { eapply Semantics.generates_with_empty_rem_app.
-          apply Semantics.generates_generates_with_empty_rem.
-          apply Semantics.generator_generates. }
-        eapply Semantics.abs_tr_eq_correct1.
-        { eapply IHp4.
-          - assumption.
-          - blia. }
-        apply Hf. Search a1'0. Search a1'.
-        rewrite rev_app_distr in CTp2. cbn [rev List.app] in CTp2. inversion CTp2. subst.
-        eapply Semantics.rem_unique; eassumption.
+        destruct fuel' as [|fuel']; [blia|]. simpl. 
+        simpl in H4. assert (H4' := H4). specialize (H4 (S fuel') ltac:(blia)). rewrite rev_app_distr in H4, H4', H5. inversion H4. subst.
+        rewrite H9. simpl. rewrite (app_one_cons _ (rev t2'')). repeat rewrite app_assoc. rewrite <- (app_assoc _ _ t2''').
+        apply predict_with_prefix_works. clear IHexec. Search snext_stmt'. Search t2''.
+        eapply CT.
+        { intros. auto. }
+        { intros. simpl. simpl in H5. eapply Semantics.predicts_ext.
+          { eassumption. }
+          { intros. simpl. rewrite H11. reflexivity. } }
+        { simpl. eapply Semantics.predicts_ext.
+          { eassumption. }
+          { auto. } }
+        { blia. }
+        simplSearch snext_stmt'.
+        simpl. intros. 
+        intros. simpl. apply H3. intros. exists (S fuel'). intros.
+              specialize (H4' n ltac:(blia)). inversion H4'. subst. rewrite H11. repeat rewrite H15. auto. }
+
+            { eapply rewrite H10 in H4. eassumption. eauto. }
+        
+        exists (S F). intros.
+        repeat (rewrite rev_app_distr || rewrite rev_involutive || cbn [rev List.app]).
+        destruct fuel' as [|fuel']; [blia|]. simpl.
+        specialize (H3 (S fuel') ltac:(blia)). rewrite rev_app_distr in H3. simpl in H3. inversion H3. subst.
+        rewrite H8.
+        apply predict_with_prefix_works. assumption.
+        rewrite rev_app_distr. eapply CT.
       + eapply exec.seq_cps. eapply load_iarg_reg_correct; (blia || eassumption || idtac).
-        clear mc2 H3. intros.
+        clear mc2 H2. intros.
         eapply exec.if_true. {
           cbn. rewrite map.get_put_same. rewrite word.eqb_ne by assumption. reflexivity.
         }
-        eapply exec.weaken.
-        { eapply IHexec with (is_ct := is_ct); try eassumption.
-          destruct is_ct; [|reflexivity].
-          intros.
-          destruct H4 as [t1'' H4]. subst.
-          instantiate (2 := fun _ => match a1 with | Semantics.cons_branch true a1_0 => True | _ => False end).
-          apply H1 in H3.
-          2: { eexists. rewrite app_one_cons. rewrite app_assoc. reflexivity. }
-          clear H1.
-          destruct H3 as [HP [a1' [t1''0 [IHp1 IHp2]]]].
-          rewrite app_one_cons in IHp1. rewrite app_assoc in IHp1. apply app_inv_tail in IHp1.
-          subst.
-          rewrite rev_app_distr in IHp2. cbn [rev List.app] in IHp2.
-          instantiate (1 := match a1 with | Semantics.cons_branch true a1_0 => a1_0 | _ => Semantics.empty end).
-          inversion IHp2. subst. clear IHp2.
-          split; [reflexivity|].
-          eexists. eexists.
-          split; [reflexivity|].
-          apply H6. }
-        cbv beta. intros.
-        destruct H3 as [t1' [m1' [l1' [mc1' [HR [Hpost CT]]]]]].
-        do 4 eexists.
-        split; [eassumption|].
-        split; [eassumption|].
-        destruct is_ct; [|reflexivity].
-        destruct CT as [F [Ha1 [a1' [t1'' [t2'' [IHp1 [IHp2 [IHp3 IHp4]]]]]]]].
-        subst. destruct a1; try destruct Ha1. destruct b; destruct Ha1.
-        apply H1 in Hpost.
-        2: { eexists. rewrite app_one_cons. rewrite app_assoc. reflexivity. }
-        clear H1. destruct Hpost as [HP [a1'0 [t1''0 [CTp1 CTp2]]]].
-        rewrite app_one_cons in CTp1. rewrite app_assoc in CTp1. apply app_inv_tail in CTp1. subst.
-        exists (S F).
-        split; [assumption|].
-        do 3 eexists.
-        split.
-        { rewrite app_one_cons. rewrite app_assoc. reflexivity. }
-        split; [eassumption|].
-        split.
-        { subst t2'. rewrite app_one_cons. repeat rewrite app_assoc. reflexivity. }
-        intros f fuel Hf Hfuel.
-        destruct fuel as [|fuel']; [blia|].
-        cbn [transform_stmt_trace]. cbv [leak_prepare_bcond leak_spill_bcond]. cbn [List.app].
-        repeat (rewrite rev_app_distr || rewrite rev_involutive || cbn [rev List.app]).
-        rewrite (app_one_cons _ (rev t2'')). repeat rewrite app_assoc.
-        eapply Semantics.generates_with_rem_trans.
-        { eapply Semantics.generates_with_empty_rem_app.
-          apply Semantics.generates_generates_with_empty_rem.
-          apply Semantics.generator_generates. }
-        eapply Semantics.abs_tr_eq_correct1.
-        { eapply IHp4.
-          - assumption.
-          - blia. }
-        apply Hf. Search a1'0. Search a1'.
-        rewrite rev_app_distr in CTp2. cbn [rev List.app] in CTp2. inversion CTp2. subst.
-        eapply Semantics.rem_unique; eassumption.
+        eapply IHexec; eassumption.
     - (* exec.if_false *)
       unfold prepare_bcond. destr cond; cbn [ForallVars_bcond eval_bcond spill_bcond] in *; fwd.
       + eapply exec.seq_assoc.
