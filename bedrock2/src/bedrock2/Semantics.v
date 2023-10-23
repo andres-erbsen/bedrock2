@@ -240,7 +240,20 @@ Section WithIOEvent.
   | predicts_nil :
     forall f,
       f [] = Some qend ->
-      predicts f [].  
+      predicts f [].
+
+  Lemma predicts_ext f g t :
+    predicts f t ->
+    (forall x, f x = g x) ->
+    predicts g t.
+  Proof.
+    intros. generalize dependent g. induction H.
+    - econstructor.
+      + rewrite <- H. rewrite H2. reflexivity.
+      + intros t'. rewrite <- H2. apply H0.
+      + eapply IHpredicts. reflexivity.
+    - intros. constructor. rewrite <- H0. apply H.
+  Qed.
 
   Lemma predictor_works a t :
     generates a t ->
