@@ -798,7 +798,7 @@ Section Spilling.
       fp < r <= maxvar /\ (r < a0 \/ a7 < r) ->
       map.get l1 r = Some v ->
       exec e2 (load_iarg_reg i r) t2 m2 l2 mc2 (fun t2' m2' l2' mc2' =>
-      t2' = leak_load_iarg_reg fpval r ++ t2
+      t2' = rev (leak_load_iarg_reg fpval r) ++ t2
       /\ m2' = m2 /\ l2' = map.put l2 (iarg_reg i r) v /\
         related maxvar frame fpval (fio t1) m1 l1 (fio t2') m2' l2').
   Proof.
@@ -2317,8 +2317,127 @@ Section Spilling.
           { eassumption. }
           { auto. } }
         { blia. }
-    - 
+    - unfold prepare_bcond. destr cond; cbn [ForallVars_bcond eval_bcond spill_bcond] in *; fwd.
+      + eapply exec.seq_assoc.
+        eapply exec.seq_cps. eapply load_iarg_reg_correct; (blia || eassumption || idtac).
+        clear mc2 H2. intros.
+        eapply exec.seq_cps. eapply load_iarg_reg_correct; (blia || eassumption || idtac).
+        clear mc2. intros.
+        eapply exec.if_false. {
+          cbn. erewrite get_iarg_reg_1 by eauto with zarith. rewrite map.get_put_same. congruence.
+        }
+        eapply exec.weaken.
+        { apply IHexec; eassumption. }
+        cbv beta. intros t' m' l' mc' (t1' & m1' & l1' & mc1' & t1'' & t2'' & R & Hpost & Et1'' & Et2'' & CT). subst.
+        do 6 eexists.
+        split; [eassumption|]. split; [eassumption|]. split.
+        { rewrite app_one_cons. rewrite app_assoc. reflexivity. } split.
+        { subst t2'0 t2'. rewrite app_one_cons. repeat rewrite app_assoc. reflexivity. }
+        intros F. specialize (CT F). destruct CT as [F' CT].
+        intros. exists (S (plus F' F)). intros.
+        repeat (rewrite rev_app_distr || rewrite rev_involutive || cbn [rev List.app]).
+        destruct fuel' as [|fuel']; [blia|]. simpl. 
+        simpl in H3. specialize (H3 (S fuel') ltac:(blia)). rewrite rev_app_distr in H3, H4. inversion H3. subst.
+        rewrite H8. simpl. rewrite (app_one_cons _ (rev t2'')). repeat rewrite app_assoc. rewrite <- (app_assoc _ _ t2''').
+        apply predict_with_prefix_works. clear IHexec. Search snext_stmt'. Search t2''.
+        eapply CT.
+        { intros. simpl. simpl in H5. eapply Semantics.predicts_ext.
+          { eassumption. }
+          { intros. simpl. rewrite H10. reflexivity. } }
+        { simpl. eapply Semantics.predicts_ext.
+          { eassumption. }
+          { auto. } }
+        { blia. }
         
+      + eapply exec.seq_cps. eapply load_iarg_reg_correct; (blia || eassumption || idtac).
+        clear mc2 H2. intros.
+        eapply exec.if_false. {
+          cbn. rewrite map.get_put_same. rewrite word.eqb_eq; reflexivity.
+        }
+        eapply exec.weaken.
+        { apply IHexec; eassumption. }
+        cbv beta. intros t' m' l' mc' (t1' & m1' & l1' & mc1' & t1'' & t2'' & R & Hpost & Et1'' & Et2'' & CT). subst.
+        do 6 eexists.
+        split; [eassumption|]. split; [eassumption|]. split.
+        { rewrite app_one_cons. rewrite app_assoc. reflexivity. } split.
+        { subst t2'. rewrite app_one_cons. repeat rewrite app_assoc. reflexivity. }
+        intros F. specialize (CT F). destruct CT as [F' CT].
+        intros. exists (S (plus F' F)). intros.
+        repeat (rewrite rev_app_distr || rewrite rev_involutive || cbn [rev List.app]).
+        destruct fuel' as [|fuel']; [blia|]. simpl. 
+        simpl in H1. specialize (H1 (S fuel') ltac:(blia)).
+        rewrite rev_app_distr in H1, H2. inversion H1. subst.
+        rewrite H6. simpl. rewrite (app_one_cons _ (rev t2'')).
+        repeat rewrite app_assoc. rewrite <- (app_assoc _ _ t2''').
+        apply predict_with_prefix_works. clear IHexec. Search snext_stmt'. Search t2''.
+        eapply CT.
+        { intros. simpl. eapply Semantics.predicts_ext.
+          { eassumption. }
+          { intros. simpl. rewrite H8. reflexivity. } }
+        { simpl. eapply Semantics.predicts_ext.
+          { eassumption. }
+          { auto. } }
+        { blia. }
+    - (* exec.loop *)
+      rename IHexec into IH1, H3 into IH2, H5 into IH12.
+      eapply exec.loop_cps.
+      eapply exec.seq.
+      1: eapply IH1; eassumption.
+      cbv beta. intros. fwd.
+      unfold prepare_bcond. destr cond; cbn [ForallVars_bcond] in *; fwd.
+      + specialize H0 with (1 := H3p1). cbn in H0. fwd.
+        eapply exec.seq. {
+          eapply load_iarg_reg_correct''; (blia || eassumption || idtac).
+        }
+        cbv beta. intros. fwd.
+        eapply exec.weaken. {
+          eapply load_iarg_reg_correct''; (blia || eassumption || idtac).
+        }
+        cbv beta. intros. fwd. cbn [eval_bcond spill_bcond].
+        erewrite get_iarg_reg_1 by eauto with zarith.
+        rewrite map.get_put_same. eexists. split; [reflexivity|].
+        split; intros.
+        * do 6 eexists. split; [|split].
+          2: { Search post. eapply H1. 1: eassumption. cbn. rewrite E, E0. congruence. }
+          { eassumption. } split.
+          { rewrite app_one_cons. rewrite app_assoc. reflexivity. } split.
+          { rewrite app_one_cons. repeat rewrite app_assoc. reflexivity. }
+          intros F. specialize (H3p4 F). destruct H3p4 as [F' CT].
+          exists (S F). intros. destruct fuel' as [|fuel']; [blia|]. simpl.
+          repeat (rewrite rev_involutive || rewrite rev_app_distr || rewrite <- app_assoc).
+          simpl in H5, H6. specialize (H5 (S fuel') ltac:(blia)).
+          rewrite <- app_assoc in H5.
+          eapply CT.
+          { intros. eassumption. }
+          { cbv [leak_spill_bcond]. rewrite app_nil_r. rewrite (app_assoc _ _ (_ ++ _)).
+            apply predict_with_prefix_works. rewrite app_nil_r.
+            eapply simpl.
+          -- exact H3p7.
+          -- split.
+             { Search post. eauto.
+             +++ eapply H1. 1: eassumption. cbn. rewrite E, E0. congruence.
+        * eapply exec.weaken. 1: eapply IH2.
+          -- eassumption.
+          -- cbn. rewrite E, E0. congruence.
+          -- eassumption.
+          -- eassumption.
+          -- cbv beta. intros. fwd. eauto 10. (* IH12 *)
+      + specialize H0 with (1 := H3p1). cbn in H0. fwd.
+        eapply exec.weaken. {
+          eapply load_iarg_reg_correct''; (blia || eassumption || idtac).
+        }
+        cbv beta. intros. fwd. cbn [eval_bcond spill_bcond].
+        rewrite map.get_put_same. eexists. split; [reflexivity|].
+        split; intros.
+        * do 4 eexists. split.
+          -- exact H3p5.
+          -- eapply H1. 1: eassumption. cbn. rewrite E. congruence.
+        * eapply exec.weaken. 1: eapply IH2.
+          -- eassumption.
+          -- cbn. rewrite E. congruence.
+          -- eassumption.
+          -- eassumption.
+          -- cbv beta. intros. fwd. eauto 10. (* IH12 *)
         
     - (* SOp *)
       inversion H. subst.
