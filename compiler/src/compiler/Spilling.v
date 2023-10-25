@@ -305,7 +305,8 @@ Section Spilling.
                  | _ => None
                  end) 
         | SSeq s1 s2 =>
-            snext_stmt' t_so_far fpval s1 st_so_far (fun next' st_so_far' => snext_stmt' next' fpval s2 st_so_far f)
+            snext_stmt' t_so_far fpval s1 st_so_far
+              (fun t_so_far' st_so_far' => snext_stmt' t_so_far' fpval s2 st_so_far' f)
         | SSkip => f t_so_far st_so_far
         | SCall resvars fname argvars =>
             match @map.get _ _ env e fname with
@@ -1645,7 +1646,7 @@ Section Spilling.
     clear. intros H. generalize dependent f. induction t1.
     - intros. simpl in H. inversion H. subst. assumption.
     - intros. simpl in H. inversion H. subst. rewrite H4. apply IHt1. assumption.
-  Qed.   
+  Qed.
   
   Lemma spilling_correct : forall
       (e1 e2 : env)
@@ -2278,14 +2279,13 @@ Section Spilling.
           { rewrite app_one_cons. repeat rewrite app_assoc. reflexivity. }
           exists (S F'). intros. destruct fuel' as [|fuel']; [blia|]. simpl.
           repeat (rewrite rev_involutive || rewrite rev_app_distr || rewrite <- app_assoc).
-          simpl in H5, H6. rewrite <- app_assoc in H5.
-          eapply H3p4.
+          simpl in H5, H6. rewrite <- app_assoc in H5. eapply H3p4. 
           { apply H5. }
           { rewrite (app_assoc t10) in H5. apply predict_cons in H5. rewrite H5. simpl.
             rewrite (app_one_cons _ t2'''). repeat rewrite (app_assoc _ _ t2''').
             apply predict_with_prefix_works. rewrite <- app_assoc. assumption. }
           { blia. }
-        * eapply exec.weaken. 1: eapply IH2.
+        * Check exec.loop_cps. eapply exec.weaken. 1: eapply IH2.
           -- eassumption.
           -- cbn. rewrite E, E0. Search r0. congruence.
           -- eassumption.
@@ -2298,9 +2298,16 @@ Section Spilling.
                 split; [eassumption|]. split; [eassumption|]. split.
                 { rewrite app_one_cons. repeat rewrite app_assoc. reflexivity. } split. 
                 { rewrite app_one_cons. repeat rewrite app_assoc. reflexivity. }
-                exists F'1. intros.
+                exists (S F'1). intros.
                 repeat (rewrite rev_involutive || rewrite rev_app_distr || rewrite <- app_assoc).
-                Search t2''.
+                destruct fuel' as [|fuel']; [blia|]. simpl.
+                repeat (rewrite rev_involutive in H5 ||
+                        rewrite rev_app_distr in H5 ||
+                                                   rewrite <- app_assoc in H5). Search body1.
+                eapply H3p4.
+
+                Search SLoop.
+                Search t2''. Check exec.loop_cps.
                 eapply H3p4.
                 do 6 eexists. split; [|split].
                 2: { Search post. Search post. eapply H2. 1: eassumption. cbn. rewrite E, E0. congruence. }
