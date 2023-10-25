@@ -300,7 +300,7 @@ Section Spilling.
                  | Some (qbranch false) =>
                      predict_with_prefix
                        (leak_prepare_bcond fpval c ++ leak_spill_bcond ++ [branch false])
-                       (f (t_so_far ++ [branch false]))
+                       (f (t_so_far' ++ [branch false]))
                        st_so_far'
                  | _ => None
                  end) 
@@ -2276,35 +2276,47 @@ Section Spilling.
           { eassumption. } split.
           { rewrite app_one_cons. rewrite app_assoc. reflexivity. } split.
           { rewrite app_one_cons. repeat rewrite app_assoc. reflexivity. }
-          intros F. specialize (H3p4 F). destruct H3p4 as [F' CT].
-          exists (S F). intros. destruct fuel' as [|fuel']; [blia|]. simpl.
+          exists (S F'). intros. destruct fuel' as [|fuel']; [blia|]. simpl.
           repeat (rewrite rev_involutive || rewrite rev_app_distr || rewrite <- app_assoc).
-          simpl in H6, H8. specialize (H6 (S fuel') ltac:(blia)).
-          rewrite <- app_assoc in H6.
-          eapply CT.
-          { intros. repeat Tactics.destruct_one_match; auto; try congruence.
-            all: apply predict_with_prefix_ext. all: auto. intros. destruct (next1 []) as [q1|]; destruct (next2 []) as [q2|];
-              try destruct q1; try destruct q2. , q; auto. }
-          { intros. eassumption. }
-          { cbv [leak_spill_bcond]. rewrite app_nil_r.
-            simpl in H5. apply predict_cons in H5. rewrite H5. simpl.
-            rewrite (app_one_cons _ t2'''). repeat rewrite app_assoc.
-            apply predict_with_prefix_works. eapply Semantics.predicts_ext; eauto.
-            intros. simpl. Search f. simpl in H6. rewrite <- app_assoc in H6. eapply H6. rewrite app_nil_r.
-            
-            econstructor.
-            { Search f. Search t2'''. simpl.
-            eapply simpl.
-          -- exact H3p7.
-          -- split.
-             { Search post. eauto.
-             +++ eapply H1. 1: eassumption. cbn. rewrite E, E0. congruence.
+          simpl in H5, H6. rewrite <- app_assoc in H5.
+          eapply H3p4.
+          { apply H5. }
+          { rewrite (app_assoc t10) in H5. apply predict_cons in H5. rewrite H5. simpl.
+            rewrite (app_one_cons _ t2'''). repeat rewrite (app_assoc _ _ t2''').
+            apply predict_with_prefix_works. rewrite <- app_assoc. assumption. }
+          { blia. }
         * eapply exec.weaken. 1: eapply IH2.
           -- eassumption.
-          -- cbn. rewrite E, E0. congruence.
+          -- cbn. rewrite E, E0. Search r0. congruence.
           -- eassumption.
           -- eassumption.
-          -- cbv beta. intros. fwd. eauto 10. (* IH12 *)
+          -- cbv beta. intros. fwd. eapply exec.weaken.
+             ++ eapply IH12; eauto 10.
+             ++ cbv beta. intros.
+                destruct H5 as [t1' [m1'1 [l1'1 [mc1'1 [t1''1 [t2''1 [R [Hpost [E1 [E2 [F'1 CT]]]]]]]]]]].
+                subst. do 6 eexists.
+                split; [eassumption|]. split; [eassumption|]. split.
+                { rewrite app_one_cons. repeat rewrite app_assoc. reflexivity. } split. 
+                { rewrite app_one_cons. repeat rewrite app_assoc. reflexivity. }
+                exists F'1. intros.
+                repeat (rewrite rev_involutive || rewrite rev_app_distr || rewrite <- app_assoc).
+                Search t2''.
+                eapply H3p4.
+                do 6 eexists. split; [|split].
+                2: { Search post. Search post. eapply H2. 1: eassumption. cbn. rewrite E, E0. congruence. }
+          { eassumption. } split.
+          { rewrite app_one_cons. rewrite app_assoc. reflexivity. } split.
+          { rewrite app_one_cons. repeat rewrite app_assoc. reflexivity. }
+          exists (S F'). intros. destruct fuel' as [|fuel']; [blia|]. simpl.
+          repeat (rewrite rev_involutive || rewrite rev_app_distr || rewrite <- app_assoc).
+          simpl in H5, H6. rewrite <- app_assoc in H5.
+          eapply H3p4.
+          { apply H5. }
+          { rewrite (app_assoc t10) in H5. apply predict_cons in H5. rewrite H5. simpl.
+            rewrite (app_one_cons _ t2'''). repeat rewrite (app_assoc _ _ t2''').
+            apply predict_with_prefix_works. rewrite <- app_assoc. assumption. }
+          { blia. }
+          do 6 eexists. split; [|split].
       + specialize H0 with (1 := H3p1). cbn in H0. fwd.
         eapply exec.weaken. {
           eapply load_iarg_reg_correct''; (blia || eassumption || idtac).
