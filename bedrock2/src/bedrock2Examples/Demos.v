@@ -72,7 +72,7 @@ Print allProgs.
 
 Require Import bedrock2.ToCString.
 Definition allProgsAsCString : string :=
-  Eval cbv in c_module allProgs.
+  Eval cbv in c_module allProgs. Print allProgsAsCString.
 
 (*
 Print allProgsAsCString.

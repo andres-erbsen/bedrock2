@@ -21,7 +21,7 @@ Section LightbulbSpec.
   Delimit Scope word_scope with word.
   Local Open Scope word_scope.
   Local Open Scope string_scope.
-
+ Print one.
   (* Common event between bedrock2 and Kami.
      Has to be of the form ("ld", addr, value) or ("st", addr, value).
      We don't use Inductives here so that we can share the same type with bedrock2 without

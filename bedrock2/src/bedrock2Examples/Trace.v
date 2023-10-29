@@ -22,7 +22,6 @@ Module Import IOMacros.
     locals :> map.map String.string word;
     env :> map.map String.string (list String.string * list String.string * cmd);
     ext_spec :> ExtSpec;
-    pick_sp :> PickSp;
 
     (* macros to be inlined to read or write a word
        TODO it's not so nice that we need to foresee the number of temp vars
@@ -81,7 +80,7 @@ Module SpiEth.
 
   Section WithMem.
     Import Word.Interface.
-    Context {word: word.word 32} {mem: map.map word Byte.byte} {pick_sp: PickSp}.
+    Context {word: word.word 32} {mem: map.map word Byte.byte}.
     Context {mem_ok: map.ok mem} {word_ok: word.ok word}.
 
     Definition Event: Type := (mem * String.string * list word) * (mem * list word).
@@ -141,6 +140,7 @@ Module SpiEth.
 
     Context {locals: map.map String.string word}.
     Context {funname_env: forall T, map.map String.string T}.
+    Print exec.interact.
 
     Instance ext_spec: ExtSpec :=
       fun t mGive action (argvals: list word) (post: (mem -> list word -> Prop)) =>
@@ -217,7 +217,7 @@ Module Syscalls.
 
   Section WithMem.
     Import Word.Interface.
-    Context {word: word.word 32} {mem: map.map word Byte.byte} {pick_sp: PickSp}.
+    Context {word: word.word 32} {mem: map.map word Byte.byte}.
     Context {word_ok: word.ok word} {mem_ok: map.ok mem}.
 
     Definition Event: Type := (mem * SyscallAction * list word) * (mem * list word).
@@ -248,6 +248,10 @@ Module Syscalls.
         | [trap; a1; a2; a3] => forall r1 r2 err, post m [r1; r2; err]
         | _ => False
         end.
+
+    Check exec.interact. Print exec.exec.
+
+    
 
     Local Axiom TODO: False.
 

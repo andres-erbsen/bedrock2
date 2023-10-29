@@ -9,7 +9,6 @@ Local Open Scope Z_scope. Local Open Scope string_scope. Local Open Scope list_s
 
 Require bedrock2Examples.lightbulb_spec.
 Local Notation patience := lightbulb_spec.patience.
-
 Definition spi_write := func! (b) ~> busy {
     busy = $-1;
     i = $patience; while i { i = i - $1;
@@ -20,7 +19,10 @@ Definition spi_write := func! (b) ~> busy {
       output! MMIOWRITE($0x10024048, b);
       busy = (busy ^ busy)
     }
-  }.
+                          }.
+
+
+
 
 Definition spi_read := func! () ~> (b, busy) {
     busy = $-1;
@@ -51,7 +53,7 @@ Import coqutil.Map.Interface.
 Import ReversedListNotations.
 
 Section WithParameters.
-  Context {word: word.word 32} {mem: map.map word Byte.byte} {pick_sp: PickSp}.
+  Context {word: word.word 32} {mem: map.map word Byte.byte}.
   Context {word_ok: word.ok word} {mem_ok: map.ok mem}.
 
   Definition mmio_event_abstraction_relation
@@ -125,7 +127,7 @@ Section WithParameters.
       split.
       { constructor. }
       exact eq_refl. }*)
-    repeat straightline.
+    repeat straightline. Check WeakestPreconditionProperties.interact_nomem. Print ext_spec.
     eapply WeakestPreconditionProperties.interact_nomem; repeat straightline.
     letexists; split; [exact eq_refl|]; split; [split; trivial|].
     {

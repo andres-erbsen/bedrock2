@@ -77,7 +77,7 @@ Section WithIOEvent.
     (forall addr, abs_tr_eq (f1 addr) (f2 addr)) ->
     abs_tr_eq (cons_salloc f1) (cons_salloc f2).
 (* IO things to do:
-   set channel; output and leak a secret; output and don't leak; output and leak one function of secret,
+   set channel: input can either be private or not; output and leak a secret; output and don't leak; output and leak one function of secret,
    take input, output and leak secret but do not leak secret until after input. *)  
   Import ListNotations.
   Inductive generates : abstract_trace -> trace -> Prop :=
