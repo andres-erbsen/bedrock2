@@ -513,13 +513,22 @@ Section Spilling.
       else
         error:("Spilling got input program with invalid var names (please report as a bug)").
 
-  (*Definition transform_fun_trace {env : map.map string (list Z * list Z * stmt)} (magicFuel : nat) (e : env) (f : list Z * list Z * stmt) (t : Semantics.abstract_trace) : Semantics.abstract_trace :=
+  Definition snext_fun {env : map.map string (list Z * list Z * stmt)} (e : env) (fuel: nat) (next : trace -> option qevent) (t_so_far : trace) (f : list Z * list Z * stmt) (st_so_far : Semantics.trace) : option Semantics.qevent :=
     let '(argnames, resnames, body) := f in
-    Semantics.cons_salloc (fun fpval =>
-                             leak_set_vars_to_reg_range fpval argnames
-                               (Semantics.abstract_app
-                                  (transform_stmt_trace e magicFuel fpval body t (fun x => x))
-                                  (leak_set_reg_range_to_vars fpval resnames empty))).*)
+    match st_so_far with
+    | [] => Some qsalloc
+    | salloc fpval :: st_so_far' =>
+        predict_with_prefix
+          (leak_set_vars_to_reg_range fpval argnames)
+          (fun st_so_far'' => snext_stmt' e fuel next t_so_far fpval body st_so_far''
+                                (fun t_so_far' st_so_far''' =>
+                                   predict_with_prefix
+                                     (leak_set_reg_range_to_vars fpval resnames)
+                                     (fun st_so_far'''' => match st_so_far'''' with |nil => Some qend |_ => None end)
+                                     st_so_far'''))
+          st_so_far
+    | _ => None
+    end.
 
   Lemma firstn_min_absorb_length_r{A: Type}: forall (l: list A) n,
       List.firstn (Nat.min n (length l)) l = List.firstn n l.
@@ -1408,47 +1417,35 @@ Section Spilling.
       blia.
   Qed.
 
-  Definition stmt_has_abstract_trace
-    (e: env) (s : stmt) (a: Semantics.abstract_trace)
-    (t: Semantics.trace)(m: mem)(l: locals)(mc: MetricLog): Prop :=
-    exec e s t m l mc (fun t' _ _ _ =>
-                         exists t'', Semantics.generates a t'' /\ t' = t'' ++ t).
-
-  (*Definition spilling_correct_for(e1 e2 : env)(s1 : stmt)(a1 : option Semantics.abstract_trace)(f : Semantics.abstract_trace -> Semantics.abstract_trace): Prop :=
-      forall (t1 : Semantics.trace) (m1 : mem) (l1 : locals) (mc1 : MetricLog)
-             (post : Semantics.trace -> mem -> locals -> MetricLog -> Prop),
-        exec e1 s1 t1 m1 l1 mc1 (fun t1' m1' l1' mc1' =>
-                                   post t1' m1' l1' mc1' /\
-                                     (match a1 with
-                                      | None => True
-                                      | Some a1 => exists t1'' a1', Semantics.generates_with_rem a1 (rev t1'') a1' /\ t1' = t1'' ++ t1 end)) ->
-        forall (frame : mem -> Prop) (maxvar : Z),
-          valid_vars_src maxvar s1 ->
-          forall (t2 : Semantics.trace) (m2 : mem) (l2 : locals) (mc2 : MetricLog) (fpval : word),
-            related maxvar frame fpval (fio t1) m1 l1 (fio t2) m2 l2 ->
-            exec e2 (spill_stmt s1) t2 m2 l2 mc2
-                 (fun (t2' : Semantics.trace) (m2' : mem) (l2' : locals) (mc2' : MetricLog) =>
-                    exists t1' m1' l1' mc1',
-                      related maxvar frame fpval (fio t1') m1' l1' (fio t2') m2' l2' /\
-                        post t1' m1' l1' mc1' /\
-                        (match a1 with
-                         | None => True
-                         | Some a1 => exists F a1' t1'' t2'',
-                             forall fuel,
-                               Nat.le F fuel ->
-                               Semantics.generates_with_rem a1 (rev t1'') a1' /\
-                                 t1' = t1'' ++ t1 /\
-                                 Semantics.generates_with_rem (transform_stmt_trace fuel e2 fpval s1 a1 f) (rev t2'') (f a1') /\
-                                 t2' = t2'' ++ t2 end)).*)
-              
+  Definition spilling_correct_for(e1 e2 : env)(s1 : stmt) : Prop :=
+    forall (t1 : Semantics.trace) (m1 : mem) (l1 : locals) (mc1 : MetricLog)
+           (post : Semantics.trace -> mem -> locals -> MetricLog -> Prop),
+      exec e1 s1 t1 m1 l1 mc1 post ->
+      forall (frame : mem -> Prop) (maxvar : Z),
+        valid_vars_src maxvar s1 ->
+        forall (t2 : Semantics.trace) (m2 : mem) (l2 : locals) (mc2 : MetricLog) (fpval : word),
+          related maxvar frame fpval (fio t1) m1 l1 (fio t2) m2 l2 ->
+          exec e2 (spill_stmt s1) t2 m2 l2 mc2
+            (fun (t2' : Semantics.trace) (m2' : mem) (l2' : locals) (mc2' : MetricLog) =>
+               exists t1' m1' l1' mc1' t1'' t2'',
+                 related maxvar frame fpval (fio t1') m1' l1' (fio t2') m2' l2' /\
+                   post t1' m1' l1' mc1' /\
+                   t1' = t1'' ++ t1 /\
+                   t2' = t2'' ++ t2 /\
+                   exists F',
+                   forall next t10 t1''' t2''' fuel' f,
+                     predicts next (t10 ++ rev t1'' ++ t1''') ->
+                     predicts (fun t => f (t10 ++ rev t1'') t) t2''' ->
+                     Nat.le F' fuel' ->
+                     predicts (fun t => snext_stmt' e1 fuel' next t10 fpval s1 t f) (rev t2'' ++ t2''')).              
 
   Definition call_spec(e: env) '(argnames, retnames, fbody)
-             (t: Semantics.trace)(m: mem)(argvals: list word)
-             (post: Semantics.io_trace -> mem -> list word -> Prop): Prop :=
-    forall l mc, map.of_list_zip argnames argvals = Some l ->
+    (t: Semantics.trace)(m: mem)(argvals: list word)
+    (post: Semantics.io_trace -> mem -> list word -> Prop): Prop :=
+    (forall l mc, map.of_list_zip argnames argvals = Some l ->
                  exec e fbody t m l mc (fun t' m' l' mc' =>
-                   exists retvals, map.getmany_of_list l' retnames = Some retvals /\
-                   post (Semantics.filterio t') m' retvals).
+                                          exists retvals, map.getmany_of_list l' retnames = Some retvals /\
+                                                            post (Semantics.filterio t') m' retvals)).
 
   (* In exec.call, there are many maps of locals involved:
 
@@ -1475,13 +1472,21 @@ Section Spilling.
      To simplify, it is helpful to have a separate lemma only talking about
      what happens in the callee. TODO: actually use that lemma in case exec.call.
      Moreover, this lemma will also be used in the pipeline, where phases
-     are composed based on the semantics of function calls. *)
-  (*Lemma spill_fun_correct_aux: forall e1 e2 argnames1 retnames1 body1 argnames2 retnames2 body2,
+     are composed based on the semantics of function calls. *) Check snext_fun.
+  Lemma spill_fun_correct_aux: forall e1 e2 next argnames1 retnames1 body1 argnames2 retnames2 body2,
       spill_fun (argnames1, retnames1, body1) = Success (argnames2, retnames2, body2) ->
       spilling_correct_for e1 e2 body1 ->
       forall argvals t m (post: Semantics.io_trace -> mem -> list word -> Prop),
-        call_spec e1 (argnames1, retnames1, body1) t m argvals post ->
-        call_spec e2 (argnames2, retnames2, body2) t m argvals post.
+        (forall l mc, map.of_list_zip argnames1 argvals = Some l ->
+                      exec e1 body1 t m l mc (fun t' m' l' mc' =>
+                                                (exists t'', t' = t'' ++ t /\ predicts next t'') /\
+                                                exists retvals, map.getmany_of_list l' retnames1 = Some retvals /\
+                                                                  post (Semantics.filterio t') m' retvals)) ->
+        (forall l mc, map.of_list_zip argnames2 argvals = Some l ->
+                      exec e2 body2 t m l mc (fun t' m' l' mc' =>
+                                                (exists t'' F, forall t' = t'' ++ t /\ predicts (snext_fun e1 
+                                                exists retvals, map.getmany_of_list l' retnames2 = Some retvals /\
+                                                                  post (Semantics.filterio t') m' retvals)).
   Proof.
     unfold call_spec, spilling_correct_for. intros * Sp IHexec * Ex lFL3 mc OL2.
     unfold spill_fun in Sp. fwd.
@@ -1620,7 +1625,7 @@ Section Spilling.
     { eassumption. }
     Unshelve.
     all: try assumption.
-  Qed.*)
+  Qed.
 
   Lemma app_one_cons {A} (x : A) (l : list A) :
     x :: l = [x] ++ l.
