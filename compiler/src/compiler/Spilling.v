@@ -1446,14 +1446,21 @@ Section Spilling.
                      Nat.le F' fuel' ->
                      predicts (fun t => snext_stmt' e1 fuel' next t10 fpval s1 t f) (rev t2'' ++ t2''')).              
 
-  Definition call_spec(e: env) '(argnames, retnames, fbody)
+  Definition call_spec(e: env) '(argnames, retnames, fbody) next
     (t: Semantics.trace)(m: mem)(argvals: list word)
     (post: Semantics.io_trace -> mem -> list word -> Prop): Prop :=
-    (forall l mc, map.of_list_zip argnames argvals = Some l ->
-                 exec e fbody t m l mc (fun t' m' l' mc' =>
-                                          exists retvals, map.getmany_of_list l' retnames = Some retvals /\
-                                                            post (Semantics.filterio t') m' retvals)).
+    (forall l mc,
+        map.of_list_zip argnames argvals = Some l ->
+        exec e fbody t m l mc (fun t' m' l' mc' =>
+                                 exists retvals, map.getmany_of_list l' retnames = Some retvals /\
+                                                   post (Semantics.filterio t') m' retvals /\
+                                                   exists t'' F,
+                                                     t' = t'' ++ t /\
+                                                       forall fuel,
+                                                         le F fuel ->
+                                                         predicts (next fuel) (rev t''))).
 
+                                                                                  
   (* In exec.call, there are many maps of locals involved:
 
          H = High-level, L = Low-level, C = Caller, F = called Function
@@ -1480,8 +1487,8 @@ Section Spilling.
      what happens in the callee. TODO: actually use that lemma in case exec.call.
      Moreover, this lemma will also be used in the pipeline, where phases
      are composed based on the semantics of function calls. *) Check snext_fun.
-  Print Semantics.predicts. Print snext_fun.
-
+  Print Semantics.predicts. Print snext_fun. Print call_spec.
+(*(snext_fun e1 fuel next [] (argnames1, retnames1, body1))*)
   Lemma app_one_cons {A} (x : A) (l : list A) :
     x :: l = [x] ++ l.
   Proof. reflexivity. Qed.
@@ -1489,22 +1496,8 @@ Section Spilling.
       spill_fun (argnames1, retnames1, body1) = Success (argnames2, retnames2, body2) ->
       spilling_correct_for e1 e2 body1 ->
       forall argvals t m (post: Semantics.io_trace -> mem -> list word -> Prop),
-        (forall l mc,
-            map.of_list_zip argnames1 argvals = Some l ->
-            exec e1 body1 t m l mc (fun t' m' l' mc' =>
-                                      (exists t'', t' = t'' ++ t /\ predicts next (rev t'')) /\
-                                        exists retvals, map.getmany_of_list l' retnames1 = Some retvals /\
-                                                          post (Semantics.filterio t') m' retvals)) ->
-        (forall l mc,
-            map.of_list_zip argnames2 argvals = Some l ->
-            exec e2 body2 t m l mc (fun t' m' l' mc' =>
-                                      (exists t'' F,
-                                          t' = t'' ++ t /\
-                                            forall fuel,
-                                              le F fuel ->
-                                              predicts (snext_fun e1 fuel next [] (argnames1, retnames1, body1)) (rev t'')) /\
-                                        exists retvals, map.getmany_of_list l' retnames2 = Some retvals /\
-                                                          post (Semantics.filterio t') m' retvals)).
+        call_spec e1 (argnames1, retnames1, body1) next t m argvals post ->
+        call_spec e2 (argnames2, retnames2, body2) (fun fuel => snext_fun e1 fuel (next fuel) [] (argnames1, retnames1, body1)) t m argvals post.
   Proof.
     unfold call_spec, spilling_correct_for. intros * Sp IHexec * Ex lFL3 mc OL2.
     unfold spill_fun in Sp. fwd.
@@ -1603,8 +1596,8 @@ Section Spilling.
       3: eassumption.
       2: {
         unfold is_valid_src_var.
-        intros *. intro F.
-        rewrite ?Bool.andb_true_iff, ?Bool.orb_true_iff, ?Z.ltb_lt in F. exact F.
+        intros *. intro F_.
+        rewrite ?Bool.andb_true_iff, ?Bool.orb_true_iff, ?Z.ltb_lt in F_. exact F_.
       }
       2: eapply Forall_le_max.
       cbv beta.
@@ -1625,7 +1618,7 @@ Section Spilling.
            | |- exists _, _ => eexists
            | |- _ /\ _ => split
            end.
-    6: { rewrite <- Rp0. eassumption. }
+    4: { rewrite <- Rp0. eassumption. }
     2: {
       unfold map.split. eauto.
     }
@@ -1640,7 +1633,7 @@ Section Spilling.
         intros w. rewrite LittleEndianList.length_le_split; trivial.
       }
       blia. }
-    3: eassumption.
+    1: eassumption.
     { subst mcL6. subst tL4. rewrite app_one_cons. repeat rewrite app_assoc. reflexivity. }
     { intros fuel. intros Hfuel. cbv [snext_fun]. subst mcL6 tL4.
       repeat (rewrite rev_app_distr || rewrite rev_involutive || cbn [rev List.app]).
@@ -1648,9 +1641,10 @@ Section Spilling.
       apply predict_with_prefix_works.
       eapply CT. Print snext_fun.
       { Search t. Search (_ ++ _ = _ ++ _ -> _ = _). apply app_inv_tail in Et1''. subst.
-        simpl. Search predicts. instantiate (1 := nil). rewrite app_nil_r. assumption. }
+        simpl. Search predicts. instantiate (1 := nil). rewrite app_nil_r.
+        instantiate (1 := (plus F F')) in Hfuel. eapply OCp2p1. blia. }
       { apply predict_with_prefix_works_end. constructor. reflexivity. }
-      { eapply Hfuel. } }
+      { blia. } }
      Unshelve.
     all: try assumption.
   Qed.
@@ -2433,9 +2427,9 @@ Section Spilling.
   Lemma spill_fun_correct: forall e1 e2 argnames1 retnames1 body1 argnames2 retnames2 body2,
       spill_functions e1 = Success e2 ->
       spill_fun (argnames1, retnames1, body1) = Success (argnames2, retnames2, body2) ->
-      forall argvals t m (post: Semantics.io_trace -> mem -> list word -> Prop),
-        call_spec e1 (argnames1, retnames1, body1) t m argvals post ->
-        call_spec e2 (argnames2, retnames2, body2) t m argvals post.
+      forall argvals t m next (post: Semantics.io_trace -> mem -> list word -> Prop),
+        call_spec e1 (argnames1, retnames1, body1) next t m argvals post ->
+        call_spec e2 (argnames2, retnames2, body2) (fun fuel => snext_fun e1 fuel (next fuel) [] (argnames1, retnames1, body1)) t m argvals post.
   Proof.
     intros. eapply spill_fun_correct_aux; try eassumption.
     unfold spilling_correct_for.
