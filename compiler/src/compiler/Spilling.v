@@ -1473,6 +1473,7 @@ Section Spilling.
      what happens in the callee. TODO: actually use that lemma in case exec.call.
      Moreover, this lemma will also be used in the pipeline, where phases
      are composed based on the semantics of function calls. *) Check snext_fun.
+  Print Semantics.predicts.
   Lemma spill_fun_correct_aux: forall e1 e2 next argnames1 retnames1 body1 argnames2 retnames2 body2,
       spill_fun (argnames1, retnames1, body1) = Success (argnames2, retnames2, body2) ->
       spilling_correct_for e1 e2 body1 ->
@@ -1652,6 +1653,8 @@ Section Spilling.
     - intros. simpl in H. inversion H. subst. assumption.
     - intros. simpl in H. inversion H. subst. rewrite H4. apply IHt1. assumption.
   Qed.
+
+  Print predicts.
   
   Lemma spilling_correct : forall
       (e1 e2 : env)
@@ -1676,6 +1679,7 @@ Section Spilling.
                    t2' = t2'' ++ t2 /\
                    exists F',
                    forall next t10 t1''' t2''' fuel' f,
+                     (*may be nice to change exec so that only new trace is output*)
                      predicts next (t10 ++ rev t1'' ++ t1''') ->
                      predicts (fun t => f (t10 ++ rev t1'') t) t2''' ->
                      Nat.le F' fuel' ->

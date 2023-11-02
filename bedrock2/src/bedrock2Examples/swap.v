@@ -54,7 +54,8 @@ Instance ct_bad_swap : ct_spec_of "bad_swap" :=
     What we'd want to do is say that the output must be the secret if we're supposed to leak it,
     but there's no way to say that in the io spec, since we dont' know what the secret is.
     So, if we want to say that this is constant-time, then we have to do some silly things with
-    ghost constants in the function specification.*)
+    the function specification.*)
+  (* can reference (call set_channel1) and inputs to set_channel1 in IO spec to constrain this.*)
   Definition set_channel1 :=
     func! (input) {
         io! input_is_public = IS_PUBLIC();
@@ -85,6 +86,16 @@ Instance ct_bad_swap : ct_spec_of "bad_swap" :=
              }
       }.
 
+  Definition set_channel4 :=
+    func! (input_is_public) {
+        io! nothing = OUT(input_is_public);
+        io! input = IN();
+        if (input_is_public)
+             {
+               if (input) { /*skip*/ }
+             }
+      }.
+
   Definition set_channel2_bad :=
     func! () {
         io! input_is_public = IS_PUBLIC();
@@ -93,6 +104,7 @@ Instance ct_bad_swap : ct_spec_of "bad_swap" :=
       }.
 
   (*sure, we can do this - but somewhat stupidly.  But what if we wanted to allow leaking other functions of the secret?  Only works if the function is known ahead of time.*)
+  (*we won't include io events in leakage trace, so nothing interesting here*)
   Definition set_channel3 :=
     func! () {
         io! input_is_public = IS_PUBLIC();
@@ -108,6 +120,9 @@ Instance ct_bad_swap : ct_spec_of "bad_swap" :=
         io! input = IN();
         io! nothing = OUT(input)
       }.
+
+  (*should have postcondition of the form
+    (exists input, tr' = f input /\ io_spec tr' input), where tr' is trace after function is done.*)
 
   (*we can do this using IO trace, sorta.*)
   Definition leak_once1 :=

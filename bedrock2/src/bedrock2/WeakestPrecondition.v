@@ -1,3 +1,4 @@
+
 Require Import coqutil.Macros.subst coqutil.Macros.unique coqutil.Map.Interface coqutil.Map.OfListWord.
 Require Import Coq.ZArith.BinIntDef coqutil.Word.Interface coqutil.Word.Bitwidth.
 Require Import coqutil.dlet bedrock2.Syntax bedrock2.Semantics.
@@ -272,7 +273,9 @@ Notation "'ctfunc!' name a0 .. an '|' b0 .. bn '/' g0 .. gn '|' h0 .. hn '~>' r0
                                                      WeakestPrecondition.call
                                                        functions name tr mem (cons a0 .. (cons an (cons b0 .. (cons bn nil) ..)) ..)
                                                        (fun tr' mem' rets =>
-                                                          (exists tr'', generates ((appl a0 .. (appl an (appl g0 .. (appl gn f) ..)) ..)) (List.rev tr'') /\
+                                                          (exists input,
+                                                              tr' = f input /\ io_spec tr' input)
+                       i                                   (exists tr'', generates ((appl a0 .. (appl an (appl g0 .. (appl gn f) ..)) ..)) (List.rev tr'') /\
                                                                           tr' = (tr'' ++ tr)%list) /\
                                                             (exists r0,
                                                                 .. (exists rn,
