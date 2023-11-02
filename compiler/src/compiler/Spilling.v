@@ -214,6 +214,13 @@ Section Spilling.
     - simpl. apply H.
     - simpl. econstructor; auto.
   Qed.
+
+  Lemma predict_with_prefix_works_end prefix predict_rest :
+    predicts predict_rest [] ->
+    predicts (predict_with_prefix prefix predict_rest) prefix.
+  Proof.
+    intros H. eapply predict_with_prefix_works in H. rewrite app_nil_r in H. eassumption.
+  Qed.
   
   Fixpoint snext_stmt' {env: map.map String.string (list Z * list Z * stmt)}
     (e: env) (fuel : nat) (next : trace -> option qevent) (t_so_far : trace) (fpval: word) (s : stmt) (st_so_far : trace)
@@ -526,7 +533,7 @@ Section Spilling.
                                      (leak_set_reg_range_to_vars fpval resnames)
                                      (fun st_so_far'''' => match st_so_far'''' with |nil => Some qend |_ => None end)
                                      st_so_far'''))
-          st_so_far
+          st_so_far'
     | _ => None
     end.
 
@@ -1473,21 +1480,31 @@ Section Spilling.
      what happens in the callee. TODO: actually use that lemma in case exec.call.
      Moreover, this lemma will also be used in the pipeline, where phases
      are composed based on the semantics of function calls. *) Check snext_fun.
-  Print Semantics.predicts.
+  Print Semantics.predicts. Print snext_fun.
+
+  Lemma app_one_cons {A} (x : A) (l : list A) :
+    x :: l = [x] ++ l.
+  Proof. reflexivity. Qed.
   Lemma spill_fun_correct_aux: forall e1 e2 next argnames1 retnames1 body1 argnames2 retnames2 body2,
       spill_fun (argnames1, retnames1, body1) = Success (argnames2, retnames2, body2) ->
       spilling_correct_for e1 e2 body1 ->
       forall argvals t m (post: Semantics.io_trace -> mem -> list word -> Prop),
-        (forall l mc, map.of_list_zip argnames1 argvals = Some l ->
-                      exec e1 body1 t m l mc (fun t' m' l' mc' =>
-                                                (exists t'', t' = t'' ++ t /\ predicts next t'') /\
-                                                exists retvals, map.getmany_of_list l' retnames1 = Some retvals /\
-                                                                  post (Semantics.filterio t') m' retvals)) ->
-        (forall l mc, map.of_list_zip argnames2 argvals = Some l ->
-                      exec e2 body2 t m l mc (fun t' m' l' mc' =>
-                                                (exists t'' F, forall t' = t'' ++ t /\ predicts (snext_fun e1 
-                                                exists retvals, map.getmany_of_list l' retnames2 = Some retvals /\
-                                                                  post (Semantics.filterio t') m' retvals)).
+        (forall l mc,
+            map.of_list_zip argnames1 argvals = Some l ->
+            exec e1 body1 t m l mc (fun t' m' l' mc' =>
+                                      (exists t'', t' = t'' ++ t /\ predicts next (rev t'')) /\
+                                        exists retvals, map.getmany_of_list l' retnames1 = Some retvals /\
+                                                          post (Semantics.filterio t') m' retvals)) ->
+        (forall l mc,
+            map.of_list_zip argnames2 argvals = Some l ->
+            exec e2 body2 t m l mc (fun t' m' l' mc' =>
+                                      (exists t'' F,
+                                          t' = t'' ++ t /\
+                                            forall fuel,
+                                              le F fuel ->
+                                              predicts (snext_fun e1 fuel next [] (argnames1, retnames1, body1)) (rev t'')) /\
+                                        exists retvals, map.getmany_of_list l' retnames2 = Some retvals /\
+                                                          post (Semantics.filterio t') m' retvals)).
   Proof.
     unfold call_spec, spilling_correct_for. intros * Sp IHexec * Ex lFL3 mc OL2.
     unfold spill_fun in Sp. fwd.
@@ -1500,7 +1517,7 @@ Section Spilling.
     }
     eapply map.sameLength_putmany_of_list in LA.
     destruct LA as (lFH4 & PA).
-    specialize Ex with (1 := PA).
+    specialize Ex with (1 := PA). Check arg_regs_alt.
     rewrite !arg_regs_alt by blia.
     assert (bytes_per_word = 4 \/ bytes_per_word = 8) as B48. {
       unfold bytes_per_word. destruct width_cases as [E' | E']; rewrite E'; cbv; auto.
@@ -1558,7 +1575,7 @@ Section Spilling.
       2: eapply Forall_le_max.
       cbv beta.
       subst maxvar'. clear. blia. }
-    intros tL4 mL4 lFL4 mcL4 R.
+    intros mL4 lFL4 mcL4 tL4 R.
     eapply exec.seq_cps.
     eapply exec.weaken. {
       eapply IHexec. 1: apply Ex. Print related. 2: exact R.
@@ -1574,7 +1591,7 @@ Section Spilling.
       }
       cbv beta. subst maxvar'. blia.
     }
-    cbv beta. intros tL5 mL5 lFL5 mcL5 (tH5 & mH5 & lFH5 & mcH5 & R5 & OC).
+    cbv beta. intros tL5 mL5 lFL5 mcL5 (tH5 & mH5 & lFH5 & mcH5 & t1'' & t2'' & R5 & OC & Et1'' & Et2'' & F' & CT).
     fwd.
     eapply set_reg_range_to_vars_correct.
     { eassumption. }
@@ -1608,7 +1625,7 @@ Section Spilling.
            | |- exists _, _ => eexists
            | |- _ /\ _ => split
            end.
-    4: { rewrite <- Rp0. eassumption. }
+    6: { rewrite <- Rp0. eassumption. }
     2: {
       unfold map.split. eauto.
     }
@@ -1623,14 +1640,20 @@ Section Spilling.
         intros w. rewrite LittleEndianList.length_le_split; trivial.
       }
       blia. }
-    { eassumption. }
-    Unshelve.
+    3: eassumption.
+    { subst mcL6. subst tL4. rewrite app_one_cons. repeat rewrite app_assoc. reflexivity. }
+    { intros fuel. intros Hfuel. cbv [snext_fun]. subst mcL6 tL4.
+      repeat (rewrite rev_app_distr || rewrite rev_involutive || cbn [rev List.app]).
+      econstructor; eauto.
+      apply predict_with_prefix_works.
+      eapply CT. Print snext_fun.
+      { Search t. Search (_ ++ _ = _ ++ _ -> _ = _). apply app_inv_tail in Et1''. subst.
+        simpl. Search predicts. instantiate (1 := nil). rewrite app_nil_r. assumption. }
+      { apply predict_with_prefix_works_end. constructor. reflexivity. }
+      { eapply Hfuel. } }
+     Unshelve.
     all: try assumption.
   Qed.
-
-  Lemma app_one_cons {A} (x : A) (l : list A) :
-    x :: l = [x] ++ l.
-  Proof. reflexivity. Qed.
   
   Lemma predict_with_prefix_ext prefix predict_rest1 predict_rest2 t :
     (forall t0, predict_rest1 t0 = predict_rest2 t0) ->
