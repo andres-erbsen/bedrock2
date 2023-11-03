@@ -42,7 +42,7 @@ Section Go.
 
   Context {M: Type -> Type}.
   Context {MM: Monad M}.
-  Context {RVM: RiscvProgram M word}.
+  Context {RVM: RiscvProgramWithLeakage}.
   Context {PRParams: PrimitivesParams M MetricRiscvMachine}.
   Context {PR: MetricPrimitives PRParams}.
 
@@ -432,7 +432,7 @@ Section Go.
       subset (footpr (program iset pc0 [inst] * Rexec)%sep) (of_list initialL.(getXAddrs)) ->
       (program iset pc0 [inst] * Rexec * R)%sep initialL.(getMem) ->
       not_InvalidInstruction inst ->
-      mcomp_sat (Bind (execute inst) (fun _ => endCycleNormal))
+      mcomp_sat (Bind (logInstr inst) (fun _ => Bind (execute inst) (fun _ => endCycleNormal)))
                 (updateMetrics (addMetricLoads 1) initialL) post ->
       mcomp_sat (run1 iset) initialL post.
   Proof.
@@ -463,7 +463,7 @@ Section Go.
       }
       rewrite Z.mod_small; try assumption; try apply encode_range.
       destruct H1.
-      + rewrite decode_encode; assumption.
+      + rewrite decode_encode; try assumption.
       + exfalso. unfold not_InvalidInstruction, valid_InvalidInstruction in *. simp. contradiction.
   Qed.
 
