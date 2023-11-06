@@ -433,12 +433,14 @@ Section Go.
     | _ => True
     end.
 
+  Check Decode.leakage_of_instr. Check getRegister. Search (word -> Z). Print word.ok.
+
   Lemma go_fetch_inst{initialL: RiscvMachineL} {inst pc0 R Rexec} (post: RiscvMachineL -> Prop):
       pc0 = initialL.(getPc) ->
       subset (footpr (program iset pc0 [inst] * Rexec)%sep) (of_list initialL.(getXAddrs)) ->
       (program iset pc0 [inst] * Rexec * R)%sep initialL.(getMem) ->
       not_InvalidInstruction inst ->
-      mcomp_sat (Bind (Decode.leakage_of_instr getRegister inst)
+      mcomp_sat (Bind (Decode.leakage_of_instr word.unsigned word.signed getRegister inst)
                    (fun e => Bind (leakEvent e)
                                (fun _ => (Bind (execute inst)
                                             (fun _ => endCycleNormal)))))
@@ -826,6 +828,7 @@ Ltac sidecondition :=
    Trick to test if right number of underscores:
           let c := open_constr:(go_associativity _ _ _ _ _ _) in
           let t := type of c in idtac t. *)
+Check go_leakEvent. Check go_getPC.
 
 Ltac simulate_step :=
   first (* lemmas packing multiple primitives need to go first: *)
@@ -846,7 +849,8 @@ Ltac simulate_step :=
         | eapply go_storeWord      ; [sidecondition..|]
         | eapply go_loadDouble     ; [sidecondition..|]
         | eapply go_storeDouble    ; [sidecondition..|]
-        *)
+         *)
+        | refine (go_leakEvent _ _ _ _ _);           [sidecondition..|]
         | refine (go_getPC _ _ _ _);               [sidecondition..|]
         | refine (go_setPC _ _ _ _ _);             [sidecondition..|]
         | refine (go_endCycleNormal _ _ _);        [sidecondition..|]

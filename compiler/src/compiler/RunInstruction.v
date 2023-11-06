@@ -104,7 +104,7 @@ Section Run.
 
   Context {M: Type -> Type}.
   Context {MM: Monad M}.
-  Context {RVM: RiscvProgram M word}.
+  Context {RVM: RiscvProgramWithLeakage}.
   Context {PRParams: PrimitivesParams M MetricRiscvMachine}.
   Context {PR: MetricPrimitives PRParams}.
 
@@ -118,7 +118,7 @@ Section Run.
           | eapply go_loadDouble_sep ; simpl; [sidecondition..|]
           | eapply go_storeDouble_sep; simpl; [sidecondition..|intros]
           | simpl_modu4_0
-          | simulate_step ].
+          | simulate_step ]. Print simulate_step.
 
   Ltac simulate' := repeat simulate'_step.
 
@@ -148,6 +148,7 @@ Section Run.
         finalL.(getPc) = word.add dest (word.of_Z oimm12) /\
         finalL.(getNextPc) = word.add finalL.(getPc) (word.of_Z 4) /\
         finalL.(getMetrics) = addMetricInstructions 1 (addMetricJumps 1 (addMetricLoads 1 initialL.(getMetrics))) /\
+        finalL.(getTrace) = ILeakage Jalr_leakage :: initialL.(getTrace) /\
         valid_machine finalL).
 
   Definition run_Jal_spec :=
@@ -167,6 +168,7 @@ Section Run.
         finalL.(getPc) = word.add initialL.(getPc) (word.of_Z jimm20) /\
         finalL.(getNextPc) = word.add finalL.(getPc) (word.of_Z 4) /\
         finalL.(getMetrics) = addMetricInstructions 1 (addMetricJumps 1 (addMetricLoads 1 initialL.(getMetrics))) /\
+        finalL.(getTrace) = ILeakage Jal_leakage :: initialL.(getTrace) /\
         valid_machine finalL).
 
   Definition run_Jal0_spec :=
@@ -184,8 +186,13 @@ Section Run.
         finalL.(getPc) = word.add initialL.(getPc) (word.of_Z jimm20) /\
         finalL.(getNextPc) = word.add finalL.(getPc) (word.of_Z 4) /\
         finalL.(getMetrics) = addMetricInstructions 1 (addMetricJumps 1 (addMetricLoads 1 initialL.(getMetrics))) /\
-        valid_machine finalL).
+        finalL.(getTrace) = ILeakage Jal_leakage :: initialL.(getTrace) /\
+          valid_machine finalL).
 
+  Print leakage_of_instr_I. Locate "[[ _ ]]".
+  Print getRegister.
+  Print concrete_leakage_of_instr_Z.
+  
   Definition run_ImmReg_spec(Op: Z -> Z -> Z -> Instruction)
                             (f: word -> word -> word): Prop :=
     forall (rd rs: Z) rs_val imm (initialL: RiscvMachineL) (Exec R Rexec: mem -> Prop),
@@ -205,6 +212,7 @@ Section Run.
         finalL.(getPc) = initialL.(getNextPc) /\
         finalL.(getNextPc) = word.add finalL.(getPc) (word.of_Z 4) /\
         finalL.(getMetrics) = addMetricInstructions 1 (addMetricLoads 1 initialL.(getMetrics)) /\
+        finalL.(getTrace) = (concrete_leakage_of_instr_Z (fun n => if n =? rs then word.unsigned rs_val else 0) (Op rd rs imm)) :: initialL.(getTrace) /\
         valid_machine finalL).
 
   Definition run_Load_spec(n: nat)(L: Z -> Z -> Z -> Instruction)
@@ -230,6 +238,7 @@ Section Run.
         finalL.(getPc) = initialL.(getNextPc) /\
         finalL.(getNextPc) = word.add finalL.(getPc) (word.of_Z 4) /\
         finalL.(getMetrics) = addMetricInstructions 1 (addMetricLoads 2 initialL.(getMetrics)) /\
+        finalL.(getTrace) = concrete_leakage_of_instr _ word.unsigned word.signed (fun n => if n =? rs then base else word.of_Z 0) (L rd rs ofs) :: initialL.(getTrace) /\
         valid_machine finalL).
 
   Definition run_Store_spec(n: nat)(S: Z -> Z -> Z -> Instruction): Prop :=
@@ -255,6 +264,7 @@ Section Run.
         finalL.(getPc) = initialL.(getNextPc) /\
         finalL.(getNextPc) = word.add finalL.(getPc) (word.of_Z 4) /\
         finalL.(getMetrics) = addMetricInstructions 1 (addMetricStores 1 (addMetricLoads 1 initialL.(getMetrics))) /\
+        finalL.(getTrace) = concrete_leakage_of_instr _ word.unsigned word.signed (fun n => if n =? rs1 then base else if n =? rs2 then v_new else word.of_Z 0) (S rs1 rs2 ofs) :: initialL.(getTrace)/\
         valid_machine finalL).
 
   Ltac inline_iff1 :=
@@ -274,6 +284,7 @@ Section Run.
            | |- _ => solve [auto]
            | |- _ => ecancel_assumption
            | |- _ => solve_MetricLog
+           | |- _ => rewrite Z.eqb_refl
            end.
 
   Ltac t := repeat intro; inline_iff1; get_run1_valid_for_free; t0.
