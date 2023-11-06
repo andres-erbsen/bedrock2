@@ -235,6 +235,12 @@ Section Go.
                          (withMem m' (updateMetrics (addMetricStores 1) initialL))) post ->
         mcomp_sat (Bind (Machine.storeDouble kind addr v) f) initialL post.
   Proof. t spec_storeDouble. Qed.
+  Check (withLeakageEvent _ _).
+
+  Lemma go_leakEvent : forall (initialL: RiscvMachineL) (f: unit -> M unit) (e : Decode.LeakageEvent) post,
+        mcomp_sat (f tt) (withLeakageEvent e initialL) post ->
+        mcomp_sat (Bind (leakEvent e) f) initialL post.
+  Proof. t spec_leakEvent. Qed.
 
   Lemma go_getPC: forall (initialL: RiscvMachineL) (f: word -> M unit) post,
         mcomp_sat (f initialL.(getPc)) initialL post ->
@@ -432,7 +438,10 @@ Section Go.
       subset (footpr (program iset pc0 [inst] * Rexec)%sep) (of_list initialL.(getXAddrs)) ->
       (program iset pc0 [inst] * Rexec * R)%sep initialL.(getMem) ->
       not_InvalidInstruction inst ->
-      mcomp_sat (Bind (logInstr inst) (fun _ => Bind (execute inst) (fun _ => endCycleNormal)))
+      mcomp_sat (Bind (Decode.leakage_of_instr getRegister inst)
+                   (fun e => Bind (leakEvent e)
+                               (fun _ => (Bind (execute inst)
+                                            (fun _ => endCycleNormal)))))
                 (updateMetrics (addMetricLoads 1) initialL) post ->
       mcomp_sat (run1 iset) initialL post.
   Proof.
