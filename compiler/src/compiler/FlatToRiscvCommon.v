@@ -83,7 +83,7 @@ Section WithParameters.
   Context {env: map.map String.string (list Z * list Z * stmt Z)}.
   Context {M: Type -> Type}.
   Context {MM: Monad M}.
-  Context {RVM: RiscvProgram M word}.
+  Context {RVM: RiscvProgramWithLeakage}.
   Context {PRParams: PrimitivesParams M MetricRiscvMachine}.
   Context {ext_spec: Semantics.ExtSpec}.
 
@@ -311,7 +311,7 @@ Section WithParameters.
     iff1 g.(allx) (xframe *
                    program iset (word.add program_base (word.of_Z pos)) insts *
                    functions program_base e_pos e_impl)%sep ->
-    goodMachine initialTrace initialMH initialRegsH g initialL ->
+    goodMachine (Semantics.filterio initialTrace) initialMH initialRegsH g initialL ->
     runsTo initialL (fun finalL => exists finalTrace finalMH finalRegsH finalMetricsH,
          postH finalTrace finalMH finalRegsH finalMetricsH /\
          finalL.(getPc) = word.add initialL.(getPc)
@@ -321,7 +321,7 @@ Section WithParameters.
                  finalL.(getRegs) /\
          (finalL.(getMetrics) - initialL.(getMetrics) <=
           lowerMetrics (finalMetricsH - initialMetricsH))%metricsL /\
-         goodMachine finalTrace finalMH finalRegsH g finalL).
+         goodMachine (Semantics.filterio finalTrace) finalMH finalRegsH g finalL).
 
 End WithParameters.
 
@@ -357,7 +357,7 @@ Section FlatToRiscv1.
   Context {env: map.map String.string (list Z * list Z * stmt Z)}.
   Context {M: Type -> Type}.
   Context {MM: Monad M}.
-  Context {RVM: RiscvProgram M word}.
+  Context {RVM: RiscvProgramWithLeakage}.
   Context {PRParams: PrimitivesParams M MetricRiscvMachine}.
   Context {ext_spec: Semantics.ExtSpec}.
   Context {word_riscv_ok: word.riscv_ok word}.

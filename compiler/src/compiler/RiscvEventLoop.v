@@ -44,7 +44,7 @@ Section EventLoop.
 
   Context {M: Type -> Type}.
   Context {MM: Monad M}.
-  Context {RVM: RiscvProgram M word}.
+  Context {RVM: RiscvProgramWithLeakage}.
   Context {PRParams: PrimitivesParams M MetricRiscvMachine}.
   Context {PR: MetricPrimitives PRParams}.
 
@@ -71,7 +71,8 @@ Section EventLoop.
       goodReadyState true state ->
       let state' := (withPc pc_start
                     (withNextPc (word.add pc_start (word.of_Z 4))
-                    (withMetrics newMetrics state))) in
+                    (withMetrics newMetrics
+                    (withLeakageEvent (ILeakage Jal_leakage) state)))) in
       valid_machine state' ->
       goodReadyState false state'.
 
@@ -135,7 +136,7 @@ Section EventLoop.
         | |- ?G => let T := type of H in replace G with T; [exact H|]
         end.
         repeat f_equal.
-        all: solve_word_eq word_ok.
+        all: try solve_word_eq word_ok.
       + simpl.
         match goal with
         | H: valid_machine ?m1 |- valid_machine ?m2 => replace m2 with m1; [exact H|]
