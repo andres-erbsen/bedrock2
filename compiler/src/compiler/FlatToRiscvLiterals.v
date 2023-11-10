@@ -21,7 +21,7 @@ Section FlatToRiscvLiterals.
   Context {mem: map.map word byte}.
   Context {M: Type -> Type}.
   Context {MM: Monads.Monad M}.
-  Context {RVM: Machine.RiscvProgram M word}.
+  Context {RVM: Machine.RiscvProgramWithLeakage}.
   Context {PRParams: Primitives.PrimitivesParams M MetricRiscvMachine}.
   Context {ext_spec: Semantics.ExtSpec}.
   Context {word_riscv_ok: RiscvWordProperties.word.riscv_ok word}.
@@ -86,7 +86,8 @@ Section FlatToRiscvLiterals.
       runsTo (withRegs (map.put initialL.(getRegs) x (word.of_Z v))
              (withPc     (add initialL.(getPc) d)
              (withNextPc (add initialL.(getNextPc) d)
-             (withMetrics (updateMetricsForLiteral v initialL.(getMetrics)) initialL))))
+             (withLeakageEvents (leak_lit iset v)
+             (withMetrics (updateMetricsForLiteral v initialL.(getMetrics)) initialL)))))
              post ->
       runsTo initialL post.
   Proof.
@@ -94,17 +95,17 @@ Section FlatToRiscvLiterals.
     simpl in *.
     destruct_RiscvMachine initialL.
     subst d insts initialL_npc.
-    unfold compile_lit, updateMetricsForLiteral in *.
+    unfold compile_lit, leak_lit, updateMetricsForLiteral in *.
     (* TODO once we're on 8.16, it should be possible to replace "F, P, N" by "*"
        https://github.com/coq/coq/pull/15426 *)
     rewrite bitwidth_matches in F, P, N.
     destruct_one_match_hyp; [|destruct_one_match_hyp].
-    - unfold compile_lit_12bit in *.
+    - unfold compile_lit_12bit, leak_lit_12bit in *.
       run1det.
       simpl_word_exprs word_ok.
       match_apply_runsTo.
       erewrite signExtend_nop; eauto; try blia.
-    - unfold compile_lit_32bit in *.
+    - unfold compile_lit_32bit, leak_lit_32bit in *.
       simpl in P.
       run1det. run1det.
       match_apply_runsTo.
@@ -144,7 +145,7 @@ Section FlatToRiscvLiterals.
           }
       + solve_word_eq word_ok.
       + solve_word_eq word_ok.
-    - unfold compile_lit_64bit, compile_lit_32bit in *.
+    - unfold compile_lit_64bit, compile_lit_32bit, leak_lit_64bit, leak_lit_32bit in *.
       remember (signExtend 12 (signExtend 32 (bitSlice v 32 64))) as mid.
       remember (signExtend 32 (signExtend 32 (bitSlice v 32 64))) as hi.
       Simp.protect_equalities.
@@ -201,7 +202,8 @@ Section FlatToRiscvLiterals.
       runsTo (withRegs (map.put initialL.(getRegs) x (word.of_Z v))
              (withPc     (add initialL.(getPc) d)
              (withNextPc (add initialL.(getNextPc) d)
-             (withMetrics (updateMetricsForLiteral v initialL.(getMetrics)) initialL))))
+             (withLeakageEvents (leak_lit iset v)
+             (withMetrics (updateMetricsForLiteral v initialL.(getMetrics)) initialL)))))
              post ->
       runsTo initialL post.
   Proof. (* by case distinction on literal size and symbolic execution through the instructions
