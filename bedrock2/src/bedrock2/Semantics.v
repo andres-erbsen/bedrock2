@@ -262,6 +262,29 @@ Section WithIOEvent.
     generates a t ->
     predicts (predictor a) t.
   Proof. intros H. induction H; intros; econstructor; simpl; eauto. Qed.
+
+  Fixpoint predict_with_prefix (prefix : trace) (predict_rest : trace -> option qevent) (t : trace) : option qevent :=
+    match prefix, t with
+    | _ :: prefix', _ :: t' => predict_with_prefix prefix' predict_rest t'
+    | e :: start', nil => Some (q e)
+    | nil, _ => predict_rest t
+    end.
+
+  Lemma predict_with_prefix_works prefix predict_rest rest :
+    predicts predict_rest rest ->
+    predicts (predict_with_prefix prefix predict_rest) (prefix ++ rest).
+  Proof.
+    intros H. induction prefix.
+    - simpl. apply H.
+    - simpl. econstructor; auto.
+  Qed.
+
+  Lemma predict_with_prefix_works_end prefix predict_rest :
+    predicts predict_rest [] ->
+    predicts (predict_with_prefix prefix predict_rest) prefix.
+  Proof.
+    intros H. eapply predict_with_prefix_works in H. rewrite app_nil_r in H. eassumption.
+  Qed.
   
   Definition filterio (t : trace) : io_trace :=
     flat_map (fun e =>

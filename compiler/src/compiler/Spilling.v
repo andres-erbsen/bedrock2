@@ -198,29 +198,9 @@ Section Spilling.
   Notation qend := Semantics.qend.
 
   Notation predicts := Semantics.predicts.
-
-  Fixpoint predict_with_prefix (prefix : trace) (predict_rest : trace -> option qevent) (t : trace) : option qevent :=
-    match prefix, t with
-    | _ :: prefix', _ :: t' => predict_with_prefix prefix' predict_rest t'
-    | e :: start', nil => Some (q e)
-    | nil, _ => predict_rest t
-    end.
-
-  Lemma predict_with_prefix_works prefix predict_rest rest :
-    predicts predict_rest rest ->
-    predicts (predict_with_prefix prefix predict_rest) (prefix ++ rest).
-  Proof.
-    intros H. induction prefix.
-    - simpl. apply H.
-    - simpl. econstructor; auto.
-  Qed.
-
-  Lemma predict_with_prefix_works_end prefix predict_rest :
-    predicts predict_rest [] ->
-    predicts (predict_with_prefix prefix predict_rest) prefix.
-  Proof.
-    intros H. eapply predict_with_prefix_works in H. rewrite app_nil_r in H. eassumption.
-  Qed.
+  Notation predict_with_prefix := Semantics.predict_with_prefix.
+  Notation predict_with_prefix_works := Semantics.predict_with_prefix_works.
+  Notation predict_with_prefix_works_end := Semantics.predict_with_prefix_works_end.
   
   Fixpoint snext_stmt' {env: map.map String.string (list Z * list Z * stmt)}
     (e: env) (fuel : nat) (next : trace -> option qevent) (t_so_far : trace) (fpval: word) (s : stmt) (st_so_far : trace)

@@ -273,9 +273,7 @@ Notation "'ctfunc!' name a0 .. an '|' b0 .. bn '/' g0 .. gn '|' h0 .. hn '~>' r0
                                                      WeakestPrecondition.call
                                                        functions name tr mem (cons a0 .. (cons an (cons b0 .. (cons bn nil) ..)) ..)
                                                        (fun tr' mem' rets =>
-                                                          (exists input,
-                                                              tr' = f input /\ io_spec tr' input)
-                       i                                   (exists tr'', generates ((appl a0 .. (appl an (appl g0 .. (appl gn f) ..)) ..)) (List.rev tr'') /\
+                                                          (exists tr'', generates ((appl a0 .. (appl an (appl g0 .. (appl gn f) ..)) ..)) (List.rev tr'') /\
                                                                           tr' = (tr'' ++ tr)%list) /\
                                                             (exists r0,
                                                                 .. (exists rn,
