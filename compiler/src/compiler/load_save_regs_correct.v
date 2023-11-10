@@ -19,7 +19,7 @@ Section Proofs.
   Context {mem: map.map word byte}.
   Context {M: Type -> Type}.
   Context {MM: Monads.Monad M}.
-  Context {RVM: Machine.RiscvProgram M word}.
+  Context {RVM: Machine.RiscvProgramWithLeakage}.
   Context {PRParams: PrimitivesParams M MetricRiscvMachine}.
   Context {ext_spec: Semantics.ExtSpec}.
   Context {word_riscv_ok: RiscvWordProperties.word.riscv_ok word}.
@@ -58,6 +58,7 @@ Section Proofs.
                                                    (word.of_Z (Z.of_nat (List.length vars)))) /\
           final.(getNextPc) = word.add final.(getPc) (word.of_Z 4) /\
           final.(getLog) = initial.(getLog) /\
+          final.(getTrace) = leak_save_regs iset (word.unsigned p_sp) vars offset ++ initial.(getTrace) /\
           final.(getMetrics) =
               Platform.MetricLogging.addMetricInstructions (Z.of_nat (List.length vars))
                 (Platform.MetricLogging.addMetricStores (Z.of_nat (List.length vars))
@@ -74,8 +75,8 @@ Section Proofs.
       destruct oldvalues as [|oldvalue oldvalues]; simpl in *; [discriminate|].
       replace (Memory.bytes_per_word (Decode.bitwidth iset)) with bytes_per_word in *. 2: {
         rewrite bitwidth_matches. reflexivity.
-      }
-      eapply runsToNonDet.runsToStep. {
+      } Check runsToNonDet.runsToStep.
+      eapply runsToNonDet.runsToStep. { Check run_store_word.
         eapply run_store_word.
         7: eassumption.
         7: {
@@ -99,7 +100,8 @@ Section Proofs.
           etransitivity; [eassumption|].
           replace (List.length vars) with (List.length oldvalues) by blia.
           solve_word_eq word_ok.
-        - rewrite H0p7. MetricsToRiscv.solve_MetricLog. 
+        - subst getTrace0. rewrite <- app_assoc. reflexivity.
+        - rewrite H0p8. MetricsToRiscv.solve_MetricLog. 
       }
       all: try eassumption.
       + simpl in *. etransitivity. 1: eassumption. ecancel.

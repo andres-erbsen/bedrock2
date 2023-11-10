@@ -498,7 +498,7 @@ Section FlatToRiscv1.
       + refine (run_Lw_unsigned iset E).
       + refine (run_Ld_unsigned iset E).
   Qed.
-
+ Print run_Store_spec.
   Lemma run_compile_store: forall sz: Syntax.access_size,
       run_Store_spec iset (@Memory.bytes_per width sz) (compile_store iset sz).
   Proof using word_ok mem_ok PR BWM.
@@ -575,6 +575,7 @@ Section FlatToRiscv1.
            (Exec * ptsto_word addr v_new * Rdata)%sep (getMem finalL) /\
            getPc finalL = getNextPc initialL /\
            getNextPc finalL = word.add (getPc finalL) (word.of_Z 4) /\
+           getTrace finalL = leak_store iset Syntax.access_size.word (word.unsigned base + ofs) :: getTrace initialL /\
            getMetrics finalL = addMetricInstructions 1 (addMetricStores 1 (addMetricLoads 1 (getMetrics initialL))) /\
            valid_machine finalL).
   Proof using word_ok mem_ok PR BWM.
@@ -584,6 +585,10 @@ Section FlatToRiscv1.
     - eapply (run_compile_store Syntax.access_size.word); cycle -3; try eassumption.
       instantiate (2:=ltac:(destruct pf)); destruct pf; eassumption.
     - cbv beta. intros. simp. repeat split; try assumption.
+      2: { rewrite H9p7. f_equal. simpl. cbv [concrete_leakage_of_instr compile_store].
+           destruct (bitwidth iset =? 32).
+           - simpl. rewrite Z.eqb_refl. simpl. cbv [trivialBind trivialReturn]. reflexivity.
+           - simpl. rewrite Z.eqb_refl. simpl. cbv [trivialBind trivialReturn]. reflexivity. }
       unfold scalar, truncated_word, truncated_scalar, littleendian, ptsto_bytes in *.
       rewrite HList.tuple.to_list_of_list.
       rewrite LittleEndian.to_list_split in *.

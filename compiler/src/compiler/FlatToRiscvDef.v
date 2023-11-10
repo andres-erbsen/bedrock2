@@ -352,8 +352,8 @@ Section FlatToRiscv1.
   Fixpoint leak_save_regs(sp_val: Z)(regs: list Z)(offset: Z): list LeakageEvent :=
     match regs with
     | nil => nil
-    | r :: regs' => leak_store access_size.word (sp_val + offset)
-                      :: leak_save_regs sp_val regs' (offset + bytes_per_word)
+    | r :: regs' => leak_save_regs sp_val regs' (offset + bytes_per_word) ++
+                      [leak_store access_size.word (sp_val + offset)]
     end.
 
   Fixpoint load_regs(regs: list Z)(offset: Z): list Instruction :=
@@ -366,8 +366,8 @@ Section FlatToRiscv1.
   Fixpoint leak_load_regs(sp_val: Z)(regs: list Z)(offset: Z): list LeakageEvent :=
     match regs with
     | nil => nil
-    | r :: regs' => leak_load access_size.word (sp_val + offset)
-                      :: leak_load_regs sp_val regs' (offset + bytes_per_word)
+    | r :: regs' => leak_load_regs sp_val regs' (offset + bytes_per_word) ++
+                      [leak_load access_size.word (sp_val + offset)]
     end.
 
   (* number of words of stack allocation space needed within current frame *)
