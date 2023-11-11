@@ -42,6 +42,10 @@ Local Arguments Z.modulo : simpl never.
 Local Arguments Z.pow: simpl never.
 Local Arguments Z.sub: simpl never.
 
+Lemma app_one_cons {A} (x : A) (l : list A) :
+    x :: l = [x] ++ l.
+  Proof. reflexivity. Qed.
+
 Section Proofs.
   Context {iset: Decode.InstructionSet}.
   Context {pos_map: map.map String.string Z}.
@@ -52,7 +56,7 @@ Section Proofs.
   Context {env: map.map String.string (list Z * list Z * FlatImp.stmt Z)}.
   Context {M: Type -> Type}.
   Context {MM: Monads.Monad M}.
-  Context {RVM: Machine.RiscvProgram M word}.
+  Context {RVM: Machine.RiscvProgramWithLeakage}.
   Context {PRParams: PrimitivesParams M MetricRiscvMachine}.
   Context {ext_spec: Semantics.ExtSpec}.
   Context {word_riscv_ok: RiscvWordProperties.word.riscv_ok word}.
@@ -63,6 +67,7 @@ Section Proofs.
   Context {PR: MetricPrimitives.MetricPrimitives PRParams}.
   Context {BWM: bitwidth_iset width iset}.
   Context (compile_ext_call: pos_map -> Z -> Z -> stmt Z -> list Instruction).
+  Context (leak_ext_call: list LeakageEvent).
 
   Add Ring wring : (word.ring_theory (word := word))
       (preprocess [autorewrite with rew_word_morphism],
@@ -416,14 +421,53 @@ Section Proofs.
         simpl in *; Simp.simp; repeat (simulate'; simpl_bools; simpl); try intuition congruence.
   Qed.
 
+  Search LeakageEvent. Print qLeakageEvent.
 
+  Inductive predictsLE : (list LeakageEvent -> option qLeakageEvent) -> list LeakageEvent -> Prop :=
+  | predictsLE_cons :
+    forall f g e t,
+      f [] = Some (quotLE e) ->
+      (forall t', f (e :: t') = g t') ->
+      predictsLE g t ->
+      predictsLE f (e :: t)
+  | predictsLE_nil :
+    forall f,
+      f [] = Some qendLE ->
+      predictsLE f [].
+
+  Notation predicts := Semantics.predicts.
+  Check map.put. Check SCall. Print rnext_fun'. Print rnext_stmt.
+
+  Lemma predictLE_with_prefix_works prefix predict_rest rest :
+    predictsLE predict_rest rest ->
+    predictsLE (predictLE_with_prefix prefix predict_rest) (prefix ++ rest).
+  Proof.
+    intros H. induction prefix.
+    - simpl. apply H.
+    - simpl. econstructor; auto.
+  Qed.
+
+  Lemma predictLE_with_prefix_works_eq prefix1 prefix2 predict_rest rest :
+    prefix1 = prefix2 ->
+    predictsLE predict_rest rest ->
+    predictsLE (predictLE_with_prefix prefix1 predict_rest) (prefix2 ++ rest).
+  Proof.
+    intros H. subst. apply predictLE_with_prefix_works.
+  Qed.
+  
+  Lemma predictLE_with_prefix_works_end prefix predict_rest :
+    predictsLE predict_rest [] ->
+    predictsLE (predictLE_with_prefix prefix predict_rest) prefix.
+  Proof.
+    intros H. eapply predictLE_with_prefix_works in H. rewrite app_nil_r in H. eassumption.
+  Qed.
 
   Lemma compile_function_body_correct: forall (e_impl_full : env) m l mc (argvs : list word)
     (st0 : locals) (post outcome : Semantics.trace -> mem -> locals -> MetricLog -> Prop)
     (argnames retnames : list Z) (body : stmt Z) (program_base : word)
     (pos : Z) (ret_addr : word) (mach : RiscvMachineL) (e_impl : env)
     (e_pos : pos_map) (binds_count : nat) (insts : list Instruction)
-    (xframe : mem -> Prop) (t : list LogItem) (g : GhostConsts)
+    (xframe : mem -> Prop) (t : Semantics.trace) (g : GhostConsts)
     (IH: forall (g0 : GhostConsts) (insts0 : list Instruction) (xframe0 : mem -> Prop)
                 (initialL : RiscvMachineL) (pos0 : Z),
         fits_stack (rem_framewords g0) (rem_stackwords g0) e_impl body ->
@@ -434,7 +478,7 @@ Section Proofs.
         iff1 (allx g0)
              ((xframe0 * program iset (program_base + !pos0) insts0)%sep *
               FlatToRiscvCommon.functions compile_ext_call program_base e_pos e_impl) ->
-        goodMachine t m st0 g0 initialL ->
+        goodMachine (Semantics.filterio t) m st0 g0 initialL ->
         runsTo initialL (fun finalL =>
           exists finalTrace finalMH finalRegsH finalMetricsH,
             outcome finalTrace finalMH finalRegsH finalMetricsH /\
@@ -443,7 +487,16 @@ Section Proofs.
                    (union (of_list (modVars_as_list Z.eqb body)) (singleton_set RegisterNames.ra))
                    (getRegs finalL) /\
             (getMetrics finalL - getMetrics initialL <= lowerMetrics (finalMetricsH - mc))%metricsL /\
-            goodMachine finalTrace finalMH finalRegsH g0 finalL))
+              goodMachine (Semantics.filterio finalTrace) finalMH finalRegsH g0 finalL /\
+              exists t' rt',
+                finalTrace = t' ++ t /\
+                  getTrace finalL = rt' ++ getTrace initialL /\
+                  exists F,
+                  forall next t0 t'' rt'' fuel f,
+                    predicts next (t0 ++ rev t' ++ t'') ->
+                    predictsLE (fun t => f (t0 ++ rev t') t) rt'' ->
+                    Nat.le F fuel ->
+                    predictsLE (fun t => rnext_stmt iset leak_ext_call e_impl_full fuel next t0 (word.unsigned g0.(p_sp)) (bytes_per_word * rem_framewords g0) body t f) (rev rt' ++ rt'')))
     (HOutcome: forall (t' : Semantics.trace) (m' : mem) (mc' : MetricLog) (st1 : locals),
         outcome t' m' st1 mc' ->
         exists (retvs : list word) (l' : locals),
@@ -471,7 +524,7 @@ Section Proofs.
       iff1 (allx g)
            ((xframe * program iset (program_base + !pos) insts)%sep *
             FlatToRiscvCommon.functions compile_ext_call program_base e_pos e_impl) ->
-      goodMachine t m l g mach ->
+      goodMachine (Semantics.filterio t) m l g mach ->
       runsToNonDet.runsTo (mcomp_sat (Run.run1 iset)) mach (fun finalL =>
         exists finalTrace finalMH finalRegsH finalMetricsH,
           post finalTrace finalMH finalRegsH finalMetricsH /\
@@ -481,12 +534,22 @@ Section Proofs.
               (of_list
                  (list_union Z.eqb (List.firstn binds_count (reg_class.all reg_class.arg)) []))
               (singleton_set RegisterNames.ra)) (getRegs finalL) /\
-          (getMetrics finalL - Platform.MetricLogging.addMetricInstructions 100
+            (getMetrics finalL - Platform.MetricLogging.addMetricInstructions 100
                                  (Platform.MetricLogging.addMetricJumps 100
                                     (Platform.MetricLogging.addMetricLoads 100
                                        (Platform.MetricLogging.addMetricStores 100 (getMetrics mach)))) <=
-             lowerMetrics (finalMetricsH - mc))%metricsL /\
-          goodMachine finalTrace finalMH finalRegsH g finalL).
+               lowerMetrics (finalMetricsH - mc))%metricsL /\
+            goodMachine (Semantics.filterio finalTrace) finalMH finalRegsH g finalL /\
+            exists t' rt',
+              finalTrace = t' ++ t /\
+                getTrace finalL = rt' ++ getTrace mach /\
+                exists F,
+                forall next t0 t'' rt'' fuel f,
+                  predicts next (t0 ++ rev t' ++ t'') ->
+                  predictsLE (fun t => f (t0 ++ rev t') t) rt'' ->
+                  Nat.le F fuel ->
+                  predictsLE (fun t => rnext_fun iset leak_ext_call e_impl_full fuel next t0 (word.unsigned g.(p_sp)) argnames retnames body t f) (rev rt' ++ rt'')
+        ).
   Proof.
     intros * IHexec OC BC OL Exb GetMany Ext GE FS C V Mo Mo' Gra RaM GPC A GM.
 
@@ -559,20 +622,18 @@ Section Proofs.
            | _ /\ _ => destruct TheSplit as [? TheSplit]
            end.
     subst stack_trash.
-
     (* decrease sp *)
     eapply runsToStep. {
       eapply run_Addi with (rd := RegisterNames.sp) (rs := RegisterNames.sp);
         simpl in *;
         try solve [safe_sidecond | simpl; solve_divisibleBy4 ].
     }
-
     simpl_MetricRiscvMachine_get_set.
     clear_old_sep_hyps.
     intros. fwd.
     repeat match goal with
            | m: _ |- _ => destruct_RiscvMachine m
-           end.
+           end. Check run_Addi. Print run_ImmReg_spec. Check getTrace0.
     subst.
 
     (* save ra on stack *)
@@ -587,12 +648,12 @@ Section Proofs.
 
     simpl_MetricRiscvMachine_get_set.
     clear_old_sep_hyps.
-    intros. fwd.
+    intros. fwd. Check getTrace0.
     repeat match goal with
            | m: _ |- _ => destruct_RiscvMachine m
            end.
     subst.
-
+ Check getTrace0.
     (* save vars modified by callee onto stack *)
     match goal with
     | |- context [ {| getRegs := ?l |} ] =>
@@ -647,7 +708,7 @@ Section Proofs.
     | _ _ ?x _ _ => ring_simplify x in FS
     end.
 
-    (* execute function body *)
+    (* execute function body *) Check getTrace0.
     eapply runsTo_trans. {
       unfold good_e_impl, valid_FlatImp_fun in *. fwd.
       set (argnames := List.firstn arg_count (reg_class.all reg_class.arg)).
@@ -728,16 +789,16 @@ Section Proofs.
         - blia.
         - wcancel_assumption.
       }
-    }
+    } Check getTrace0.
 
     unfold goodMachine.
     simpl.
     simpl_MetricRiscvMachine_get_set.
     clear_old_sep_hyps.
-    intros. fwd.
+    intros. fwd. (* H2p10p1 appears HERE - where does it go?*) Check H2p10p1. 
     repeat match goal with
            | m: _ |- _ => destruct_RiscvMachine m
-           end.
+           end. Check H2p10p1. Search getTrace.
     subst.
     match goal with
     | H: outcome _ _ _ _ |- _ => rename H into HO
@@ -747,9 +808,9 @@ Section Proofs.
       specialize H with (1 := HO);
       move H at bottom;
       destruct H as (retvs & finalRegsH' & ? & ? & ?)
-    end.
+    end. Check F.
 
-    (* load back the modified vars *)
+    (* load back the modified vars *) Check getTrace0.
     eapply runsTo_trans. {
       eapply load_regs_correct with (values := newvalues);
         simpl; cycle 1.
@@ -780,19 +841,19 @@ Section Proofs.
     intros. fwd.
     repeat match goal with
            | m: _ |- _ => destruct_RiscvMachine m
-           end.
-    subst.
+           end. Check getTrace.
+    subst. Check load_regs_correct. Check getTrace.
 
-    (* load back the return address *)
-    eapply runsToStep. {
+    (* load back the return address *) Check runsToStep. Check getTrace0.
+    eapply runsToStep. { Check run_load_word.
       eapply run_load_word; cycle 2; simpl_MetricRiscvMachine_get_set.
       - simpl. solve [sidecondition].
       - simpl.
-        assert (forall x, In x (modVars_as_list Z.eqb body) -> valid_FlatImp_var x) as F. {
+        assert (forall x, In x (modVars_as_list Z.eqb body) -> valid_FlatImp_var x) as FF. {
           eapply Forall_forall.
           apply modVars_as_list_valid_FlatImp_var. assumption.
         }
-        revert F.
+        revert FF.
         subst FL.
         repeat match goal with
                | H: ?T |- _ => lazymatch T with
@@ -819,11 +880,11 @@ Section Proofs.
       - eassumption.
       - assumption.
     }
-
+    
     simpl.
     simpl_MetricRiscvMachine_get_set.
     clear_old_sep_hyps.
-    intros. fwd.
+    intros. fwd. (* here, getTrace1 comes from mid. *)
     repeat match goal with
            | m: _ |- _ => destruct_RiscvMachine m
            end.
@@ -846,8 +907,8 @@ Section Proofs.
       clear. blia.
     }
     destruct RC as (ret_count & RC & ? & ?). subst retnames binds_count.
-
-    (* increase sp *)
+    
+    (* increase sp *) Check getTrace.
     eapply runsToStep. {
       eapply (run_Addi iset RegisterNames.sp RegisterNames.sp);
         simpl_MetricRiscvMachine_get_set;
@@ -888,7 +949,7 @@ Section Proofs.
     repeat match goal with
            | m: _ |- _ => destruct_RiscvMachine m
            end.
-    subst.
+    subst. Check getTrace0.
 
     (* jump back to caller *)
     eapply runsToStep. {
@@ -917,7 +978,7 @@ Section Proofs.
     do 4 eexists.
     match goal with
     | |- _ /\ _ /\ ?ODGoal /\ _ => assert ODGoal as OD
-    end.
+    end. (* getTrace1 exists here *)
     {
       apply_in_hyps (@map.only_differ_putmany _ _ _ locals_ok _ _).
       (* TODO these should be in map_solver or another automated step *)
@@ -1042,7 +1103,7 @@ Section Proofs.
         }
     }
 
-    ssplit.
+    ssplit. (* getTrace1 exists here. *) Check getTrace.
     + eassumption.
     + solve_word_eq word_ok.
     + exact OD.
@@ -1330,8 +1391,21 @@ Section Proofs.
       wcancel_assumption.
     + reflexivity.
     + assumption.
+    + simpl. cbv [trivialBind trivialReturn]. eexists. eexists. split; [reflexivity|]. split.
+      { do 3 (instantiate (1 := _ :: _); simpl; f_equal).
+        do 3 (instantiate (1 := _ ++ _); rewrite <- (app_assoc _ _ getTrace0); f_equal).
+        do 1 (instantiate (1 := _ :: _); simpl; f_equal).
+        do 1 (instantiate (1 := _ :: _); simpl; f_equal).
+        instantiate (1 := nil). reflexivity. }
+      exists F. intros. Search predictsLE. simpl.
+      apply predictLE_with_prefix_works_eq.
+      { simpl.
+        repeat (rewrite rev_app_distr || rewrite rev_involutive || cbn [rev List.app]).
+        f_equal. rewrite BPW. f_equal.
+        { f_equal. Search p_sp. Print RegisterNames.sp. subst. Search Memory.bytes_per_word. f_equal.
+          { Search (word.unsigned (_ + _)). Locate "!". blia. Zn_words. Search p_sp.
+      cbv [rnext_fun rnext_fun']. apply predictLE_with_prefix_works_eq. Check Semantics.predict_with_prefix_works.
   Qed.
-
 
   Lemma compile_stmt_correct:
     (forall resvars extcall argvars,

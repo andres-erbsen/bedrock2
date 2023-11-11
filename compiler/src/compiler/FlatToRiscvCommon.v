@@ -534,6 +534,7 @@ Section FlatToRiscv1.
             getMem finalL = getMem initialL /\
             getPc finalL = getNextPc initialL /\
             getNextPc finalL = word.add (getPc finalL) (word.of_Z 4) /\
+            getTrace finalL = leak_load iset Syntax.access_size.word (word.unsigned base + ofs) :: getTrace initialL /\
             getMetrics finalL = addMetricInstructions 1 (addMetricLoads 2 (getMetrics initialL)) /\
             valid_machine finalL).
   Proof using word_ok mem_ok PR BWM.
@@ -543,6 +544,10 @@ Section FlatToRiscv1.
     - eapply (run_compile_load Syntax.access_size.word); cycle -3; try eassumption.
       instantiate (2:=ltac:(destruct pf)); destruct pf; eassumption.
     - cbv beta. intros. simp. repeat split; try assumption.
+      2: { rewrite H8p7. f_equal. simpl. cbv [concrete_leakage_of_instr compile_load].
+           destruct (bitwidth iset =? 32).
+           - simpl. rewrite Z.eqb_refl. simpl. cbv [trivialBind trivialReturn]. reflexivity.
+           - simpl. rewrite Z.eqb_refl. simpl. cbv [trivialBind trivialReturn]. reflexivity. }
       etransitivity. 1: eassumption.
       unfold id.
       rewrite LittleEndian.combine_of_list, LittleEndianList.le_combine_split.

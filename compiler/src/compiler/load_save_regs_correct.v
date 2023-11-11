@@ -100,7 +100,7 @@ Section Proofs.
           etransitivity; [eassumption|].
           replace (List.length vars) with (List.length oldvalues) by blia.
           solve_word_eq word_ok.
-        - subst getTrace0. rewrite <- app_assoc. reflexivity.
+        - rewrite <- app_assoc. assumption.
         - rewrite H0p8. MetricsToRiscv.solve_MetricLog. 
       }
       all: try eassumption.
@@ -133,6 +133,7 @@ Section Proofs.
           final.(getNextPc) = word.add final.(getPc) (word.of_Z 4) /\
           final.(getLog) = initial.(getLog) /\
           final.(getXAddrs) = initial.(getXAddrs) /\
+          final.(getTrace) = leak_load_regs iset (word.unsigned p_sp) vars offset ++ initial.(getTrace) /\
           final.(getMetrics) =
               Platform.MetricLogging.addMetricInstructions (Z.of_nat (List.length vars))
                 (Platform.MetricLogging.addMetricLoads (Z.of_nat (2 * (List.length vars)))
@@ -185,7 +186,8 @@ Section Proofs.
           rewrite Znat.Nat2Z.inj_succ. rewrite <- Z.add_1_r.
           replace (List.length values) with (List.length vars) by congruence.
           solve_word_eq word_ok.
-        * rewrite H1p3. MetricsToRiscv.solve_MetricLog. 
+        * rewrite <- app_assoc. assumption.
+        * rewrite H1p4. MetricsToRiscv.solve_MetricLog. 
   Qed.
 
   Lemma length_load_regs: forall vars offset,
