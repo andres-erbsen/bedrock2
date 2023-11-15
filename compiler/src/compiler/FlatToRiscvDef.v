@@ -571,7 +571,7 @@ Section FlatToRiscv1.
               | Some (params, rets, fbody) =>
                   predictLE_with_prefix
                     [ leak_Jal ](* jump to compiled function *)
-                    (fun rt_so_far' => rnext_fun' rnext_stmt0 fuel' next t_so_far sp_val params rets fbody rt_so_far f)
+                    (fun rt_so_far' => rnext_fun' rnext_stmt0 fuel' next t_so_far sp_val params rets fbody rt_so_far' f)
                     rt_so_far
               | None => None
               end

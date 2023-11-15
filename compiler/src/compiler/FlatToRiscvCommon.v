@@ -49,6 +49,45 @@ Require Export compiler.regs_initialized.
 Require Import coqutil.Word.Interface.
 Local Hint Mode Word.Interface.word - : typeclass_instances.
 
+Inductive predictsLE : (list LeakageEvent -> option qLeakageEvent) -> list LeakageEvent -> Prop :=
+  | predictsLE_cons :
+    forall f g e t,
+      f [] = Some (quotLE e) ->
+      (forall t', f (e :: t') = g t') ->
+      predictsLE g t ->
+      predictsLE f (e :: t)
+  | predictsLE_nil :
+    forall f,
+      f [] = Some qendLE ->
+      predictsLE f [].
+
+  Notation predicts := Semantics.predicts.
+  Check map.put. Check SCall. Print rnext_fun'. Print rnext_stmt.
+
+  Lemma predictLE_with_prefix_works prefix predict_rest rest :
+    predictsLE predict_rest rest ->
+    predictsLE (predictLE_with_prefix prefix predict_rest) (prefix ++ rest).
+  Proof.
+    intros H. induction prefix.
+    - simpl. apply H.
+    - simpl. econstructor; auto.
+  Qed.
+
+  Lemma predictLE_with_prefix_works_eq stuff prefix rest predict_rest :
+    stuff = prefix ++ rest ->
+    predictsLE predict_rest rest ->
+    predictsLE (predictLE_with_prefix prefix predict_rest) stuff.
+  Proof.
+    intros H. subst. apply predictLE_with_prefix_works.
+  Qed.
+  
+  Lemma predictLE_with_prefix_works_end prefix predict_rest :
+    predictsLE predict_rest [] ->
+    predictsLE (predictLE_with_prefix prefix predict_rest) prefix.
+  Proof.
+    intros H. eapply predictLE_with_prefix_works in H. rewrite app_nil_r in H. eassumption.
+  Qed.
+
 Import Utility.
 
 Local Open Scope ilist_scope.
@@ -290,45 +329,6 @@ Section WithParameters.
 
   Local Notation stmt := (stmt Z).
 
-  Inductive predictsLE : (list LeakageEvent -> option qLeakageEvent) -> list LeakageEvent -> Prop :=
-  | predictsLE_cons :
-    forall f g e t,
-      f [] = Some (quotLE e) ->
-      (forall t', f (e :: t') = g t') ->
-      predictsLE g t ->
-      predictsLE f (e :: t)
-  | predictsLE_nil :
-    forall f,
-      f [] = Some qendLE ->
-      predictsLE f [].
-
-  Notation predicts := Semantics.predicts.
-  Check map.put. Check SCall. Print rnext_fun'. Print rnext_stmt.
-
-  Lemma predictLE_with_prefix_works prefix predict_rest rest :
-    predictsLE predict_rest rest ->
-    predictsLE (predictLE_with_prefix prefix predict_rest) (prefix ++ rest).
-  Proof.
-    intros H. induction prefix.
-    - simpl. apply H.
-    - simpl. econstructor; auto.
-  Qed.
-
-  Lemma predictLE_with_prefix_works_eq stuff prefix rest predict_rest :
-    stuff = prefix ++ rest ->
-    predictsLE predict_rest rest ->
-    predictsLE (predictLE_with_prefix prefix predict_rest) stuff.
-  Proof.
-    intros H. subst. apply predictLE_with_prefix_works.
-  Qed.
-  
-  Lemma predictLE_with_prefix_works_end prefix predict_rest :
-    predictsLE predict_rest [] ->
-    predictsLE (predictLE_with_prefix prefix predict_rest) prefix.
-  Proof.
-    intros H. eapply predictLE_with_prefix_works in H. rewrite app_nil_r in H. eassumption.
-  Qed.
-
   (* note: [e_impl_reduced] and [funnames] will shrink one function at a time each time
      we enter a new function body, to make sure functions cannot call themselves, while
      [e_impl] and [e_pos] remain the same throughout because that's mandated by
@@ -499,7 +499,36 @@ Section FlatToRiscv1.
         Memory.load, Memory.load_Z in *;
         simp; simulate''; simpl; simpl_word_exprs word_ok; destruct initialL;
           try eassumption].
- Qed.
+  Qed.
+
+  Lemma go_leak_load: forall sz (x a ofs: Z) (addr v: word) (initialL: RiscvMachineL) post e f,
+      valid_register x ->
+      valid_register a ->
+      map.get initialL.(getRegs) a = Some addr ->
+      Memory.load sz (getMem initialL) (word.add addr (word.of_Z ofs)) = Some v ->
+      mcomp_sat (f e)
+                (withRegs (map.put initialL.(getRegs) x v) (updateMetrics (addMetricLoads 1) initialL)) post ->
+      mcomp_sat (Bind (leakage_of_instr word.unsigned word.signed Machine.getRegister (compile_load iset sz x a ofs)) f) initialL post.
+  Proof.
+    unfold leakage_of_instr, leakage_of_instr_I, compile_load, Memory.load, Memory.load_Z, Memory.bytes_per, Memory.bytes_per_word.
+    rewrite bitwidth_matches.
+    destruct width_cases as [E | E];
+      (* note: "rewrite E" does not work because "width" also appears in the type of "word",
+         but we don't need to rewrite in the type of word, only in the type of the tuple,
+         which works if we do it before intro'ing it *)
+      (destruct (width =? 32) eqn: E'; [apply Z.eqb_eq in E' | apply Z.eqb_neq in E']);
+      try congruence;
+      clear E';
+      [set (nBytes := 4%nat) | set (nBytes := 8%nat)];
+      replace (Z.to_nat ((width + 7) / 8)) with nBytes by (subst nBytes; rewrite E; reflexivity);
+      subst nBytes;
+      intros; destruct sz;
+      try solve [
+        unfold execute, ExecuteI.execute, ExecuteI64.execute, translate, DefaultRiscvState,
+        Memory.load, Memory.load_Z in *;
+        simp; simulate''; simpl; simpl_word_exprs word_ok; destruct initialL;
+        try eassumption]. (*CONTINUE HERE*)
+  Abort.
 
   Arguments invalidateWrittenXAddrs: simpl never.
 

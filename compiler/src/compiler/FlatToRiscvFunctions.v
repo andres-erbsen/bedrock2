@@ -424,6 +424,8 @@ Section Proofs.
   Qed.
 
   Search LeakageEvent. Print qLeakageEvent.
+  Notation predicts := Semantics.predicts.
+  Check FlatToRiscvCommon.predictsLE.
 
   Lemma compile_function_body_correct: forall (e_impl_full : env) m l mc (argvs : list word)
     (st0 : locals) (post outcome : Semantics.trace -> mem -> locals -> MetricLog -> Prop)
@@ -1378,14 +1380,14 @@ Section Proofs.
       subst. solve_word_eq word_ok.
   Qed.
 
-  Print compiles_FlatToRiscv_correctly. Check compile_ext_call.
+  Print compiles_FlatToRiscv_correctly. Check compile_ext_call. Check compiles_FlatToRiscv_correctly.
 
   Lemma compile_stmt_correct:
     (forall resvars extcall argvars,
-        compiles_FlatToRiscv_correctly compile_ext_call
+        compiles_FlatToRiscv_correctly compile_ext_call leak_ext_call
           compile_ext_call (SInteract resvars extcall argvars)) ->
     (forall s,
-        compiles_FlatToRiscv_correctly compile_ext_call
+        compiles_FlatToRiscv_correctly compile_ext_call leak_ext_call
           (compile_stmt iset compile_ext_call) s).
   Proof. (* by induction on the FlatImp execution, symbolically executing through concrete
      RISC-V instructions, and using the IH for lists of abstract instructions (eg a then or else branch),
@@ -1417,6 +1419,7 @@ Section Proofs.
       + simpl. intros finalL A. destruct_RiscvMachine finalL. unfold goodMachine in *. simpl in *.
         destruct_products. subst.
         do 4 eexists; ssplit; eauto.
+        do 2 eexists; ssplit; eauto.
 
     - idtac "Case compile_stmt_correct/SCall".
       (* We have one "map.get e fname" from exec, one from fits_stack, make them match *)
@@ -1461,8 +1464,8 @@ Section Proofs.
       clear_old_sep_hyps.
       intro mid. set (mach := mid). intros. fwd. destruct_RiscvMachine mid. subst.
 
-      remember mach.(getLog) as t.
-      assert (GM: goodMachine t m l
+      remember mach.(getLog) as log.
+      assert (GM: goodMachine (Semantics.filterio t) m l
                               {| p_sp := p_sp;
                                  rem_stackwords := #(List.length old_stackvals);
                                  rem_framewords := #(List.length unused_part_of_caller_frame);
@@ -1487,7 +1490,22 @@ Section Proofs.
          (union (of_list (list_union Z.eqb binds [])) (singleton_set RegisterNames.ra))
          (getRegs finalL) /\
        (getMetrics finalL - initialL_metrics <= lowerMetrics (finalMetricsH - mc))%metricsL /\
-       goodMachine finalTrace finalMH finalRegsH g finalL))
+         goodMachine (Semantics.filterio finalTrace) finalMH finalRegsH g finalL /\
+            (exists (t' : list Semantics.event) (rt' : list LeakageEvent),
+          finalTrace = t' ++ t /\
+          RiscvMachine.getTrace finalL = rt' ++ getTrace /\
+          (exists F : nat,
+             forall (next : Semantics.trace -> option Semantics.qevent) (t0 t'' : list Semantics.event)
+               (rt'' : list LeakageEvent) (fuel : nat)
+               (f : list Semantics.event -> list LeakageEvent -> option qLeakageEvent),
+             predicts next (t0 ++ rev t' ++ t'') ->
+             predictsLE (fun t1 : list LeakageEvent => f (t0 ++ rev t') t1) rt'' ->
+             Nat.le F fuel ->
+             predictsLE
+               (fun t1 : list LeakageEvent =>
+                rnext_stmt iset leak_ext_call e_impl_full fuel next t0 p_sp
+                  (bytes_per_word * #(Datatypes.length unused_part_of_caller_frame))
+                  (SCall binds fname args) t1 f) (rev rt' ++ rt'')))))
       end.
       2: { subst. reflexivity. }
 
@@ -1599,7 +1617,7 @@ Section Proofs.
            iff1 (FlatToRiscvCommon.allx g)
              ((xframe * program iset (program_base + !pos) insts)%sep *
               functions program_base e_pos e_impl) ->
-           goodMachine mid_log m st0 g initialL ->
+           goodMachine (Semantics.filterio t) m st0 g initialL ->
            runsTo initialL
              (fun finalL : RiscvMachineL =>
               exists
@@ -1612,7 +1630,8 @@ Section Proofs.
                   (getRegs finalL) /\
                   (*                (getMetrics finalL - initialL_metrics <= lowerMetrics (finalMetricsH - mc))%metricsL /\ *)
                   _ /\
-                goodMachine finalTrace finalMH finalRegsH g finalL))
+                  goodMachine (Semantics.filterio finalTrace) finalMH finalRegsH g finalL /\
+             _))
         ) in replace T with T' in IHexec.
       2: {
         subst. reflexivity.
@@ -1640,8 +1659,9 @@ Section Proofs.
       }
       move Gra after GPC.
       assert (word.unsigned ret_addr mod 4 = 0) as RaM by (subst ret_addr; solve_divisibleBy4).
-      move RaM before Gra.
-      replace mid_log with t in *.
+      move RaM before Gra. 
+      (*replace (Semantics.filterio t) with log in *. have to do this after
+        applying compile_function_body_correct *)
       forget (Datatypes.length binds) as binds_count.
       subst binds.
       eapply runsTo_weaken. {
@@ -1657,13 +1677,23 @@ Section Proofs.
         revert IHexec OC BC OL Exb GetMany Ext GE FS C V Mo Mo' Gra RaM GPC A GM.
         eapply compile_function_body_correct.
       }
+      replace (Semantics.filterio t) with log in *.
       subst mach. simpl_MetricRiscvMachine_get_set.
       intros. fwd. eexists. eexists. eexists. eexists.
       split; [ eapply H0p0 | ].
       split; eauto 8 with map_hints.
       split; eauto 8 with map_hints.
+      split; [MetricsToRiscv.solve_MetricLog|].
       split; eauto 8 with map_hints.
-      MetricsToRiscv.solve_MetricLog.
+      
+      do 2 eexists. split; [reflexivity|]. split.
+      { rewrite H0p5p1. simpl. rewrite app_one_cons. rewrite app_assoc. reflexivity. }
+      exists (S F). intros. destruct fuel as [|fuel']; [blia|]. cbn [rnext_stmt].
+      Search (map.get e_impl_full fname). rewrite H.
+      Search predictsLE. eapply predictLE_with_prefix_works_eq.
+      { rewrite rev_app_distr. simpl. reflexivity. }
+      cbv [rnext_fun] in H0p5p2. Search p_sp. subst. simpl in H0p5p2.
+      eapply H0p5p2; try eassumption. blia.      
 
     - idtac "Case compile_stmt_correct/SLoad".
       progress unfold Memory.load, Memory.load_Z in *. fwd.
@@ -1672,7 +1702,14 @@ Section Proofs.
         unfold valid_FlatImp_var, RegisterNames.sp in *.
         blia.
       }
-      inline_iff1.
+      inline_iff1. Print run1det.
+      eapply runsTo_det_step_with_valid_machine; [assumption| |].
+      { simulate'. Search leakage_of_instr. Print simulate'_step. Print simulate_step.
+        cbv [leakage_of_instr].
+        Check go_load. Check go_fetch_inst.Print compile_load.
+        
+        eapply MetricSane.leakage_of_instr_sane. eapply go_fetch_inst.
+      Print simulate'_step.
       run1det. clear H0. (* <-- TODO this should not be needed *) run1done.
 
     - idtac "Case compile_stmt_correct/SStore".
