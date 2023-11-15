@@ -33,6 +33,8 @@ Require Import compiler.MemoryLayout.
 Require Import coqutil.Map.MapEauto.
 Require Import compiler.Registers.
 
+Require Import compiler.FlatImpConstraints.
+
 Import MetricLogging.
 
 Local Arguments Z.mul: simpl never.
@@ -422,45 +424,6 @@ Section Proofs.
   Qed.
 
   Search LeakageEvent. Print qLeakageEvent.
-
-  Inductive predictsLE : (list LeakageEvent -> option qLeakageEvent) -> list LeakageEvent -> Prop :=
-  | predictsLE_cons :
-    forall f g e t,
-      f [] = Some (quotLE e) ->
-      (forall t', f (e :: t') = g t') ->
-      predictsLE g t ->
-      predictsLE f (e :: t)
-  | predictsLE_nil :
-    forall f,
-      f [] = Some qendLE ->
-      predictsLE f [].
-
-  Notation predicts := Semantics.predicts.
-  Check map.put. Check SCall. Print rnext_fun'. Print rnext_stmt.
-
-  Lemma predictLE_with_prefix_works prefix predict_rest rest :
-    predictsLE predict_rest rest ->
-    predictsLE (predictLE_with_prefix prefix predict_rest) (prefix ++ rest).
-  Proof.
-    intros H. induction prefix.
-    - simpl. apply H.
-    - simpl. econstructor; auto.
-  Qed.
-
-  Lemma predictLE_with_prefix_works_eq stuff prefix rest predict_rest :
-    stuff = prefix ++ rest ->
-    predictsLE predict_rest rest ->
-    predictsLE (predictLE_with_prefix prefix predict_rest) stuff.
-  Proof.
-    intros H. subst. apply predictLE_with_prefix_works.
-  Qed.
-  
-  Lemma predictLE_with_prefix_works_end prefix predict_rest :
-    predictsLE predict_rest [] ->
-    predictsLE (predictLE_with_prefix prefix predict_rest) prefix.
-  Proof.
-    intros H. eapply predictLE_with_prefix_works in H. rewrite app_nil_r in H. eassumption.
-  Qed.
 
   Lemma compile_function_body_correct: forall (e_impl_full : env) m l mc (argvs : list word)
     (st0 : locals) (post outcome : Semantics.trace -> mem -> locals -> MetricLog -> Prop)
@@ -1414,6 +1377,8 @@ Section Proofs.
            { blia. } }
       subst. solve_word_eq word_ok.
   Qed.
+
+  Print compiles_FlatToRiscv_correctly. Check compile_ext_call.
 
   Lemma compile_stmt_correct:
     (forall resvars extcall argvars,

@@ -78,6 +78,7 @@ Section WithParameters.
 
   Context {pos_map: map.map String.string Z}.
   Context (compile_ext_call: pos_map -> Z -> Z -> stmt Z -> list Instruction).
+  Context (leak_ext_call: list LeakageEvent).
   Context {word_ok: word.ok word}.
   Context {mem: map.map word byte}.
   Context {env: map.map String.string (list Z * list Z * stmt Z)}.
@@ -289,6 +290,45 @@ Section WithParameters.
 
   Local Notation stmt := (stmt Z).
 
+  Inductive predictsLE : (list LeakageEvent -> option qLeakageEvent) -> list LeakageEvent -> Prop :=
+  | predictsLE_cons :
+    forall f g e t,
+      f [] = Some (quotLE e) ->
+      (forall t', f (e :: t') = g t') ->
+      predictsLE g t ->
+      predictsLE f (e :: t)
+  | predictsLE_nil :
+    forall f,
+      f [] = Some qendLE ->
+      predictsLE f [].
+
+  Notation predicts := Semantics.predicts.
+  Check map.put. Check SCall. Print rnext_fun'. Print rnext_stmt.
+
+  Lemma predictLE_with_prefix_works prefix predict_rest rest :
+    predictsLE predict_rest rest ->
+    predictsLE (predictLE_with_prefix prefix predict_rest) (prefix ++ rest).
+  Proof.
+    intros H. induction prefix.
+    - simpl. apply H.
+    - simpl. econstructor; auto.
+  Qed.
+
+  Lemma predictLE_with_prefix_works_eq stuff prefix rest predict_rest :
+    stuff = prefix ++ rest ->
+    predictsLE predict_rest rest ->
+    predictsLE (predictLE_with_prefix prefix predict_rest) stuff.
+  Proof.
+    intros H. subst. apply predictLE_with_prefix_works.
+  Qed.
+  
+  Lemma predictLE_with_prefix_works_end prefix predict_rest :
+    predictsLE predict_rest [] ->
+    predictsLE (predictLE_with_prefix prefix predict_rest) prefix.
+  Proof.
+    intros H. eapply predictLE_with_prefix_works in H. rewrite app_nil_r in H. eassumption.
+  Qed.
+
   (* note: [e_impl_reduced] and [funnames] will shrink one function at a time each time
      we enter a new function body, to make sure functions cannot call themselves, while
      [e_impl] and [e_pos] remain the same throughout because that's mandated by
@@ -321,7 +361,16 @@ Section WithParameters.
                  finalL.(getRegs) /\
          (finalL.(getMetrics) - initialL.(getMetrics) <=
           lowerMetrics (finalMetricsH - initialMetricsH))%metricsL /\
-         goodMachine (Semantics.filterio finalTrace) finalMH finalRegsH g finalL).
+         goodMachine (Semantics.filterio finalTrace) finalMH finalRegsH g finalL /\
+           exists t' rt',
+             finalTrace = t' ++ initialTrace /\
+               getTrace finalL = rt' ++ getTrace initialL /\
+               exists F,
+               forall next t0 t'' rt'' fuel f,
+                 predicts next (t0 ++ rev t' ++ t'') ->
+                 predictsLE (fun t => f (t0 ++ rev t') t) rt'' ->
+                 Nat.le F fuel ->
+                 predictsLE (fun t => rnext_stmt iset leak_ext_call e_impl_full fuel next t0 g.(p_sp) (bytes_per_word * rem_framewords g) s t f) (rev rt' ++ rt'')).
 
 End WithParameters.
 
@@ -350,6 +399,7 @@ Section FlatToRiscv1.
   Context {iset: InstructionSet}.
   Context {fun_info: map.map String.string Z}.
   Context (compile_ext_call: fun_info -> Z -> Z -> stmt Z -> list Instruction).
+  Context (leak_ext_call: list LeakageEvent).
   Context {width: Z} {BW: Bitwidth width} {word: word.word width}.
   Context {word_ok: word.ok word}.
   Context {locals: map.map Z word}.
