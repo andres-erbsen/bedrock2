@@ -353,8 +353,8 @@ Section FlatToRiscv1.
     (sp_val: word)(regs: list Z)(offset: Z): list LeakageEvent :=
     match regs with
     | nil => nil
-    | r :: regs' => leak_save_regs sp_val regs' (offset + bytes_per_word) ++
-                      [leak_store access_size.word (word.unsigned sp_val + offset)]
+    | r :: regs' => [leak_store access_size.word (word.unsigned sp_val + offset)] ++
+                      leak_save_regs sp_val regs' (offset + bytes_per_word)
     end.
 
   Fixpoint load_regs(regs: list Z)(offset: Z): list Instruction :=
@@ -368,8 +368,8 @@ Section FlatToRiscv1.
     (sp_val: word)(regs: list Z)(offset: Z): list LeakageEvent :=
     match regs with
     | nil => nil
-    | r :: regs' => leak_load_regs sp_val regs' (offset + bytes_per_word) ++
-                      [leak_load access_size.word (word.unsigned sp_val + offset)]
+    | r :: regs' => [leak_load access_size.word (word.unsigned sp_val + offset)] ++
+                      leak_load_regs sp_val regs' (offset + bytes_per_word)
     end.
 
   (* number of words of stack allocation space needed within current frame *)
@@ -445,26 +445,26 @@ Section FlatToRiscv1.
     | _ :: prefix', _ :: t' => predictLE_with_prefix prefix' predict_rest t'
     | e :: start', nil => Some (quotLE e)
     | nil, _ => predict_rest t
-    end.
+    end. Print word.word.
 
     Definition rnext_fun' rnext_stmt (fuel : nat) (next : trace -> option qevent) (t_so_far : trace)
       (sp_val : word) (params rets : list Z) fbody (rt_so_far : list LeakageEvent)
       (f : forall (t_so_far : trace) (rt_so_far : list LeakageEvent), option qLeakageEvent)
       : option qLeakageEvent :=
-      let need_to_save := list_diff Z.eqb (modVars_as_list Z.eqb fbody) params in
+      let need_to_save := list_diff Z.eqb (modVars_as_list Z.eqb fbody) rets in
                   let scratchwords := stackalloc_words fbody in
                   let framesize := bytes_per_word *
-                                     (Z.of_nat (1 + length need_to_save) + scratchwords) in
-                  let sp_val' := word.sub sp_val (word.of_Z framesize) in
+                                     (Z.of_nat (length need_to_save) + 1 + scratchwords) in
+                  let sp_val' := word.add sp_val (word.of_Z (-framesize)) in
                   let beforeBody :=
                       [ leak_Addi ] ++ (* Addi sp sp (-framesize) *)
                       [ leak_store access_size.word
-                          (word.unsigned (word.add sp_val' (word.of_Z (bytes_per_word * (Z.of_nat (length need_to_save) + scratchwords))))) ] ++
+                          (word.unsigned sp_val' + (bytes_per_word * (Z.of_nat (length need_to_save) + scratchwords))) ] ++
                       leak_save_regs sp_val' need_to_save (bytes_per_word * scratchwords) in
                   let afterBody :=
                     leak_load_regs sp_val' need_to_save (bytes_per_word * scratchwords) ++
                       [ leak_load access_size.word
-                          (word.unsigned (word.add sp_val' (word.of_Z (bytes_per_word * (Z.of_nat (length need_to_save) + scratchwords))))) ] ++
+                          (word.unsigned sp_val' + (bytes_per_word * (Z.of_nat (length need_to_save) + scratchwords))) ] ++
                       [ leak_Addi ] ++ (* Addi sp sp framesize *)
                       [ leak_Jalr ] in
                   

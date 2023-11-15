@@ -447,10 +447,10 @@ Section Proofs.
     - simpl. econstructor; auto.
   Qed.
 
-  Lemma predictLE_with_prefix_works_eq prefix1 prefix2 predict_rest rest :
-    prefix1 = prefix2 ->
+  Lemma predictLE_with_prefix_works_eq stuff prefix rest predict_rest :
+    stuff = prefix ++ rest ->
     predictsLE predict_rest rest ->
-    predictsLE (predictLE_with_prefix prefix1 predict_rest) (prefix2 ++ rest).
+    predictsLE (predictLE_with_prefix prefix predict_rest) stuff.
   Proof.
     intros H. subst. apply predictLE_with_prefix_works.
   Qed.
@@ -496,7 +496,7 @@ Section Proofs.
                     predicts next (t0 ++ rev t' ++ t'') ->
                     predictsLE (fun t => f (t0 ++ rev t') t) rt'' ->
                     Nat.le F fuel ->
-                    predictsLE (fun t => rnext_stmt iset leak_ext_call e_impl_full fuel next t0 (word.unsigned g0.(p_sp)) (bytes_per_word * rem_framewords g0) body t f) (rev rt' ++ rt'')))
+                    predictsLE (fun t => rnext_stmt iset leak_ext_call e_impl_full fuel next t0 g0.(p_sp) (bytes_per_word * rem_framewords g0) body t f) (rev rt' ++ rt'')))
     (HOutcome: forall (t' : Semantics.trace) (m' : mem) (mc' : MetricLog) (st1 : locals),
         outcome t' m' st1 mc' ->
         exists (retvs : list word) (l' : locals),
@@ -548,7 +548,7 @@ Section Proofs.
                   predicts next (t0 ++ rev t' ++ t'') ->
                   predictsLE (fun t => f (t0 ++ rev t') t) rt'' ->
                   Nat.le F fuel ->
-                  predictsLE (fun t => rnext_fun iset leak_ext_call e_impl_full fuel next t0 (word.unsigned g.(p_sp)) argnames retnames body t f) (rev rt' ++ rt'')
+                  predictsLE (fun t => rnext_fun iset leak_ext_call e_impl_full fuel next t0 g.(p_sp) argnames retnames body t f) (rev rt' ++ rt'')
         ).
   Proof.
     intros * IHexec OC BC OL Exb GetMany Ext GE FS C V Mo Mo' Gra RaM GPC A GM.
@@ -1398,13 +1398,21 @@ Section Proofs.
         do 1 (instantiate (1 := _ :: _); simpl; f_equal).
         instantiate (1 := nil). reflexivity. }
       exists F. intros. Search predictsLE. simpl.
-      apply predictLE_with_prefix_works_eq.
-      { simpl.
+      repeat (rewrite rev_app_distr || rewrite rev_involutive || cbn [rev List.app]).
+      eapply predictLE_with_prefix_works_eq.
+      { simpl. rewrite BPW. f_equal. f_equal.
         repeat (rewrite rev_app_distr || rewrite rev_involutive || cbn [rev List.app]).
-        f_equal. rewrite BPW. f_equal.
-        { f_equal. Search p_sp. Print RegisterNames.sp. subst. Search Memory.bytes_per_word. f_equal.
-          { Search (word.unsigned (_ + _)). Locate "!". blia. Zn_words. Search p_sp.
-      cbv [rnext_fun rnext_fun']. apply predictLE_with_prefix_works_eq. Check Semantics.predict_with_prefix_works.
+        repeat rewrite <- app_assoc. reflexivity. }
+      rewrite BPW.
+      Search predictsLE. Check H2p10p2.
+      remember (p_sp + _) as new_sp. Check H2p10p2. eassert (Esp: new_sp = _).
+      2: { rewrite Esp. eapply H2p10p2.
+           { eapply H6. }
+           { eapply predictLE_with_prefix_works_eq.
+             { simpl. rewrite <- app_assoc. reflexivity. }
+             { eapply H7. } }
+           { blia. } }
+      subst. solve_word_eq word_ok.
   Qed.
 
   Lemma compile_stmt_correct:
