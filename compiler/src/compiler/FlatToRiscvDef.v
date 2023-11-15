@@ -349,11 +349,12 @@ Section FlatToRiscv1.
                    :: (save_regs regs (offset + bytes_per_word))
     end. Print leak_store. Print compile_store.
 
-  Fixpoint leak_save_regs(sp_val: Z)(regs: list Z)(offset: Z): list LeakageEvent :=
+  Fixpoint leak_save_regs{width: Z}{BW: Bitwidth width}{word: word.word width}
+    (sp_val: word)(regs: list Z)(offset: Z): list LeakageEvent :=
     match regs with
     | nil => nil
     | r :: regs' => leak_save_regs sp_val regs' (offset + bytes_per_word) ++
-                      [leak_store access_size.word (sp_val + offset)]
+                      [leak_store access_size.word (word.unsigned sp_val + offset)]
     end.
 
   Fixpoint load_regs(regs: list Z)(offset: Z): list Instruction :=
@@ -363,11 +364,12 @@ Section FlatToRiscv1.
                    :: (load_regs regs (offset + bytes_per_word))
     end.
 
-  Fixpoint leak_load_regs(sp_val: Z)(regs: list Z)(offset: Z): list LeakageEvent :=
+  Fixpoint leak_load_regs{width: Z}{BW: Bitwidth width}{word: word.word width}
+    (sp_val: word)(regs: list Z)(offset: Z): list LeakageEvent :=
     match regs with
     | nil => nil
     | r :: regs' => leak_load_regs sp_val regs' (offset + bytes_per_word) ++
-                      [leak_load access_size.word (sp_val + offset)]
+                      [leak_load access_size.word (word.unsigned sp_val + offset)]
     end.
 
   (* number of words of stack allocation space needed within current frame *)
@@ -399,9 +401,8 @@ Section FlatToRiscv1.
   (* All positions are relative to the beginning of the progam, so we get completely
      position independent code. *)
 
+  Context {width: Z}{BW: Bitwidth width}{word: word.word width} {mem: map.map word byte}.
   Context {env: map.map String.string (list Z * list Z * stmt Z)}.
-  Check Semantics.abstract_trace.
-  Context {width: Z}{BW: Bitwidth width}{word: word.word width}{mem: map.map word byte}.
   Context {pos_map: map.map String.string Z}.
   Context (compile_ext_call: pos_map -> Z -> Z -> stmt Z -> list Instruction).
   Context (leak_ext_call: (*env -> Z (*sp_val*) -> Z (*stackoffset*) -> stmt Z ->*) list LeakageEvent).
@@ -447,23 +448,23 @@ Section FlatToRiscv1.
     end.
 
     Definition rnext_fun' rnext_stmt (fuel : nat) (next : trace -> option qevent) (t_so_far : trace)
-      (sp_val : Z) (params rets : list Z) fbody (rt_so_far : list LeakageEvent)
+      (sp_val : word) (params rets : list Z) fbody (rt_so_far : list LeakageEvent)
       (f : forall (t_so_far : trace) (rt_so_far : list LeakageEvent), option qLeakageEvent)
       : option qLeakageEvent :=
       let need_to_save := list_diff Z.eqb (modVars_as_list Z.eqb fbody) params in
                   let scratchwords := stackalloc_words fbody in
                   let framesize := bytes_per_word *
                                      (Z.of_nat (1 + length need_to_save) + scratchwords) in
-                  let sp_val' := sp_val - framesize in
+                  let sp_val' := word.sub sp_val (word.of_Z framesize) in
                   let beforeBody :=
                       [ leak_Addi ] ++ (* Addi sp sp (-framesize) *)
                       [ leak_store access_size.word
-                          (sp_val' + bytes_per_word * (Z.of_nat (length need_to_save) + scratchwords)) ] ++
+                          (word.unsigned (word.add sp_val' (word.of_Z (bytes_per_word * (Z.of_nat (length need_to_save) + scratchwords))))) ] ++
                       leak_save_regs sp_val' need_to_save (bytes_per_word * scratchwords) in
                   let afterBody :=
                     leak_load_regs sp_val' need_to_save (bytes_per_word * scratchwords) ++
                       [ leak_load access_size.word
-                          (sp_val' + bytes_per_word * (Z.of_nat (length need_to_save) + scratchwords)) ] ++
+                          (word.unsigned (word.add sp_val' (word.of_Z (bytes_per_word * (Z.of_nat (length need_to_save) + scratchwords))))) ] ++
                       [ leak_Addi ] ++ (* Addi sp sp framesize *)
                       [ leak_Jalr ] in
                   
@@ -479,7 +480,7 @@ Section FlatToRiscv1.
                     rt_so_far.
 
     Fixpoint rnext_stmt (fuel : nat) (next : trace -> option qevent) (t_so_far : trace)
-      (sp_val : Z) (stackoffset : Z) (s : stmt Z) (rt_so_far : list LeakageEvent)
+      (sp_val : word) (stackoffset : Z) (s : stmt Z) (rt_so_far : list LeakageEvent)
       (f : forall (t_so_far : trace) (rt_so_far : list LeakageEvent), option qLeakageEvent)
       : option qLeakageEvent :=
       match fuel with
@@ -509,7 +510,7 @@ Section FlatToRiscv1.
           | SInlinetable sz x t i =>
               None (* TODO: I think I need to put something about the inlinetable in the source-level trace *)
           | SStackalloc _ n body =>
-              let a := (word.of_Z (sp_val + stackoffset - n)) in
+              let a := (word.add sp_val (word.of_Z (stackoffset - n))) in
               predictLE_with_prefix
                 [ leak_Addi ]
                 (fun rt_so_far' => rnext_stmt (t_so_far ++ [salloc a]) sp_val (stackoffset - n) body rt_so_far' f)

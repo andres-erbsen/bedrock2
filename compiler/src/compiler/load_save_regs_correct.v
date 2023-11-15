@@ -36,7 +36,7 @@ Section Proofs.
   Local Notation RiscvMachineL := MetricRiscvMachine.
 
   Local Arguments Z.add : simpl never.
-  Local Arguments Z.of_nat : simpl never.
+  Local Arguments Z.of_nat : simpl never. Check leak_save_regs.
 
   Lemma save_regs_correct: forall vars offset Exec R Rexec (initial: RiscvMachineL)
                                   p_sp oldvalues newvalues addr,
@@ -58,7 +58,7 @@ Section Proofs.
                                                    (word.of_Z (Z.of_nat (List.length vars)))) /\
           final.(getNextPc) = word.add final.(getPc) (word.of_Z 4) /\
           final.(getLog) = initial.(getLog) /\
-          final.(getTrace) = leak_save_regs iset (word.unsigned p_sp) vars offset ++ initial.(getTrace) /\
+          final.(getTrace) = leak_save_regs iset p_sp vars offset ++ initial.(getTrace) /\
           final.(getMetrics) =
               Platform.MetricLogging.addMetricInstructions (Z.of_nat (List.length vars))
                 (Platform.MetricLogging.addMetricStores (Z.of_nat (List.length vars))
@@ -133,7 +133,7 @@ Section Proofs.
           final.(getNextPc) = word.add final.(getPc) (word.of_Z 4) /\
           final.(getLog) = initial.(getLog) /\
           final.(getXAddrs) = initial.(getXAddrs) /\
-          final.(getTrace) = leak_load_regs iset (word.unsigned p_sp) vars offset ++ initial.(getTrace) /\
+          final.(getTrace) = leak_load_regs iset p_sp vars offset ++ initial.(getTrace) /\
           final.(getMetrics) =
               Platform.MetricLogging.addMetricInstructions (Z.of_nat (List.length vars))
                 (Platform.MetricLogging.addMetricLoads (Z.of_nat (2 * (List.length vars)))
