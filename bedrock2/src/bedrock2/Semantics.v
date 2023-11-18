@@ -19,18 +19,24 @@ Section WithIOEvent.
 
   Definition io_trace : Type := list io_event.
 
+  (*could reduce this to many fewer cases, at the cost of being a bit more confusing.*)
+  (*I think I'll leave IO in the leakage trace and abstract trace for now, just because it's
+    unclear what is the best way to remove it.  I lean towards separating leakage trace and IO
+    trace as two separate arguments to exec, but I should ask about this.*)
   Inductive event  : Type :=
   | IO : io_event -> event
   | branch : bool -> event
-  | read : access_size -> word -> event
-  | write : access_size -> word -> event
+  | read : word -> event
+  | write : word -> event
+  | table: word(*the index*) -> event
   | salloc : word -> event.
 
   Inductive qevent : Type :=
   | qIO : io_event -> qevent
   | qbranch : bool -> qevent
-  | qread : access_size -> word -> qevent
-  | qwrite : access_size -> word -> qevent
+  | qread : word -> qevent
+  | qwrite : word -> qevent
+  | qtable : word -> qevent
   | qsalloc : qevent
   | qend: qevent.
 
@@ -38,8 +44,9 @@ Section WithIOEvent.
     match e with
     | IO i => qIO i
     | branch b => qbranch b
-    | read sz a => qread sz a
-    | write sz a => qwrite sz a
+    | read a => qread a
+    | write a => qwrite a
+    | table i => qtable i
     | salloc a => qsalloc
     end.
 
@@ -49,33 +56,11 @@ Section WithIOEvent.
   | empty
   | cons_IO (e: io_event) (after : abstract_trace)
   | cons_branch (b : bool) (after : abstract_trace)
-  | cons_read (sz : access_size) (a : word) (after : abstract_trace)
-  | cons_write (sz : access_size) (a : word) (after : abstract_trace)
+  | cons_read (a : word) (after : abstract_trace)
+  | cons_write (a : word) (after : abstract_trace)
+  | cons_table (i : word) (after : abstract_trace)
   | cons_salloc (after : word -> abstract_trace).
 
-  Inductive abs_tr_eq : abstract_trace -> abstract_trace -> Prop :=
-  | empty_eq : abs_tr_eq empty empty
-  | cons_IO_eq : forall i1 a1' i2 a2',
-      i1 = i2 ->
-      abs_tr_eq a1' a2' ->
-      abs_tr_eq (cons_IO i1 a1') (cons_IO i2 a2')
-  | cons_branch_eq : forall b1 a1' b2 a2',
-      b1 = b2 ->
-      abs_tr_eq a1' a2' ->
-      abs_tr_eq (cons_branch b1 a1') (cons_branch b2 a2')
-  | cons_read_eq : forall sz1 addr1 a1' sz2 addr2 a2',
-      sz1 = sz2 ->
-      addr1 = addr2 ->
-      abs_tr_eq a1' a2' ->
-      abs_tr_eq (cons_read sz1 addr1 a1') (cons_read sz2 addr2 a2')
-  | cons_write_eq : forall sz1 addr1 a1' sz2 addr2 a2',
-      sz1 = sz2 ->
-      addr1 = addr2 ->
-      abs_tr_eq a1' a2' ->
-      abs_tr_eq (cons_write sz1 addr1 a1') (cons_write sz2 addr2 a2')
-  | cons_salloc_eq : forall f1 f2,
-    (forall addr, abs_tr_eq (f1 addr) (f2 addr)) ->
-    abs_tr_eq (cons_salloc f1) (cons_salloc f2).
 (* IO things to do:
    set channel: input can either be private or not; output and leak a secret; output and don't leak; output and leak one function of secret,
    take input, output and leak secret but do not leak secret until after input. *)  
@@ -84,58 +69,21 @@ Section WithIOEvent.
   | nil_gen : generates empty nil
   | IO_gen : forall x a t_rev, generates a t_rev -> generates (cons_IO x a) (IO x :: t_rev)
   | branch_gen : forall x a t_rev, generates a t_rev -> generates (cons_branch x a) (branch x :: t_rev)
-  | read_gen : forall x1 x2 a t_rev, generates a t_rev -> generates (cons_read x1 x2 a) (read x1 x2 :: t_rev)
-  | write_gen : forall x1 x2 a t_rev, generates a t_rev -> generates (cons_write x1 x2 a) (write x1 x2 :: t_rev)
+  | read_gen : forall x a t_rev, generates a t_rev -> generates (cons_read x a) (read x :: t_rev)
+  | write_gen : forall x a t_rev, generates a t_rev -> generates (cons_write x a) (write x :: t_rev)
+  | table_gen : forall x a t_rev, generates a t_rev -> generates (cons_table x a) (table x :: t_rev)
   | salloc_gen : forall f x t_rev, generates (f x) t_rev -> generates (cons_salloc f) (salloc x :: t_rev).
-
-  Inductive generates_with_rem : abstract_trace -> trace -> abstract_trace -> Prop :=
-  | nil_gen_rem : forall a1 a2, abs_tr_eq a1 a2 -> generates_with_rem a1 nil a2
-  | IO_gen_rem : forall x a t_rev a', generates_with_rem a t_rev a' -> generates_with_rem (cons_IO x a) (IO x :: t_rev) a'
-  | branch_gen_rem : forall x a t_rev a', generates_with_rem a t_rev a' -> generates_with_rem (cons_branch x a) (branch x :: t_rev) a'
-  | read_gen_rem : forall x1 x2 a t_rev a', generates_with_rem a t_rev a' -> generates_with_rem (cons_read x1 x2 a) (read x1 x2 :: t_rev) a'
-  | write_gen_rem : forall x1 x2 a t_rev a', generates_with_rem a t_rev a' -> generates_with_rem (cons_write x1 x2 a) (write x1 x2 :: t_rev) a'
-  | salloc_gen_rem : forall f x t_rev a', generates_with_rem (f x) t_rev a' -> generates_with_rem (cons_salloc f) (salloc x :: t_rev) a'.
 
   Fixpoint abstract_app (a1 a2 : abstract_trace) : abstract_trace :=
     match a1 with
     | empty => a2
     | cons_IO e a1' => cons_IO e (abstract_app a1' a2)
     | cons_branch b a1' => cons_branch b (abstract_app a1' a2)
-    | cons_read sz a a1' => cons_read sz a (abstract_app a1' a2)
-    | cons_write sz a a1' => cons_write sz a (abstract_app a1' a2)
+    | cons_read a a1' => cons_read a (abstract_app a1' a2)
+    | cons_write a a1' => cons_write a (abstract_app a1' a2)
+    | cons_table a a1' => cons_table a (abstract_app a1' a2)
     | cons_salloc a1' => cons_salloc (fun w => abstract_app (a1' w) a2)
     end.
-
-  Lemma abs_tr_eq_app a01 a02 a11 a12 :
-    abs_tr_eq a01 a02 ->
-    abs_tr_eq a11 a12 ->
-    abs_tr_eq (abstract_app a01 a11) (abstract_app a02 a12).
-  Proof. intros H1 H2. induction H1; cbn [abstract_app]; try constructor; auto. Qed.
-
-  Lemma abs_tr_eq_self a :
-    abs_tr_eq a a.
-  Proof. induction a; constructor; auto. Qed.
-
-  Lemma abs_tr_eq_trans a1 a2 a3 :
-    abs_tr_eq a1 a2 ->
-    abs_tr_eq a2 a3 ->
-    abs_tr_eq a1 a3.
-  Proof.
-    intros H1. generalize dependent a3. induction H1; intros a3 H2; inversion H2; subst; constructor; auto. Qed.
-
-  Lemma abs_tr_eq_symm a1 a2 :
-    abs_tr_eq a1 a2 ->
-    abs_tr_eq a2 a1.
-  Proof. intros H1. induction H1; constructor; auto. Qed.
-
-  Lemma generates_generates_with_empty_rem a t :
-    generates a t <-> generates_with_rem a t empty.
-  Proof.
-    split; intros H.
-    - induction H; constructor; try assumption. apply abs_tr_eq_self.
-    - remember empty as a'. induction H; subst; try constructor; auto.
-      inversion H. subst. constructor.
-  Qed.
 
   Lemma generates_app :
     forall a1 a2 t1 t2,
@@ -149,8 +97,9 @@ Section WithIOEvent.
     | nil => empty
     | IO x :: t_rev' => cons_IO x (generator t_rev')
     | branch x :: t_rev' => cons_branch x (generator t_rev')
-    | read x1 x2 :: t_rev' => cons_read x1 x2 (generator t_rev')
-    | write x1 x2 :: t_rev' => cons_write x1 x2 (generator t_rev')
+    | read x :: t_rev' => cons_read x (generator t_rev')
+    | write x :: t_rev' => cons_write x (generator t_rev')
+    | table x :: t_rev' => cons_table x (generator t_rev')
     | salloc x :: t_rev' => cons_salloc (fun _ => generator t_rev')
     end.
 
@@ -158,58 +107,15 @@ Section WithIOEvent.
     generates (generator t) t.
   Proof. induction t; try constructor. destruct a; cbn [generator]; constructor; assumption. Qed.
 
-   Lemma abs_tr_eq_correct1 a t a'1 a'2 :
-    generates_with_rem a t a'1 ->
-    abs_tr_eq a'1 a'2 ->
-    generates_with_rem a t a'2.
-  Proof.
-    intros H1 H2. induction H1; constructor; auto.
-    eapply abs_tr_eq_trans; eassumption.
-  Qed.
-
-  Lemma abs_tr_eq_correct2 a1 a2 t a' :
-    generates_with_rem a1 t a' ->
-    abs_tr_eq a1 a2 ->
-    generates_with_rem a2 t a'.
-  Proof.
-    intros H1. generalize dependent a2. induction H1; intros a22 H2; try solve [ inversion H2; subst; constructor; auto ].
-    constructor. eapply abs_tr_eq_trans; try eassumption. apply abs_tr_eq_symm; assumption.
-  Qed.
-
-  Lemma generates_with_rem_app :
-    forall a1 a1' a2 t,
-      generates_with_rem a1 t a1' ->
-      generates_with_rem (abstract_app a1 a2) t (abstract_app a1' a2).
-  Proof. intros a1 a1' a2 t H. induction H; cbn [abstract_app]; constructor; try assumption.
-         apply abs_tr_eq_app. { assumption. } apply abs_tr_eq_self. Qed.
-  
-  Lemma generates_with_empty_rem_app a1 a2 t :
-    generates_with_rem a1 t empty ->
-    generates_with_rem (abstract_app a1 a2) t a2.
-  Proof. intros H. eapply generates_with_rem_app in H. apply H. Qed.
-
-  Lemma generates_with_rem_trans :
-    forall a1 a2 a3 t1 t2,
-      generates_with_rem a1 t1 a2 ->
-      generates_with_rem a2 t2 a3 ->
-      generates_with_rem a1 (t1 ++ t2) a3.
-  Proof. intros a1 a2 a3 t1 t2 H12 H23. induction H12; cbn [List.app]; try constructor; auto.
-         eapply abs_tr_eq_correct2; try eassumption. apply abs_tr_eq_symm. assumption. Qed.
-
-  Lemma rem_unique a t a'1 a'2 :
-    generates_with_rem a t a'1 ->
-    generates_with_rem a t a'2 ->
-    abs_tr_eq a'1 a'2.
-  Proof. intros H1 H2. induction H1; inversion H2; subst; auto. eapply abs_tr_eq_trans; try eassumption. apply abs_tr_eq_symm. assumption. Qed.
-
   Print abstract_trace.
   Definition head (a : abstract_trace) : qevent :=
     match a with
     | empty => qend
     | cons_IO i _ => qIO i
     | cons_branch b _ => qbranch b
-    | cons_read sz a _ => qread sz a
-    | cons_write sz a _ => qwrite sz a
+    | cons_read a _ => qread a
+    | cons_write a _ => qwrite a
+    | cons_table a _ => qtable a
     | cons_salloc _ => qsalloc
     end.
   Fixpoint predictor (a(*the whole thing*) : abstract_trace) (t(*so far*) : trace) : option qevent :=
@@ -217,8 +123,9 @@ Section WithIOEvent.
     | _, nil => Some (head a)
     | cons_IO _ a', cons (IO _) t' => predictor a' t'
     | cons_branch _ a', cons (branch _) t' => predictor a' t'
-    | cons_read _ _ a', cons (read _ _) t' => predictor a' t'
-    | cons_write _ _ a', cons (write _ _) t' => predictor a' t'
+    | cons_read _ a', cons (read _) t' => predictor a' t'
+    | cons_write _ a', cons (write _) t' => predictor a' t'
+    | cons_table _ a', cons (table _) t' => predictor a' t'
     | cons_salloc f, cons (salloc a) t' => predictor (f a) t'
     | _, _ => None (*failure*)
     end.
@@ -394,22 +301,20 @@ Section semantics.
                                       tr)
                       | None => None
                       end
-      (* if i understand correctly, this thing does not access memory at all.
-         so no change to leakage trace. *)
       | expr.inlinetable aSize t index =>
           'Some (index', mc', tr') <- eval_expr index mc tr | None;
           'Some v <- load aSize (map.of_list_word t) index' | None;
           Some (
               v,
               (addMetricInstructions 3 (addMetricLoads 4 (addMetricJumps 1 mc'))),
-              tr')
+              table index' :: tr')
       | expr.load aSize a =>
           'Some (a', mc', tr') <- eval_expr a mc tr | None;
           'Some v <- load aSize m a' | None;
           Some (
               v,
               addMetricInstructions 1 (addMetricLoads 2 mc'),
-              read aSize a' :: tr')
+              read a' :: tr')
       | expr.op op e1 e2 =>
           'Some (v1, mc', tr') <- eval_expr e1 mc tr | None;
           'Some (v2, mc'', tr'') <- eval_expr e2 mc' tr' | None;
@@ -489,7 +394,7 @@ Module exec. Section WithEnv.
     a mc' t' (_ : eval_expr m l ea mc t = Some (a, mc', t'))
     v mc'' t'' (_ : eval_expr m l ev mc' t' = Some (v, mc'', t''))
     m' (_ : store sz m a v = Some m')
-    (_ : post (write sz a :: t'') m' l (addMetricInstructions 1
+    (_ : post (write a :: t'') m' l (addMetricInstructions 1
                                           (addMetricLoads 1
                                              (addMetricStores 1 mc''))))
     : exec (cmd.store sz ea ev) t m l mc post
@@ -661,6 +566,7 @@ Module exec. Section WithEnv.
                end.
         eauto 10.
   Qed.
+  Print expr.expr.
 
   End WithEnv.
 End exec. Notation exec := exec.exec.
