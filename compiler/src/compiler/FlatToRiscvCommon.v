@@ -49,44 +49,6 @@ Require Export compiler.regs_initialized.
 Require Import coqutil.Word.Interface.
 Local Hint Mode Word.Interface.word - : typeclass_instances.
 
-Inductive predictsLE : (list LeakageEvent -> option qLeakageEvent) -> list LeakageEvent -> Prop :=
-  | predictsLE_cons :
-    forall f g e t,
-      f [] = Some (quotLE e) ->
-      (forall t', f (e :: t') = g t') ->
-      predictsLE g t ->
-      predictsLE f (e :: t)
-  | predictsLE_nil :
-    forall f,
-      f [] = Some qendLE ->
-      predictsLE f [].
-
-  Notation predicts := Semantics.predicts.
-  Check map.put. Check SCall. Print rnext_fun'. Print rnext_stmt.
-
-  Lemma predictLE_with_prefix_works prefix predict_rest rest :
-    predictsLE predict_rest rest ->
-    predictsLE (predictLE_with_prefix prefix predict_rest) (prefix ++ rest).
-  Proof.
-    intros H. induction prefix.
-    - simpl. apply H.
-    - simpl. econstructor; auto.
-  Qed.
-
-  Lemma predictLE_with_prefix_works_eq stuff prefix rest predict_rest :
-    stuff = prefix ++ rest ->
-    predictsLE predict_rest rest ->
-    predictsLE (predictLE_with_prefix prefix predict_rest) stuff.
-  Proof.
-    intros H. subst. apply predictLE_with_prefix_works.
-  Qed.
-  
-  Lemma predictLE_with_prefix_works_end prefix predict_rest :
-    predictsLE predict_rest [] ->
-    predictsLE (predictLE_with_prefix prefix predict_rest) prefix.
-  Proof.
-    intros H. eapply predictLE_with_prefix_works in H. rewrite app_nil_r in H. eassumption.
-  Qed.
 
 Import Utility.
 
@@ -126,6 +88,46 @@ Section WithParameters.
   Context {RVM: RiscvProgramWithLeakage}.
   Context {PRParams: PrimitivesParams M MetricRiscvMachine}.
   Context {ext_spec: Semantics.ExtSpec}.
+
+  Inductive predictsLE : (list LeakageEvent -> option qLeakageEvent) -> list LeakageEvent -> Prop :=
+  | predictsLE_cons :
+    forall f g e t,
+      f [] = Some (quotLE e) ->
+      (forall t', f (e :: t') = g t') ->
+      predictsLE g t ->
+      predictsLE f (e :: t)
+  | predictsLE_nil :
+    forall f,
+      f [] = Some qendLE ->
+      predictsLE f [].
+
+  Notation predicts := Semantics.predicts.
+  Check map.put. Check SCall. Print rnext_fun'. Print rnext_stmt.
+
+  Lemma predictLE_with_prefix_works prefix predict_rest rest :
+    predictsLE predict_rest rest ->
+    predictsLE (predictLE_with_prefix prefix predict_rest) (prefix ++ rest).
+  Proof.
+    intros H. induction prefix.
+    - simpl. apply H.
+    - simpl. econstructor; auto.
+  Qed.
+
+  Lemma predictLE_with_prefix_works_eq stuff prefix rest predict_rest :
+    stuff = prefix ++ rest ->
+    predictsLE predict_rest rest ->
+    predictsLE (predictLE_with_prefix prefix predict_rest) stuff.
+  Proof.
+    intros H. subst. apply predictLE_with_prefix_works.
+  Qed.
+  
+  Lemma predictLE_with_prefix_works_end prefix predict_rest :
+    predictsLE predict_rest [] ->
+    predictsLE (predictLE_with_prefix prefix predict_rest) prefix.
+  Proof.
+    intros H. eapply predictLE_with_prefix_works in H. rewrite app_nil_r in H. eassumption.
+  Qed.
+
 
   Definition runsTo{BWM: bitwidth_iset width iset}: (* BWM is unused, but makes iset inferrable *)
     MetricRiscvMachine -> (MetricRiscvMachine -> Prop) -> Prop :=
@@ -398,9 +400,9 @@ Ltac simpl_bools :=
 Section FlatToRiscv1.
   Context {iset: InstructionSet}.
   Context {fun_info: map.map String.string Z}.
+  Context {width: Z} {BW: Bitwidth width} {word: word.word width}.
   Context (compile_ext_call: fun_info -> Z -> Z -> stmt Z -> list Instruction).
   Context (leak_ext_call: list LeakageEvent).
-  Context {width: Z} {BW: Bitwidth width} {word: word.word width}.
   Context {word_ok: word.ok word}.
   Context {locals: map.map Z word}.
   Context {mem: map.map word byte}.
@@ -506,8 +508,8 @@ Section FlatToRiscv1.
   Lemma go_leak_load: forall sz (x a ofs: Z) (addr v: word) (initialL: RiscvMachineL) post (f : LeakageEvent -> M unit),
       valid_register a ->
       map.get initialL.(getRegs) a = Some addr ->
-      mcomp_sat (f (leak_load iset sz (word.unsigned addr + ofs))) initialL post ->
-      mcomp_sat (Bind (leakage_of_instr word.unsigned word.signed Machine.getRegister (compile_load iset sz x a ofs)) f) initialL post.
+      mcomp_sat (f (leak_load iset sz (word.add addr (word.of_Z ofs)))) initialL post ->
+      mcomp_sat (Bind (leakage_of_instr Machine.getRegister (compile_load iset sz x a ofs)) f) initialL post.
   Proof.
     unfold leakage_of_instr, leakage_of_instr_I, leak_load, compile_load, Memory.bytes_per, Memory.bytes_per_word.
     rewrite bitwidth_matches.
@@ -605,7 +607,7 @@ Section FlatToRiscv1.
             getMem finalL = getMem initialL /\
             getPc finalL = getNextPc initialL /\
             getNextPc finalL = word.add (getPc finalL) (word.of_Z 4) /\
-            getTrace finalL = leak_load iset Syntax.access_size.word (word.unsigned base + ofs) :: getTrace initialL /\
+            getTrace finalL = leak_load iset Syntax.access_size.word (word.add base (word.of_Z ofs)) :: getTrace initialL /\
             getMetrics finalL = addMetricInstructions 1 (addMetricLoads 2 (getMetrics initialL)) /\
             valid_machine finalL).
   Proof using word_ok mem_ok PR BWM.
@@ -651,7 +653,7 @@ Section FlatToRiscv1.
            (Exec * ptsto_word addr v_new * Rdata)%sep (getMem finalL) /\
            getPc finalL = getNextPc initialL /\
            getNextPc finalL = word.add (getPc finalL) (word.of_Z 4) /\
-           getTrace finalL = leak_store iset Syntax.access_size.word (word.unsigned base + ofs) :: getTrace initialL /\
+           getTrace finalL = leak_store iset Syntax.access_size.word (word.add base (word.of_Z ofs)) :: getTrace initialL /\
            getMetrics finalL = addMetricInstructions 1 (addMetricStores 1 (addMetricLoads 1 (getMetrics initialL))) /\
            valid_machine finalL).
   Proof using word_ok mem_ok PR BWM.
@@ -991,7 +993,7 @@ Global Hint Resolve
      valid_FlatImp_var_implies_valid_register
      valid_FlatImp_vars_bcond_implies_valid_registers_bcond
 : sidecondition_hints.
-
+Check Decode.leakage_of_instr.
 Ltac simulate'_step :=
   match goal with
   (* mentions definition only introduced in FlatToRiscvDef: *)
@@ -1000,7 +1002,7 @@ Ltac simulate'_step :=
   (* lemmas introduced only in this file: *)
   | |- mcomp_sat (Monads.Bind (Execute.execute (compile_load _ _ _ _ _)) _) _ _ =>
        eapply go_load; [ sidecondition.. | idtac ]
-  | |- mcomp_sat (Monads.Bind (Decode.leakage_of_instr _ _ _ (compile_load _ _ _ _ _)) _) _ _ =>
+  | |- mcomp_sat (Monads.Bind (Decode.leakage_of_instr _ (compile_load _ _ _ _ _)) _) _ _ =>
        eapply go_leak_load; [ sidecondition.. | idtac ]
   | |- mcomp_sat (Monads.Bind (Execute.execute (compile_store _ _ _ _ _)) _) _ _ =>
        eapply go_store; [ sidecondition.. | idtac ]

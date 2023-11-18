@@ -440,7 +440,7 @@ Section Go.
       subset (footpr (program iset pc0 [inst] * Rexec)%sep) (of_list initialL.(getXAddrs)) ->
       (program iset pc0 [inst] * Rexec * R)%sep initialL.(getMem) ->
       not_InvalidInstruction inst ->
-      mcomp_sat (Bind (Decode.leakage_of_instr word.unsigned word.signed getRegister inst)
+      mcomp_sat (Bind (Decode.leakage_of_instr getRegister inst)
                    (fun e => Bind (leakEvent e)
                                (fun _ => (Bind (execute inst)
                                             (fun _ => endCycleNormal)))))

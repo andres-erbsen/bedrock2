@@ -68,7 +68,8 @@ Section FlatToRiscv1.
 
 
   Context (iset: InstructionSet).
-
+  Context {width} {BW: Bitwidth width} {word: word.word width}.
+ 
   (* Part 2: compilation *)
 
   (* load & store depend on the bitwidth: on 32-bit machines, Lw just loads 4 bytes,
@@ -94,7 +95,7 @@ Section FlatToRiscv1.
   Definition leak_Ld x := I64Leakage (Ld_leakage x).
 
   Definition leak_load(sz: access_size) :
-    Z -> LeakageEvent :=
+    word -> LeakageEvent :=
     match sz with
     | access_size.one => leak_Lbu
     | access_size.two => leak_Lhu
@@ -117,7 +118,7 @@ Section FlatToRiscv1.
   Definition leak_Sd x := I64Leakage (Sd_leakage x).
 
   Definition leak_store(sz: access_size) :
-    Z -> LeakageEvent :=
+    word -> LeakageEvent :=
     match sz with
     | access_size.one => leak_Sb
     | access_size.two => leak_Sh
@@ -349,14 +350,14 @@ Section FlatToRiscv1.
                    :: (save_regs regs (offset + bytes_per_word))
     end. Print leak_store. Print compile_store.
 
-  Fixpoint leak_save_regs{width: Z}{BW: Bitwidth width}{word: word.word width}
+  Fixpoint leak_save_regs
     (sp_val: word)(regs: list Z)(offset: Z): list LeakageEvent :=
     match regs with
     | nil => nil
-    | r :: regs' => [leak_store access_size.word (word.unsigned sp_val + offset)] ++
+    | r :: regs' => [leak_store access_size.word (word.add sp_val (word.of_Z offset))] ++
                       leak_save_regs sp_val regs' (offset + bytes_per_word)
     end.
-
+  
   Fixpoint load_regs(regs: list Z)(offset: Z): list Instruction :=
     match regs with
     | nil => nil
@@ -364,11 +365,11 @@ Section FlatToRiscv1.
                    :: (load_regs regs (offset + bytes_per_word))
     end.
 
-  Fixpoint leak_load_regs{width: Z}{BW: Bitwidth width}{word: word.word width}
+  Fixpoint leak_load_regs
     (sp_val: word)(regs: list Z)(offset: Z): list LeakageEvent :=
     match regs with
     | nil => nil
-    | r :: regs' => [leak_load access_size.word (word.unsigned sp_val + offset)] ++
+    | r :: regs' => [leak_load access_size.word (word.add sp_val (word.of_Z offset))] ++
                       leak_load_regs sp_val regs' (offset + bytes_per_word)
     end.
 
@@ -401,7 +402,7 @@ Section FlatToRiscv1.
   (* All positions are relative to the beginning of the progam, so we get completely
      position independent code. *)
 
-  Context {width: Z}{BW: Bitwidth width}{word: word.word width} {mem: map.map word byte}.
+  Context {mem: map.map word byte}.
   Context {env: map.map String.string (list Z * list Z * stmt Z)}.
   Context {pos_map: map.map String.string Z}.
   Context (compile_ext_call: pos_map -> Z -> Z -> stmt Z -> list Instruction).
@@ -459,12 +460,12 @@ Section FlatToRiscv1.
                   let beforeBody :=
                       [ leak_Addi ] ++ (* Addi sp sp (-framesize) *)
                       [ leak_store access_size.word
-                          (word.unsigned sp_val' + (bytes_per_word * (Z.of_nat (length need_to_save) + scratchwords))) ] ++
+                          (word.add sp_val' (word.of_Z (bytes_per_word * (Z.of_nat (length need_to_save) + scratchwords)))) ] ++
                       leak_save_regs sp_val' need_to_save (bytes_per_word * scratchwords) in
                   let afterBody :=
                     leak_load_regs sp_val' need_to_save (bytes_per_word * scratchwords) ++
                       [ leak_load access_size.word
-                          (word.unsigned sp_val' + (bytes_per_word * (Z.of_nat (length need_to_save) + scratchwords))) ] ++
+                          (word.add sp_val' (word.of_Z (bytes_per_word * (Z.of_nat (length need_to_save) + scratchwords)))) ] ++
                       [ leak_Addi ] ++ (* Addi sp sp framesize *)
                       [ leak_Jalr ] in
                   
@@ -493,7 +494,7 @@ Section FlatToRiscv1.
               match next t_so_far with
               | Some (qread sz a) =>
                   predictLE_with_prefix
-                    [leak_load sz (word.unsigned a)]
+                    [leak_load sz a]
                     (f (t_so_far ++ [read sz a]))
                     rt_so_far
               | _ => None
@@ -502,7 +503,7 @@ Section FlatToRiscv1.
               match next t_so_far with
               | Some (qwrite sz a) =>
                   predictLE_with_prefix
-                    [leak_store sz (word.unsigned a)]
+                    [leak_store sz a]
                     (f (t_so_far ++ [write sz a]))
                     rt_so_far
               | _ => None

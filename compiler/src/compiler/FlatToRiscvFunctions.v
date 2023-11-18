@@ -1702,24 +1702,18 @@ Section Proofs.
         unfold valid_FlatImp_var, RegisterNames.sp in *.
         blia.
       }
-      inline_iff1.
+      inline_iff1. simulate'. simpl.
       run1det. clear H0. (* <-- TODO this should not be needed *) run1done.
+
+      (*ct stuff*)
       do 2 eexists. split.
       { instantiate (1 := [_]). reflexivity. } split.
       { instantiate (1 := [_]). reflexivity. }
       exists (S O). intros. destruct fuel as [|fuel']; [blia|].
       simpl. apply Semantics.predict_cons in H0. rewrite H0.
-      simpl. econstructor.
-      { f_equal. f_equal. f_equal. (*this is kind of ugly. is there a nice way to fix it?*)
-        Search (word.unsigned (_ + _)).
-        (* this looks innocuous, but it's actually a big problem.
-           I was wondering whether memory addresses should be represented as Z or as word
-           in leakage_of_instr.  This demonstrates that it needs to be word - not Z, as it 
-           currently is. *)
-        solve_word_eq word_ok. word- f_equal. reflexivity. 
-      rSearch predicts.
-      simpl. cbn [rnext_stmt].
-
+      simpl. econstructor; try reflexivity.
+      assumption. Print concrete_leakage_of_instr.
+      
     - idtac "Case compile_stmt_correct/SStore".
       inline_iff1.
       simpl_MetricRiscvMachine_get_set.

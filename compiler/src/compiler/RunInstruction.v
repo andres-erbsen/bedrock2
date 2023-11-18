@@ -190,8 +190,7 @@ Section Run.
           valid_machine finalL).
 
   Print leakage_of_instr_I. Locate "[[ _ ]]".
-  Print getRegister.
-  Print concrete_leakage_of_instr_Z.
+  Print getRegister. Check concrete_leakage_of_instr.
   
   Definition run_ImmReg_spec(Op: Z -> Z -> Z -> Instruction)
                             (f: word -> word -> word): Prop :=
@@ -212,7 +211,7 @@ Section Run.
         finalL.(getPc) = initialL.(getNextPc) /\
         finalL.(getNextPc) = word.add finalL.(getPc) (word.of_Z 4) /\
         finalL.(getMetrics) = addMetricInstructions 1 (addMetricLoads 1 initialL.(getMetrics)) /\
-        finalL.(getTrace) = (concrete_leakage_of_instr_Z (fun n => if n =? rs then word.unsigned rs_val else 0) (Op rd rs imm)) :: initialL.(getTrace) /\
+        finalL.(getTrace) = (concrete_leakage_of_instr (fun n => if n =? rs then rs_val else word.of_Z 0) (Op rd rs imm)) :: initialL.(getTrace) /\
         valid_machine finalL).
 
   Definition run_Load_spec(n: nat)(L: Z -> Z -> Z -> Instruction)
@@ -238,7 +237,7 @@ Section Run.
         finalL.(getPc) = initialL.(getNextPc) /\
         finalL.(getNextPc) = word.add finalL.(getPc) (word.of_Z 4) /\
         finalL.(getMetrics) = addMetricInstructions 1 (addMetricLoads 2 initialL.(getMetrics)) /\
-        finalL.(getTrace) = concrete_leakage_of_instr _ word.unsigned word.signed (fun n => if n =? rs then base else word.of_Z 0) (L rd rs ofs) :: initialL.(getTrace) /\
+        finalL.(getTrace) = concrete_leakage_of_instr (fun n => if n =? rs then base else word.of_Z 0) (L rd rs ofs) :: initialL.(getTrace) /\
         valid_machine finalL).
 
   Definition run_Store_spec(n: nat)(S: Z -> Z -> Z -> Instruction): Prop :=
@@ -264,7 +263,7 @@ Section Run.
         finalL.(getPc) = initialL.(getNextPc) /\
         finalL.(getNextPc) = word.add finalL.(getPc) (word.of_Z 4) /\
         finalL.(getMetrics) = addMetricInstructions 1 (addMetricStores 1 (addMetricLoads 1 initialL.(getMetrics))) /\
-        finalL.(getTrace) = concrete_leakage_of_instr _ word.unsigned word.signed (fun n => if n =? rs1 then base else if n =? rs2 then v_new else word.of_Z 0) (S rs1 rs2 ofs) :: initialL.(getTrace)/\
+        finalL.(getTrace) = concrete_leakage_of_instr (fun n => if n =? rs1 then base else if n =? rs2 then v_new else word.of_Z 0) (S rs1 rs2 ofs) :: initialL.(getTrace)/\
         valid_machine finalL).
 
   Ltac inline_iff1 :=
