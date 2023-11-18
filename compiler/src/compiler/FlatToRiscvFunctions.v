@@ -1732,9 +1732,17 @@ Section Proofs.
       destruct (eq_sym (LittleEndianList.length_le_split (Memory.bytes_per(width:=width) sz) (word.unsigned val))) in t0, E.
       subst_load_bytes_for_eq.
       run1det. run1done.
-      eapply preserve_subset_of_xAddrs. 1: assumption.
-      ecancel_assumption.
-
+      { eapply preserve_subset_of_xAddrs. 1: assumption.
+        ecancel_assumption. }
+      (*ct stuff, copied from load*)
+      do 2 eexists. split.
+      { instantiate (1 := [_]). reflexivity. } split.
+      { instantiate (1 := [_]). reflexivity. }
+      exists (S O). intros. destruct fuel as [|fuel']; [blia|].
+      simpl. apply Semantics.predict_cons in H7. rewrite H7.
+      simpl. econstructor; try reflexivity.
+      assumption.
+      
     - idtac "Case compile_stmt_correct/SInlinetable".
       inline_iff1.
       run1det.
@@ -1754,6 +1762,14 @@ Section Proofs.
         blia.
       }
       run1done.
+      (*ct stuff, copied from load*)
+      do 2 eexists. split.
+      { instantiate (1 := []). reflexivity. } split.
+      { instantiate (1 := [_; _; _]). reflexivity. }
+      exists (S O). intros. destruct fuel as [|fuel']; [blia|].
+      simpl. apply Semantics.predict_cons in H7. rewrite H7.
+      simpl. econstructor; try reflexivity.
+      assumption.
 
     - idtac "Case compile_stmt_correct/SStackalloc".
       rename H1 into IHexec.

@@ -505,7 +505,7 @@ Section FlatToRiscv1.
 
   Check leak_load.
 
-  Lemma go_leak_load: forall sz (x a ofs: Z) (addr v: word) (initialL: RiscvMachineL) post (f : LeakageEvent -> M unit),
+  Lemma go_leak_load: forall sz (x a ofs: Z) (addr: word) (initialL: RiscvMachineL) post (f : LeakageEvent -> M unit),
       valid_register a ->
       map.get initialL.(getRegs) a = Some addr ->
       mcomp_sat (f (leak_load iset sz (word.add addr (word.of_Z ofs)))) initialL post ->
@@ -517,8 +517,7 @@ Section FlatToRiscv1.
       (* note: "rewrite E" does not work because "width" also appears in the type of "word",
          but we don't need to rewrite in the type of word, only in the type of the tuple,
          which works if we do it before intro'ing it *)
-      (destruct (width =? 32) eqn: E');
-      clear E';
+      (destruct (width =? 32));
       intros; destruct sz;
       simulate'';
       eassumption.
@@ -556,6 +555,24 @@ Section FlatToRiscv1.
         simp; simulate''; simpl; simpl_word_exprs word_ok; try eassumption.
   Qed.
 
+  Lemma go_leak_store: forall sz (x a ofs: Z) (addr: word) (initialL: RiscvMachineL) post f,
+    valid_register a ->
+    map.get initialL.(getRegs) a = Some addr ->
+    mcomp_sat (f (leak_store iset sz (word.add addr (word.of_Z ofs)))) initialL post ->
+    mcomp_sat (Bind (leakage_of_instr Machine.getRegister (compile_store iset sz a x ofs)) f) initialL post.
+  Proof.
+    unfold leakage_of_instr, leakage_of_instr_I, leak_store, compile_store, Memory.bytes_per, Memory.bytes_per_word.
+    rewrite bitwidth_matches.
+    destruct width_cases as [E | E];
+      (* note: "rewrite E" does not work because "width" also appears in the type of "word",
+         but we don't need to rewrite in the type of word, only in the type of the tuple,
+         which works if we do it before intro'ing it *)
+      (destruct (width =? 32));
+      intros; destruct sz;
+      simulate'';
+      eassumption.
+  Qed.
+  
   Lemma run_compile_load: forall sz: Syntax.access_size,
       run_Load_spec iset (@Memory.bytes_per width sz) (compile_load iset sz) id.
   Proof using word_ok mem_ok PR BWM.
@@ -1006,6 +1023,8 @@ Ltac simulate'_step :=
        eapply go_leak_load; [ sidecondition.. | idtac ]
   | |- mcomp_sat (Monads.Bind (Execute.execute (compile_store _ _ _ _ _)) _) _ _ =>
        eapply go_store; [ sidecondition.. | idtac ]
+  | |- mcomp_sat (Monads.Bind (Decode.leakage_of_instr _ (compile_store _ _ _ _ _)) _) _ _ =>
+       eapply go_leak_store; [ sidecondition.. | idtac ]
   (* simulate_step from GoFlatToRiscv: *)
   | |- _ => simulate_step
   | |- _ => simpl_modu4_0
