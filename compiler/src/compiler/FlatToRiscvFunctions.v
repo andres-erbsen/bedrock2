@@ -425,7 +425,7 @@ Section Proofs.
 
   Search LeakageEvent. Print qLeakageEvent.
   Notation predicts := Semantics.predicts.
-  Check FlatToRiscvCommon.predictsLE.
+  Check FlatToRiscvCommon.predictsLE. Print rnext_stmt. Print rnext_fun.
 
   Lemma compile_function_body_correct: forall (e_impl_full : env) m l mc (argvs : list word)
     (st0 : locals) (post outcome : Semantics.trace -> mem -> locals -> MetricLog -> Prop)
@@ -461,7 +461,7 @@ Section Proofs.
                     predicts next (t0 ++ rev t' ++ t'') ->
                     predictsLE (fun t => f (t0 ++ rev t') t) rt'' ->
                     Nat.le F fuel ->
-                    predictsLE (fun t => rnext_stmt iset leak_ext_call e_impl_full fuel next t0 g0.(p_sp) (bytes_per_word * rem_framewords g0) body t f) (rev rt' ++ rt'')))
+                    predictsLE (fun t => rnext_stmt iset compile_ext_call leak_ext_call e_pos program_base e_impl_full fuel next t0 pos0 g0.(p_sp) (bytes_per_word * rem_framewords g0) body t f) (rev rt' ++ rt'')))
     (HOutcome: forall (t' : Semantics.trace) (m' : mem) (mc' : MetricLog) (st1 : locals),
         outcome t' m' st1 mc' ->
         exists (retvs : list word) (l' : locals),
@@ -513,7 +513,7 @@ Section Proofs.
                   predicts next (t0 ++ rev t' ++ t'') ->
                   predictsLE (fun t => f (t0 ++ rev t') t) rt'' ->
                   Nat.le F fuel ->
-                  predictsLE (fun t => rnext_fun iset leak_ext_call e_impl_full fuel next t0 g.(p_sp) argnames retnames body t f) (rev rt' ++ rt'')
+                  predictsLE (fun t => rnext_fun iset compile_ext_call leak_ext_call e_pos program_base e_impl_full fuel next t0 pos g.(p_sp) argnames retnames body t f) (rev rt' ++ rt'')
         ).
   Proof.
     intros * IHexec OC BC OL Exb GetMany Ext GE FS C V Mo Mo' Gra RaM GPC A GM.
@@ -1495,15 +1495,17 @@ Section Proofs.
           finalTrace = t' ++ t /\
           RiscvMachine.getTrace finalL = rt' ++ getTrace /\
           (exists F : nat,
-             forall (next : Semantics.trace -> option Semantics.qevent) (t0 t'' : list Semantics.event)
-               (rt'' : list LeakageEvent) (fuel : nat)
+             forall (next : Semantics.trace -> option Semantics.qevent)
+               (t0 t'' : list Semantics.event) (rt'' : list LeakageEvent) 
+               (fuel : nat)
                (f : list Semantics.event -> list LeakageEvent -> option qLeakageEvent),
              predicts next (t0 ++ rev t' ++ t'') ->
              predictsLE (fun t1 : list LeakageEvent => f (t0 ++ rev t') t1) rt'' ->
              Nat.le F fuel ->
              predictsLE
                (fun t1 : list LeakageEvent =>
-                rnext_stmt iset leak_ext_call e_impl_full fuel next t0 p_sp
+                rnext_stmt iset compile_ext_call leak_ext_call e_pos program_base e_impl_full
+                  fuel next t0 pos p_sp
                   (bytes_per_word * #(Datatypes.length unused_part_of_caller_frame))
                   (SCall binds fname args) t1 f) (rev rt' ++ rt'')))))
       end.
@@ -1689,7 +1691,8 @@ Section Proofs.
       do 2 eexists. split; [reflexivity|]. split.
       { rewrite H0p5p1. simpl. rewrite app_one_cons. rewrite app_assoc. reflexivity. }
       exists (S F). intros. destruct fuel as [|fuel']; [blia|]. cbn [rnext_stmt].
-      Search (map.get e_impl_full fname). rewrite H.
+      Search (map.get e_impl_full fname). rewrite H. Search (map.get e_pos fname).
+      rewrite GetPos.
       Search predictsLE. eapply predictLE_with_prefix_works_eq.
       { rewrite rev_app_distr. simpl. reflexivity. }
       cbv [rnext_fun] in H0p5p2. Search p_sp. subst. simpl in H0p5p2.
@@ -1769,9 +1772,10 @@ Section Proofs.
       exists (S O). intros. destruct fuel as [|fuel']; [blia|].
       cbn [rev rnext_stmt]. apply Semantics.predict_cons in H14. rewrite H14.
       cbn [Semantics.q]. cbn [List.app].
-      simpl. econstructor; try reflexivity.
+      eapply predictLE_with_prefix_works_eq.
+      { reflexivity. }
       assumption.
-
+      
     - idtac "Case compile_stmt_correct/SStackalloc".
       rename H1 into IHexec.
       assert (x <> RegisterNames.sp). {

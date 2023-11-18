@@ -334,7 +334,7 @@ Section WithParameters.
   (* note: [e_impl_reduced] and [funnames] will shrink one function at a time each time
      we enter a new function body, to make sure functions cannot call themselves, while
      [e_impl] and [e_pos] remain the same throughout because that's mandated by
-     [FlatImp.exec] and [compile_stmt], respectively *)
+     [FlatImp.exec] and [compile_stmt], respectively *) Print rnext_stmt.
   Definition compiles_FlatToRiscv_correctly{BWM: bitwidth_iset width iset}
     (f: pos_map -> Z -> Z -> stmt -> list Instruction)
     (s: stmt): Prop :=
@@ -372,8 +372,8 @@ Section WithParameters.
                  predicts next (t0 ++ rev t' ++ t'') ->
                  predictsLE (fun t => f (t0 ++ rev t') t) rt'' ->
                  Nat.le F fuel ->
-                 predictsLE (fun t => rnext_stmt iset leak_ext_call e_impl_full fuel next t0 g.(p_sp) (bytes_per_word * rem_framewords g) s t f) (rev rt' ++ rt'')).
-
+                 predictsLE (fun t => rnext_stmt iset compile_ext_call leak_ext_call e_pos program_base e_impl_full fuel next t0 pos g.(p_sp) (bytes_per_word * rem_framewords g) s t f) (rev rt' ++ rt'')).
+Print rnext_stmt.
 End WithParameters.
 
 Ltac simpl_g_get :=

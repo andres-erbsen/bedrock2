@@ -615,7 +615,7 @@ Section FlatToRiscv1.
               match next t_so_far with
               | Some (qtable i') =>
                   predictLE_with_prefix
-                    [leak_Jal; leak_Add; leak_load sz i']
+                    [leak_Jal; leak_Add; leak_load sz (word.add (word.add (word.add program_base (word.of_Z myPos)) (word.of_Z 4)) i')]
                     (f (t_so_far ++ [table i']))
                     rt_so_far
               | _ => None
