@@ -86,7 +86,7 @@ Section FlatToRiscvLiterals.
       runsTo (withRegs (map.put initialL.(getRegs) x (word.of_Z v))
              (withPc     (add initialL.(getPc) d)
              (withNextPc (add initialL.(getNextPc) d)
-             (withLeakageEvents (leak_lit iset v)
+             (withLeakageEvents (rev (leak_lit iset v))
              (withMetrics (updateMetricsForLiteral v initialL.(getMetrics)) initialL)))))
              post ->
       runsTo initialL post.
@@ -202,7 +202,7 @@ Section FlatToRiscvLiterals.
       runsTo (withRegs (map.put initialL.(getRegs) x (word.of_Z v))
              (withPc     (add initialL.(getPc) d)
              (withNextPc (add initialL.(getNextPc) d)
-             (withLeakageEvents (leak_lit iset v)
+             (withLeakageEvents (rev (leak_lit iset v))
              (withMetrics (updateMetricsForLiteral v initialL.(getMetrics)) initialL)))))
              post ->
       runsTo initialL post.

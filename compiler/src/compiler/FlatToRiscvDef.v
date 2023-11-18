@@ -262,7 +262,7 @@ Section FlatToRiscv1.
   Definition leak_Lui := ILeakage Lui_leakage.
 
   Definition leak_lit_32bit : list LeakageEvent :=
-    [ leak_Xori ; leak_Lui ].
+    [ leak_Lui ; leak_Xori ].
 
   Definition compile_lit_64bit(rd: Z)(v: Z): list Instruction :=
     let v0 := bitSlice v  0 11 in
@@ -278,13 +278,13 @@ Section FlatToRiscv1.
        Xori rd rd v0 ]].
 
   Definition leak_lit_64bit : list LeakageEvent :=
-    [ leak_Xori ;
-      leak_Slli ;
+    leak_lit_32bit ++
+    [ leak_Slli ;
       leak_Xori ;
       leak_Slli ;
       leak_Xori ;
-      leak_Slli ] ++
-      leak_lit_32bit.
+      leak_Slli ;
+      leak_Xori ].
 
   Definition compile_lit(rd: Z)(v: Z): list Instruction :=
     if ((-2^11 <=? v)%Z && (v <? 2^11)%Z)%bool then

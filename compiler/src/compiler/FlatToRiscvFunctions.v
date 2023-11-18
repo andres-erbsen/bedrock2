@@ -1928,6 +1928,24 @@ Section Proofs.
           1: congruence.
           simpl_addrs.
           reflexivity.
+        * (*ct stuff*)
+          do 2 eexists. split.
+          { rewrite app_one_cons. rewrite app_assoc. reflexivity. } split.
+          { cbv [trivialBind trivialReturn]. rewrite app_one_cons, app_assoc. reflexivity. }
+          exists (S F). intros. destruct fuel as [|fuel']; [blia|].
+          cbn [rnext_stmt]. simpl_addrs. eapply predictLE_with_prefix_works_eq.
+          { rewrite rev_app_distr. reflexivity. }
+          simpl_addrs. eapply H7p7p2.
+          { rewrite rev_app_distr in H7. repeat rewrite <- app_assoc in H7.
+            repeat rewrite <- app_assoc. simpl in H7. simpl.
+            remember (p_sp + _) as new_sp. eassert (new_sp = _).
+            2: { rewrite H13 in H7. eapply H7. }
+            subst. solve_word_eq word_ok. }
+          { rewrite rev_app_distr in H10. repeat rewrite <- app_assoc. simpl in H10. simpl.
+            remember (p_sp + _) as new_sp. eassert (new_sp = _).
+            2: { rewrite H13 in H10. eapply H10. }
+            subst. solve_word_eq word_ok. }
+          blia.
 
     - idtac "Case compile_stmt_correct/SLit".
       inline_iff1.
@@ -1944,13 +1962,21 @@ Section Proofs.
           blia.
         }
         run1done.
-        cbn.
-        remember (updateMetricsForLiteral v initialL_metrics) as finalMetrics;
-        symmetry in HeqfinalMetrics;
-        pose proof update_metrics_for_literal_bounded (width := width) as Hlit;
-        specialize Hlit with (1 := HeqfinalMetrics);
-        MetricsToRiscv.solve_MetricLog.
-
+        { cbn.
+          remember (updateMetricsForLiteral v initialL_metrics) as finalMetrics;
+            symmetry in HeqfinalMetrics;
+            pose proof update_metrics_for_literal_bounded (width := width) as Hlit;
+            specialize Hlit with (1 := HeqfinalMetrics);
+            MetricsToRiscv.solve_MetricLog. }
+        (*ct things*)
+        do 2 eexists. split.
+        { instantiate (1 := []). reflexivity. } split.
+        { reflexivity. }
+        exists (S O). intros. destruct fuel as [|fuel']; [blia|].
+        simpl. eapply predictLE_with_prefix_works_eq.
+        { rewrite rev_involutive. reflexivity. }
+        { rewrite app_nil_r in H8. assumption. }
+        
     - idtac "Case compile_stmt_correct/SOp".
       assert (x <> RegisterNames.sp). {
         unfold valid_FlatImp_var, RegisterNames.sp in *.
@@ -1959,7 +1985,7 @@ Section Proofs.
       inline_iff1;
       match goal with
       | op: Syntax.bopname.bopname |- _ => destr op
-      end.
+      end. 
       all: match goal with
            | y: operand, H: context[Syntax.bopname.eq] |- _ =>
                destr y; simpl in *;
@@ -1978,10 +2004,32 @@ Section Proofs.
                  eauto 8 with map_hints
                | try fwd; try eauto 8 with map_hints ]
            end.
+      Ltac doSomething fuel H10 :=
+        do 2 eexists; split; [instantiate (1 := []); reflexivity |
+                               split; [instantiate (1 := [_]); reflexivity|
+                                        exists (S O); intros; destruct fuel as [|fuel']; [blia|]];
+                               simpl; econstructor; try reflexivity;
+                               rewrite app_nil_r in H10; assumption].
+      all: try doSomething fuel H10.
+      
+      16: {
+        simpl. econstructor; try reflexivity. rewrite app_nil_r in H10. assumption. }
+      2: { do 2 eexists. split.
+           { instantiate (1 := []). reflexivity. } split.
+           { instantiate (1 := [_]). reflexivity. }
+           exists (S O). intros. destruct fuel as [|fuel']; [blia|].
+           simpl. econstructor; try reflexivity. rewrite app_nil_r in H10. assumption. }
+      3: { do 2 eexists. split.
+           { instantiate (1 := []). reflexivity. } split.
+           { instantiate (1 := [_]). reflexivity. }
+           exists (S O). intros. destruct fuel as [|fuel']; [blia|].
+           simpl. econstructor; try reflexivity. rewrite app_nil_r in H10. assumption. }
+      
+      
       all: match goal with
            | H: context[InvalidInstruction (-1)] |- _ =>  assert (Encode.verify (InvalidInstruction (-1)) iset \/
                   valid_InvalidInstruction (InvalidInstruction (-1))) by (eapply invert_ptsto_instr; ecancel_assumption)
-           | |- _ => run1det; run1done
+           | |- _ => (*run1det; run1done*)simulate'
            end.
       all:
         match goal with
