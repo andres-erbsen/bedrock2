@@ -499,36 +499,28 @@ Section FlatToRiscv1.
         Memory.load, Memory.load_Z in *;
         simp; simulate''; simpl; simpl_word_exprs word_ok; destruct initialL;
           try eassumption].
-  Qed.
+  Qed. Check go_load.
 
-  Lemma go_leak_load: forall sz (x a ofs: Z) (addr v: word) (initialL: RiscvMachineL) post e f,
-      valid_register x ->
+  Check leak_load.
+
+  Lemma go_leak_load: forall sz (x a ofs: Z) (addr v: word) (initialL: RiscvMachineL) post (f : LeakageEvent -> M unit),
       valid_register a ->
       map.get initialL.(getRegs) a = Some addr ->
-      Memory.load sz (getMem initialL) (word.add addr (word.of_Z ofs)) = Some v ->
-      mcomp_sat (f e)
-                (withRegs (map.put initialL.(getRegs) x v) (updateMetrics (addMetricLoads 1) initialL)) post ->
+      mcomp_sat (f (leak_load iset sz (word.unsigned addr + ofs))) initialL post ->
       mcomp_sat (Bind (leakage_of_instr word.unsigned word.signed Machine.getRegister (compile_load iset sz x a ofs)) f) initialL post.
   Proof.
-    unfold leakage_of_instr, leakage_of_instr_I, compile_load, Memory.load, Memory.load_Z, Memory.bytes_per, Memory.bytes_per_word.
+    unfold leakage_of_instr, leakage_of_instr_I, leak_load, compile_load, Memory.bytes_per, Memory.bytes_per_word.
     rewrite bitwidth_matches.
     destruct width_cases as [E | E];
       (* note: "rewrite E" does not work because "width" also appears in the type of "word",
          but we don't need to rewrite in the type of word, only in the type of the tuple,
          which works if we do it before intro'ing it *)
-      (destruct (width =? 32) eqn: E'; [apply Z.eqb_eq in E' | apply Z.eqb_neq in E']);
-      try congruence;
+      (destruct (width =? 32) eqn: E');
       clear E';
-      [set (nBytes := 4%nat) | set (nBytes := 8%nat)];
-      replace (Z.to_nat ((width + 7) / 8)) with nBytes by (subst nBytes; rewrite E; reflexivity);
-      subst nBytes;
       intros; destruct sz;
-      try solve [
-        unfold execute, ExecuteI.execute, ExecuteI64.execute, translate, DefaultRiscvState,
-        Memory.load, Memory.load_Z in *;
-        simp; simulate''; simpl; simpl_word_exprs word_ok; destruct initialL;
-        try eassumption]. (*CONTINUE HERE*)
-  Abort.
+      simulate'';
+      eassumption.
+  Qed.
 
   Arguments invalidateWrittenXAddrs: simpl never.
 
@@ -1008,6 +1000,8 @@ Ltac simulate'_step :=
   (* lemmas introduced only in this file: *)
   | |- mcomp_sat (Monads.Bind (Execute.execute (compile_load _ _ _ _ _)) _) _ _ =>
        eapply go_load; [ sidecondition.. | idtac ]
+  | |- mcomp_sat (Monads.Bind (Decode.leakage_of_instr _ _ _ (compile_load _ _ _ _ _)) _) _ _ =>
+       eapply go_leak_load; [ sidecondition.. | idtac ]
   | |- mcomp_sat (Monads.Bind (Execute.execute (compile_store _ _ _ _ _)) _) _ _ =>
        eapply go_store; [ sidecondition.. | idtac ]
   (* simulate_step from GoFlatToRiscv: *)

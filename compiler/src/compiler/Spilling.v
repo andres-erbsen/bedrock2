@@ -1629,30 +1629,6 @@ Section Spilling.
     all: try assumption.
   Qed.
   
-  Lemma predict_with_prefix_ext prefix predict_rest1 predict_rest2 t :
-    (forall t0, predict_rest1 t0 = predict_rest2 t0) ->
-    predict_with_prefix prefix predict_rest1 t = predict_with_prefix prefix predict_rest2 t.
-  Proof.
-    intros. generalize dependent t. induction prefix.
-    - simpl. apply H.
-    - destruct t; simpl.
-      + reflexivity.
-      + apply IHprefix.
-  Qed.
-
-  Search predicts.
-
-  Lemma predict_cons e f t1 t2 :
-    predicts f (t1 ++ e :: t2) ->
-    f t1 = Some (q e).
-  Proof.
-    clear. intros H. generalize dependent f. induction t1.
-    - intros. simpl in H. inversion H. subst. assumption.
-    - intros. simpl in H. inversion H. subst. rewrite H4. apply IHt1. assumption.
-  Qed.
-
-  Print predicts.
-  
   Lemma spilling_correct : forall
       (e1 e2 : env)
       (Ev : spill_functions e1 = Success e2)
@@ -1744,7 +1720,8 @@ Section Spilling.
           exists (S O). intros.
           repeat (rewrite rev_app_distr || rewrite rev_involutive || cbn [rev List.app]).
           destruct fuel' as [|fuel']; [blia|]. simpl.
-          simpl in H5. apply predict_cons in H5. rewrite H5. simpl. apply predict_with_prefix_works.
+          simpl in H5. apply predict_cons in H5. rewrite H5.
+          simpl. apply predict_with_prefix_works.
           apply H6.
           (*end ct stuff for interact*)
         }

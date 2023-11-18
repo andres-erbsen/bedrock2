@@ -285,6 +285,15 @@ Section WithIOEvent.
   Proof.
     intros H. eapply predict_with_prefix_works in H. rewrite app_nil_r in H. eassumption.
   Qed.
+
+  Lemma predict_cons e f t1 t2 :
+    predicts f (t1 ++ e :: t2) ->
+    f t1 = Some (q e).
+  Proof.
+    clear. intros H. generalize dependent f. induction t1.
+    - intros. simpl in H. inversion H. subst. assumption.
+    - intros. simpl in H. inversion H. subst. rewrite H4. apply IHt1. assumption.
+  Qed.
   
   Definition filterio (t : trace) : io_trace :=
     flat_map (fun e =>
