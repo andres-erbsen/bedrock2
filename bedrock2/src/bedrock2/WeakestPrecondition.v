@@ -36,10 +36,10 @@ Section WeakestPrecondition.
         post t'' (interp_binop op v1 v2)))
       | expr.load s e =>
         rec t e (fun t' a =>
-        load s m a (post (cons (read s a) t')))
+        load s m a (post (cons (read a) t')))
       | expr.inlinetable s tbl e =>
         rec t e (fun t' a =>
-        load s (map.of_list_word tbl) a (post t'))
+        load s (map.of_list_word tbl) a (post (cons (table a ) t')))
       | expr.ite c e1 e2 =>
         rec t c (fun t' b =>
         rec (cons (if word.eqb b (word.of_Z 0) then branch false else branch true) t') (if word.eqb b (word.of_Z 0) then e2 else e1) (fun t'' v =>
@@ -108,7 +108,7 @@ Section WeakestPrecondition.
         exists a t', dexpr m l t ea a t' /\
         exists v t'', dexpr m l t' ev v t'' /\
         store sz m a v (fun m =>
-        post (cons (write sz a) t'') m l)
+        post (cons (write a) t'') m l)
       | cmd.stackalloc x n c =>
         Z.modulo n (bytes_per_word width) = 0 /\
         forall a mStack mCombined,
