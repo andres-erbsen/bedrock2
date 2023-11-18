@@ -1764,10 +1764,11 @@ Section Proofs.
       run1done.
       (*ct stuff, copied from load*)
       do 2 eexists. split.
-      { instantiate (1 := []). reflexivity. } split.
+      { instantiate (1 := [_]). reflexivity. } split.
       { instantiate (1 := [_; _; _]). reflexivity. }
       exists (S O). intros. destruct fuel as [|fuel']; [blia|].
-      simpl. apply Semantics.predict_cons in H7. rewrite H7.
+      cbn [rev rnext_stmt]. apply Semantics.predict_cons in H14. rewrite H14.
+      cbn [Semantics.q]. cbn [List.app].
       simpl. econstructor; try reflexivity.
       assumption.
 

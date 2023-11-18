@@ -330,7 +330,7 @@ Module exec.
     | load: forall t m l mc sz x a o v addr post,
         map.get l a = Some addr ->
         load sz m (word.add addr (word.of_Z o)) = Some v ->
-        post (read sz (word.add addr (word.of_Z o)) :: t) m (map.put l x v)
+        post (read (word.add addr (word.of_Z o)) :: t) m (map.put l x v)
              (addMetricLoads 2
              (addMetricInstructions 1 mc)) ->
         exec (SLoad sz x a o) t m l mc post
@@ -338,7 +338,7 @@ Module exec.
         map.get l a = Some addr ->
         map.get l v = Some val ->
         store sz m (word.add addr (word.of_Z o)) val = Some m' ->
-        post (write sz (word.add addr (word.of_Z o)) :: t) m' l
+        post (write (word.add addr (word.of_Z o)) :: t) m' l
              (addMetricLoads 1
              (addMetricInstructions 1
              (addMetricStores 1 mc))) ->
@@ -348,7 +348,7 @@ Module exec.
         x <> i ->
         map.get l i = Some index ->
         load sz (map.of_list_word table) index = Some v ->
-        post t m (map.put l x v)
+        post (Semantics.table index :: t) m (map.put l x v)
              (addMetricLoads 4
              (addMetricInstructions 3
              (addMetricJumps 1 mc))) ->
