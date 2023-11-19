@@ -653,7 +653,12 @@ Section FlatToRiscv1.
                     [ leak_bcond_by_inverting cond (negb b) ]
                     (fun rt_so_far' => rnext_stmt (t_so_far ++ [branch b])
                                          (if b then (myPos + 4) else (myPos + 4 + 4 * thenLength + 4))
-                                         sp_val stackoffset (if b then bThen else bElse) rt_so_far' f)
+                                         sp_val stackoffset (if b then bThen else bElse) rt_so_far'
+                                         (fun t_so_far' rt_so_far'' =>
+                                            predictLE_with_prefix
+                                              (if b then [leak_Jal] else [])
+                                              (f t_so_far')
+                                              rt_so_far''))
                     rt_so_far
               | _ => None
               end
@@ -669,7 +674,10 @@ Section FlatToRiscv1.
                             rnext_stmt (t_so_far' ++ [branch true])
                               (myPos + (body1Length + 1) * 4) sp_val stackoffset body2 rt_so_far''
                               (fun t_so_far'' rt_so_far''' =>
-                                 rnext_stmt t_so_far'' myPos sp_val stackoffset s rt_so_far''' f))
+                                 predictLE_with_prefix
+                                   [ leak_Jal ]
+                                   (fun rt_so_far'''' => rnext_stmt t_so_far'' myPos sp_val stackoffset s rt_so_far'''' f)
+                                   rt_so_far'''))
                          rt_so_far'
                    | Some (qbranch false) =>
                        predictLE_with_prefix

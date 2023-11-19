@@ -403,6 +403,7 @@ Section Proofs.
         finalL.(getPc) = word.add initialL.(getPc)
                                   (word.of_Z (if b then 4 else amt)) /\
         finalL.(getNextPc) = word.add finalL.(getPc) (word.of_Z 4) /\
+        finalL.(getTrace) = leak_bcond_by_inverting cond (negb b) :: initialL.(getTrace) /\
         finalL.(getMetrics) =
           (if b then
              (Platform.MetricLogging.addMetricLoads 1 (Platform.MetricLogging.addMetricInstructions 1 initialL.(getMetrics)))
@@ -1382,6 +1383,15 @@ Section Proofs.
 
   Print compiles_FlatToRiscv_correctly. Check compile_ext_call. Check compiles_FlatToRiscv_correctly.
 
+  Lemma predictLE_cons e f t1 t2 :
+    predictsLE f (t1 ++ e :: t2) ->
+    f t1 = Some (quotLE e).
+  Proof.
+    clear. intros H. generalize dependent f. induction t1.
+    - intros. simpl in H. inversion H. subst. assumption.
+    - intros. simpl in H. inversion H. subst. rewrite H4. apply IHt1. assumption.
+  Qed.
+
   Lemma compile_stmt_correct:
     (forall resvars extcall argvars,
         compiles_FlatToRiscv_correctly compile_ext_call leak_ext_call
@@ -2067,10 +2077,17 @@ Section Proofs.
       }
       inline_iff1.
       run1det. run1done.
+      do 2 eexists. split.
+      { instantiate (1 := []). reflexivity. } split.
+      { instantiate (1 := [_]). reflexivity. }
+      exists (S O). intros. destruct fuel as [|fuel']; [blia|].
+      eapply predictLE_with_prefix_works_eq.
+      { reflexivity. }
+      { rewrite app_nil_r in H9. assumption. }
 
     - idtac "Case compile_stmt_correct/SIf/Then".
       (* execute branch instruction, which will not jump *)
-      eapply runsToStep.
+      eapply runsToStep. Check compile_bcond_by_inverting_correct.
       + eapply compile_bcond_by_inverting_correct with (l := l) (b := true);
           simpl_MetricRiscvMachine_get_set;
           try safe_sidecond.
@@ -2089,8 +2106,24 @@ Section Proofs.
           eapply runsToStep.
           { eapply run_Jal0; try safe_sidecond. solve_divisibleBy4. }
           simpl_MetricRiscvMachine_get_set.
-
           intros. destruct_RiscvMachine mid. fwd. run1done.
+          
+          do 2 eexists. split.
+          { rewrite app_one_cons. rewrite app_assoc. reflexivity. } split.
+          { rewrite app_one_cons. rewrite (app_one_cons _ getTrace).
+            repeat rewrite app_assoc. reflexivity. }
+          exists (S F). intros. destruct fuel as [|fuel']; [blia|].
+          cbn [rnext_stmt]. rewrite rev_app_distr in H4. simpl in H4.
+          assert (H4' := H4).
+          apply Semantics.predict_cons in H4. rewrite H4. cbn [Semantics.q].
+          eapply predictLE_with_prefix_works_eq.
+          { rewrite rev_app_distr. reflexivity. }
+          { rewrite rev_app_distr. rewrite <- (app_assoc _ _ rt''). eapply H4p11p2.
+            { rewrite <- app_assoc. simpl. eassumption. }
+            { eapply predictLE_with_prefix_works_eq.
+              { reflexivity. }
+              { rewrite <- app_assoc. simpl. rewrite rev_app_distr in H5. eassumption. } }
+            { blia. } }
 
     - idtac "Case compile_stmt_correct/SIf/Else".
       (* execute branch instruction, which will jump over then-branch *)
@@ -2116,6 +2149,22 @@ Section Proofs.
         * (* at end of else-branch, i.e. also at end of if-then-else, just prove that
              computed post satisfies required post *)
           simpl. intros. destruct_RiscvMachine middle. fwd. subst. run1done.
+          
+          do 2 eexists. split.
+          { rewrite app_one_cons. rewrite app_assoc. reflexivity. } split.
+          { rewrite app_one_cons. rewrite app_assoc. reflexivity. }
+          exists (S F). intros. destruct fuel as [|fuel']; [blia|].
+          cbn [rnext_stmt]. rewrite rev_app_distr in H4. simpl in H4.
+          assert (H4' := H4).
+          apply Semantics.predict_cons in H4. rewrite H4. cbn [Semantics.q].
+          eapply predictLE_with_prefix_works_eq.
+          { rewrite rev_app_distr. reflexivity. }
+          { eapply H4p11p2.
+            { rewrite <- app_assoc. simpl. eassumption. }
+            { eapply predictLE_with_prefix_works_eq.
+              { reflexivity. }
+              { rewrite <- app_assoc. simpl. rewrite rev_app_distr in H5. eassumption. } }
+            { blia. } }
 
     - idtac "Case compile_stmt_correct/SLoop".
       match goal with
@@ -2188,6 +2237,33 @@ Section Proofs.
           }
           (* at end of loop, just prove that computed post satisfies required post *)
           simpl. intros. destruct_RiscvMachine middle. fwd. run1done.
+
+          do 2 eexists. split.
+          { rewrite app_one_cons. repeat rewrite app_assoc. reflexivity. } split.
+          { rewrite app_one_cons. rewrite (app_one_cons _ (rt' ++ _)).
+            repeat rewrite app_assoc. reflexivity. }
+          exists (S (F + F0 + F1)). intros. destruct fuel as [|fuel']; [blia|].
+          cbn [rnext_stmt].
+          repeat (rewrite rev_app_distr in * || cbn [List.app] in * || rewrite <- app_assoc in *).
+          eapply H3p5p2.
+          { eassumption. }
+          2: blia.
+          simpl in H3. assert (H3' := H3). rewrite app_assoc in H3.
+          apply Semantics.predict_cons in H3. rewrite H3. clear H3.
+          cbn [Semantics.q].
+          eapply predictLE_with_prefix_works_eq.
+          { reflexivity. }
+          eapply H3p8p2.
+          { repeat rewrite <- app_assoc. simpl. eassumption. }
+          2: blia.
+          eapply predictLE_with_prefix_works_eq.
+          { reflexivity. } 
+          { eapply H3p12p2.
+            { repeat rewrite <- app_assoc. simpl. eassumption. }
+            2: blia.
+            repeat rewrite <- app_assoc.
+            assumption. }
+          
         * (* false: done, jump over body2 *)
           eapply runsToStep. {
             eapply compile_bcond_by_inverting_correct with (l := lH') (b := false);
@@ -2196,6 +2272,23 @@ Section Proofs.
           }
           simpl_MetricRiscvMachine_get_set.
           intros. destruct_RiscvMachine mid. fwd. run1done.
+          
+          do 2 eexists. split.
+          { rewrite app_one_cons. rewrite app_assoc. reflexivity. } split.
+          { rewrite app_one_cons. rewrite app_assoc. reflexivity. }
+          exists (S F). intros. destruct fuel as [|fuel']; [blia|].
+          cbn [rnext_stmt].
+          Search body1.
+          rewrite rev_app_distr. rewrite <- app_assoc.
+          eapply H3p5p2.
+          { simpl in H3. rewrite <- app_assoc in H3. eassumption. }
+          2: blia.
+          simpl in H3. rewrite <- app_assoc in H3. rewrite app_assoc in H3.
+          simpl in H3. assert (H3' := H3). apply Semantics.predict_cons in H3.
+          rewrite H3. cbn [Semantics.q].
+          eapply predictLE_with_prefix_works_eq.
+          { reflexivity. }
+          rewrite <- app_assoc. simpl in H5. assumption.
 
     - idtac "Case compile_stmt_correct/SSeq".
       on hyp[(FlatImpConstraints.uses_standard_arg_regs s1); runsTo]
@@ -2222,8 +2315,30 @@ Section Proofs.
           all: try safe_sidecond.
         * simpl. intros. destruct_RiscvMachine middle. fwd. run1done.
 
+          do 2 eexists. split.
+          { rewrite app_assoc. reflexivity. } split.
+          { rewrite app_assoc. reflexivity. }
+          exists (S (F + F0)). intros. destruct fuel as [|fuel']; [blia|].
+          cbn [rnext_stmt].
+          rewrite rev_app_distr. rewrite <- app_assoc.
+          eapply H1p5p2.
+          { rewrite rev_app_distr in H1. rewrite <- app_assoc in H1. eassumption. }
+          2: blia.
+          eapply H1p8p2.
+          { repeat rewrite <- app_assoc. rewrite rev_app_distr in H1.
+            repeat rewrite <- app_assoc in H1. eassumption. }
+          2: blia.
+          repeat rewrite <- app_assoc. rewrite rev_app_distr in H5.
+          repeat rewrite <- app_assoc in H5. eassumption.
+
     - idtac "Case compile_stmt_correct/SSkip".
       run1done.
+      do 2 eexists. split.
+      { instantiate (1 := []). reflexivity. } split.
+      { instantiate (1 := []). reflexivity. }
+      exists (S O). intros. destruct fuel as [|fuel']; [blia|].
+      cbn [rnext_stmt]. rewrite app_nil_r in H4. assumption.
+      
   Qed. (* <-- takes a while *)
 
 
