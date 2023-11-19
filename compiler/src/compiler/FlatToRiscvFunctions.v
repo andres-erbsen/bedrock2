@@ -1985,13 +1985,25 @@ Section Proofs.
       inline_iff1;
       match goal with
       | op: Syntax.bopname.bopname |- _ => destr op
-      end. 
+      end.
+      (*1,2,3,4,5,6,7,8,9,10,11,12,13,14: admit.
+      match goal with
+      | y: operand |- _ => destr y; simpl in * end.
+      { run1det. run1det. run1done.
+        { rewrite reduce_eq_to_sub_and_lt, map.put_put_same. eauto 8 with map_hints. }
+        admit. }*)
+      (*15: { match goal with
+           | y: operand, H: context[Syntax.bopname.eq] |- _ =>
+               destr y; simpl in *;
+               [ run1det; run1det; run1done;
+                 [rewrite reduce_eq_to_sub_and_lt, map.put_put_same;
+                 eauto 8 with map_hints | ] |  ] end.*)
       all: match goal with
            | y: operand, H: context[Syntax.bopname.eq] |- _ =>
                destr y; simpl in *;
                [ run1det; run1det; run1done;
-                 rewrite reduce_eq_to_sub_and_lt, map.put_put_same;
-                 eauto 8 with map_hints |  ]
+                 [rewrite reduce_eq_to_sub_and_lt, map.put_put_same;
+                 eauto 8 with map_hints | ] |  ]
            | y: operand |- _ =>
                destr y; simpl in *;
                [ run1det; run1done;
@@ -2010,29 +2022,27 @@ Section Proofs.
                                         exists (S O); intros; destruct fuel as [|fuel']; [blia|]];
                                simpl; econstructor; try reflexivity;
                                rewrite app_nil_r in H10; assumption].
+      
       all: try doSomething fuel H10.
-      
-      16: {
-        simpl. econstructor; try reflexivity. rewrite app_nil_r in H10. assumption. }
-      2: { do 2 eexists. split.
-           { instantiate (1 := []). reflexivity. } split.
-           { instantiate (1 := [_]). reflexivity. }
-           exists (S O). intros. destruct fuel as [|fuel']; [blia|].
-           simpl. econstructor; try reflexivity. rewrite app_nil_r in H10. assumption. }
-      3: { do 2 eexists. split.
-           { instantiate (1 := []). reflexivity. } split.
-           { instantiate (1 := [_]). reflexivity. }
-           exists (S O). intros. destruct fuel as [|fuel']; [blia|].
-           simpl. econstructor; try reflexivity. rewrite app_nil_r in H10. assumption. }
-      
+      15: {
+        do 2 eexists. split.
+        { instantiate (1 := []). reflexivity. } split.
+        { instantiate (1 := [_; _]). reflexivity. }
+        exists (S O). intros. destruct fuel as [|fuel']; [blia|].
+        eapply predictLE_with_prefix_works_eq.
+        { simpl. reflexivity. }
+        { rewrite app_nil_r in H11. assumption. } }
       
       all: match goal with
+           | y: operand, H: context[Syntax.bopname.eq] |- _ => idtac
            | H: context[InvalidInstruction (-1)] |- _ =>  assert (Encode.verify (InvalidInstruction (-1)) iset \/
                   valid_InvalidInstruction (InvalidInstruction (-1))) by (eapply invert_ptsto_instr; ecancel_assumption)
-           | |- _ => (*run1det; run1done*)simulate'
+           | |- _ => run1det; run1done
            end.
+      all: try doSomething fuel H7.
       all:
         match goal with
+        | y: operand, H: context[Syntax.bopname.eq] |- _ => idtac
         | H: Encode.verify (InvalidInstruction (-1)) iset \/
                valid_InvalidInstruction (InvalidInstruction (-1)) |- _
           => exfalso; destruct H;
@@ -2042,6 +2052,7 @@ Section Proofs.
         end.
       all:
         match goal with
+        | y: operand, H: context[Syntax.bopname.eq] |- _ => idtac
         | H: 0 <= -1 < 2^32 |- False
           => destruct H;
              match goal with
