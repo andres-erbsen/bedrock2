@@ -379,7 +379,7 @@ Section LowerPipeline.
 
   (*I modeled my changes to this after my changes to call_spec in Spilling.*)
   Definition riscv_call(p: list Instruction * pos_map * Z)
-             (f_name: string) next (t: Semantics.trace)(mH: mem)(argvals: list word)
+             (f_name: string) (next: word -> Z -> word -> nat -> _ -> _) (t: Semantics.trace)(mH: mem)(argvals: list word)
              (post: Semantics.io_trace -> mem -> list word -> Prop): Prop :=
     let '(instrs, finfo, req_stack_size) := p in
     exists f_rel_pos,
@@ -403,7 +403,8 @@ Section LowerPipeline.
               final.(getTrace) = tL ++ initial.(getTrace) /\
                 forall fuel,
                   le F fuel ->
-                  predictsLE (next fuel) (rev tL)).
+                  predictsLE (next p_funcs f_rel_pos stack_start fuel) (rev tL)). Check riscv_call.
+  Print machine_ok.
 
   Definition same_finfo_and_length:
     list Instruction * pos_map -> list Instruction * pos_map -> Prop :=
@@ -473,19 +474,33 @@ Section LowerPipeline.
     specialize H with (1 := H0).
     cbv beta iota zeta in H.
     exact H.
-  Qed.
+  Qed. Check riscvPhase. Print env.
+  Definition finfo: pos_map. Admitted.
+  Definition p_funcs: word. Admitted.
+  Definition p1: env. Admitted.
+  Check (rnext_fun iset compile_ext_call leak_ext_call finfo p_funcs p1). Check riscvPhase.
 
   Lemma flat_to_riscv_correct: forall p1 p2,
+      let '(instrs, finfo, req_stack_size) := p2 in
       map.forall_values FlatToRiscvDef.valid_FlatImp_fun p1 ->
       riscvPhase p1 = Success p2 ->
-      forall fname t m argvals post,
+      forall fname next t m argvals post,
       (exists argnames retnames fbody l,
           map.get p1 fname = Some (argnames, retnames, fbody) /\
           map.of_list_zip argnames argvals = Some l /\
           forall mc, FlatImp.exec p1 fbody t m l mc (fun t' m' l' mc' =>
                          exists retvals, map.getmany_of_list l' retnames = Some retvals /\
-                                         post t' m' retvals)) ->
-      riscv_call p2 fname t m argvals post.
+                                           post (Semantics.filterio t') m' retvals /\
+                                           exists t'' F,
+                                             t' = t'' ++ t /\
+                                               forall fuel,
+                                                 le F fuel ->
+                                                 Semantics.predicts (next fuel) (rev t''))) ->
+      exists argnames retnames fbody,
+        map.get p1 fname = Some (argnames, retnames, fbody) /\
+      riscv_call p2 fname
+        (fun p_funcs f_rel_pos stack_start (fuel: nat) (tL : list LeakageEvent) => rnext_fun iset compile_ext_call leak_ext_call finfo p_funcs p1 fuel (next fuel) t f_rel_pos stack_start argnames retnames fbody tL (fun _ _ => Some qendLE))
+        t m argvals post.
   Proof.
     unfold riscv_call.
     intros. destruct p2 as ((finstrs & finfo) & req_stack_size).
