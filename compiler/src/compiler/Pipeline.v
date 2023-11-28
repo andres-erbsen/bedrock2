@@ -59,11 +59,14 @@ Section WithWordAndMem.
   Context {width: Z} {BW: Bitwidth width} {word: Interface.word width} {mem : map.map word byte}.
 
   Record Lang := {
-    Program: Type;
-    Valid: Program -> Prop;
-    Call(p: Program)(funcname: string)
+      Program: Type;
+      Event: Type;
+      QEvent: Type;
+      LeakageInfo: Type;
+      Valid: Program -> Prop;
+      Call(p: Program)(funcname: string)(next: LeakageInfo -> nat -> list Event -> option QEvent)
         (t: trace)(m: mem)(argvals: list word)
-        (post: trace -> mem -> list word -> Prop): Prop;
+        (post: io_trace -> mem -> list word -> Prop): Prop;
   }.
 
   Record phase_correct{L1 L2: Lang}
@@ -76,9 +79,10 @@ Section WithWordAndMem.
     phase_preserves_post: forall p1 p2,
         L1.(Valid) p1 ->
         compile p1 = Success p2 ->
-        forall fname t m argvals post,
-        L1.(Call) p1 fname t m argvals post ->
-        L2.(Call) p2 fname t m argvals post;
+        forall fname next t m argvals post,
+          L1.(Call) p1 fname next t m argvals post ->
+          exists next',
+            L2.(Call) p2 fname next' t m argvals post;
   }.
 
   Arguments phase_correct : clear implicits.
@@ -100,6 +104,8 @@ Section WithWordAndMem.
     unfold compose_phases.
     intros [V12 C12] [V23 C23].
     split; intros; fwd; eauto.
+    specialize (C12 p1 a H E fname next t m argvals post H1). destruct C12 as [next' C12].
+    eauto.
   Qed.
 
   Section WithMoreParams.
@@ -117,7 +123,7 @@ Section WithWordAndMem.
     Context {Registers: map.map Z word}.
     Context {M: Type -> Type}.
     Context {MM: Monad M}.
-    Context {RVM: RiscvProgram M word}.
+    Context {RVM: RiscvProgramWithLeakage}.
     Context {PRParams: PrimitivesParams M MetricRiscvMachine}.
     Context {word_riscv_ok: RiscvWordProperties.word.riscv_ok word}.
     Context {Registers_ok: map.ok Registers}.
@@ -126,8 +132,9 @@ Section WithWordAndMem.
     Context {BWM: bitwidth_iset width iset}.
     Context (compile_ext_call : string_keyed_map Z -> Z -> Z -> FlatImp.stmt Z ->
                                 list Instruction).
+    Context (leak_ext_call : list LeakageEvent).
     Context (compile_ext_call_correct: forall resvars extcall argvars,
-                compiles_FlatToRiscv_correctly compile_ext_call compile_ext_call
+                compiles_FlatToRiscv_correctly compile_ext_call leak_ext_call compile_ext_call
                                                (FlatImp.SInteract resvars extcall argvars)).
     Context (compile_ext_call_length_ignores_positions:
                forall stackoffset posmap1 posmap2 c pos1 pos2,
@@ -144,14 +151,20 @@ Section WithWordAndMem.
                       Cmd -> trace -> mem -> locals -> MetricLog ->
                       (trace -> mem -> locals -> MetricLog -> Prop) -> Prop)
                (e: string_keyed_map (list Var * list Var * Cmd))(f: string)
+               (next: unit -> nat -> trace -> option qevent)
                (t: trace)(m: mem)(argvals: list word)
-               (post: trace -> mem -> list word -> Prop): Prop :=
+               (post: io_trace -> mem -> list word -> Prop): Prop :=
       exists argnames retnames fbody l,
         map.get e f = Some (argnames, retnames, fbody) /\
         map.of_list_zip argnames argvals = Some l /\
         forall mc, Exec e fbody t m l mc (fun t' m' l' mc' =>
                        exists retvals, map.getmany_of_list l' retnames = Some retvals /\
-                                       post t' m' retvals).
+                                         post (filterio t') m' retvals /\
+                                         exists t'' F,
+                                           t' = t'' ++ t /\
+                                             forall fuel,
+                                               le F fuel ->
+                                               predicts (next tt fuel) (rev t'')).
 
     Definition ParamsNoDup{Var: Type}: (list Var * list Var * FlatImp.stmt Var) -> Prop :=
       fun '(argnames, retnames, body) => NoDup argnames /\ NoDup retnames.
@@ -193,7 +206,7 @@ Section WithWordAndMem.
     |}.
     (* |                 *)
     (* | FlatToRiscv     *)
-    (* V                 *)
+    (* V                 *) Print riscv_call. Print Lang. Check string_keyed_map Z.
     Definition RiscvLang: Lang := {|
       Program :=
         list Instruction *      (* <- code of all functions concatenated       *)
@@ -201,7 +214,8 @@ Section WithWordAndMem.
         Z;                      (* <- required stack space in XLEN-bit words   *)
       (* bounds in instructions are checked by `ptsto_instr` *)
       Valid '(insts, finfo, req_stack_size) := True;
-      Call := riscv_call;
+      Call := (fun p fname next =>
+                 riscv_call p fname (fun p_funcs f_rel_pos sp_val => next (p_funcs, f_rel_pos, sp_val)));
     |}.
 
     Lemma flatten_functions_NoDup: forall funs funs',
@@ -232,7 +246,7 @@ Section WithWordAndMem.
       unfold flatten_functions in GF.
       eapply map.try_map_values_fw in GF. 2: eassumption.
       unfold flatten_function in GF. fwd.
-      eexists _, _, _, _. split. 1: eassumption. split. 1: eassumption.
+      eexists _, _, _, _, _. split. 1: eassumption. split. 1: eassumption.
       intros.
       eapply FlatImp.exec.weaken.
       - eapply flattenStmt_correct_aux with (mcH := mc).
@@ -256,8 +270,8 @@ Section WithWordAndMem.
           eapply start_state_spec. 2: exact A.
           eapply ListSet.In_list_union_l. eapply ListSet.In_list_union_l. assumption.
         + eapply @freshNameGenState_disjoint_fbody.
-      - simpl. intros. fwd. eauto using map.getmany_of_list_extends.
-    Qed.
+      - simpl. intros. fwd. eauto 8 using map.getmany_of_list_extends.
+       Qed.
 
     Lemma useimmediate_functions_NoDup: forall funs funs',
         (forall f argnames retnames body,
@@ -291,12 +305,12 @@ Section WithWordAndMem.
       unfold  useimmediate_functions in GI.
       eapply map.try_map_values_fw in GI. 2: eassumption.
       unfold useimmediate_function in GI. fwd.
-      eexists _, _, _, _. split. 1: eassumption. split. 1: eassumption.
+      eexists _, _, _, _, _. split. 1: eassumption. split. 1: eassumption.
       intros.
       eapply exec.weaken.
       - eapply useImmediate_correct_aux.
         all: eauto.
-      - eauto.
+      - simpl. eauto 10.
     Qed.
 
     Lemma regalloc_functions_NoDup: forall funs funs',
@@ -342,7 +356,7 @@ Section WithWordAndMem.
         eapply map.sameLength_putmany_of_list. congruence.
       }
       fwd.
-      eexists _, _, _, _. split. 1: eassumption. split. 1: eassumption. intros.
+      eexists _, _, _, _, _. split. 1: eassumption. split. 1: eassumption. intros.
       unfold map.of_list_zip in *.
       eapply FlatImp.exec.weaken.
       - eapply checker_correct; eauto.
@@ -350,8 +364,8 @@ Section WithWordAndMem.
         edestruct putmany_of_list_zip_states_compat as (lL' & P' & Cp); try eassumption.
         1: eapply states_compat_empty.
         rewrite H1 in P'. inversion P'. exact Cp.
-      - simpl. intros. fwd. eexists. split. 2: eassumption.
-        eauto using states_compat_getmany.
+      - simpl. intros. fwd. eexists. split. 2: split; [eassumption|].
+        1: eauto using states_compat_getmany. eauto.
     Qed.
 
     Ltac debool :=
@@ -419,10 +433,13 @@ Section WithWordAndMem.
         blia.
       }
       fwd.
-      exists argnames2, retnames2, fbody2, l'.
+      eexists _, argnames2, retnames2, fbody2, l'.
       split. 1: exact G2. split. 1: eassumption.
-      intros. eapply spill_fun_correct; try eassumption.
-      unfold call_spec. intros * E. rewrite E in *. fwd. eauto.
+      intros. eapply exec.weaken. 1: eapply spill_fun_correct; try eassumption.
+      { unfold call_spec. intros * E. rewrite E in *. fwd. eauto. }
+      simpl. intros. fwd. exists retvals. split; [assumption|]. split; [assumption|].
+      do 2 eexists. split; [reflexivity|]. intros.
+      instantiate (1 := fun x y => _). simpl. eauto.
     Qed.
 
     Lemma riscv_phase_correct: phase_correct FlatWithRegs RiscvLang (riscvPhase compile_ext_call).
@@ -430,7 +447,12 @@ Section WithWordAndMem.
       unfold FlatWithRegs, RiscvLang.
       split; cbn.
       - intros p1 ((? & finfo) & ?). intros. exact I.
-      - eapply flat_to_riscv_correct; eassumption.
+      - intros. eexists. Check flat_to_riscv_correct. instantiate (1 := fun x => _). simpl.
+        Check flat_to_riscv_correct. eassert (fun (_ : word) (_ : Z) (_ : word) => _ = (_ : _)). eapply flat_to_riscv_correct. Check flat_to_riscv_correct. eenough _.
+        2: { eapply flat_to_riscv_correct; eassumption. }
+        instantiate (1 := fun x => _). simpl. intros. Check flat_to_riscv_correct.
+        eaflat_to_riscv_correct. 
+        instantiate (1 := fun x y => _). simpl. eapply flat_to_riscv_correct; eassumption.
     Qed.
 
     Definition composed_compile:

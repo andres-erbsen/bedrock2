@@ -484,8 +484,8 @@ Section LowerPipeline.
       let '(instrs, finfo, req_stack_size) := p2 in
       map.forall_values FlatToRiscvDef.valid_FlatImp_fun p1 ->
       riscvPhase p1 = Success p2 ->
-      forall fname next t m argvals post,
-      (exists argnames retnames fbody l,
+      forall fname next t m argvals post argnames retnames fbody,
+      (exists (*argnames retnames fbody*) l,
           map.get p1 fname = Some (argnames, retnames, fbody) /\
           map.of_list_zip argnames argvals = Some l /\
           forall mc, FlatImp.exec p1 fbody t m l mc (fun t' m' l' mc' =>
@@ -496,8 +496,6 @@ Section LowerPipeline.
                                                forall fuel,
                                                  le F fuel ->
                                                  Semantics.predicts (next fuel) (rev t''))) ->
-      exists argnames retnames fbody,
-        map.get p1 fname = Some (argnames, retnames, fbody) /\
       riscv_call p2 fname
         (fun p_funcs f_rel_pos stack_pastend (fuel: nat) (tL : list LeakageEvent) => rnext_fun iset compile_ext_call leak_ext_call finfo p_funcs p1 fuel (next fuel) nil f_rel_pos stack_pastend argnames retnames fbody tL (fun _ _ => Some qendLE))
         t m argvals post.
@@ -512,7 +510,7 @@ Section LowerPipeline.
     rewrite E0 in P.
     specialize P with (1 := H1p0). cbn in P.
     pose proof (compile_funs_finfo_idemp _ _ _ E0) as Q. subst r. fwd.
-    do 3 eexists. split; [eassumption|]. eexists. split. 1: eassumption.
+    eexists. split. 1: eassumption.
     intros.
     assert (word.unsigned p_funcs mod 4 = 0). {
       unfold machine_ok in *. fwd.
