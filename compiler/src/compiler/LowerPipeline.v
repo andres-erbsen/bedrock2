@@ -403,7 +403,7 @@ Section LowerPipeline.
               final.(getTrace) = tL ++ initial.(getTrace) /\
                 forall fuel,
                   le F fuel ->
-                  predictsLE (next p_funcs f_rel_pos stack_start fuel) (rev tL)). Check riscv_call.
+                  predictsLE (next p_funcs f_rel_pos stack_pastend fuel) (rev tL)). Check riscv_call.
   Print machine_ok.
 
   Definition same_finfo_and_length:
@@ -475,10 +475,10 @@ Section LowerPipeline.
     cbv beta iota zeta in H.
     exact H.
   Qed. Check riscvPhase. Print env.
-  Definition finfo: pos_map. Admitted.
+  (*Definition finfo: pos_map. Admitted.
   Definition p_funcs: word. Admitted.
   Definition p1: env. Admitted.
-  Check (rnext_fun iset compile_ext_call leak_ext_call finfo p_funcs p1). Check riscvPhase.
+  Check (rnext_fun iset compile_ext_call leak_ext_call finfo p_funcs p1). Check riscvPhase.*)
 
   Lemma flat_to_riscv_correct: forall p1 p2,
       let '(instrs, finfo, req_stack_size) := p2 in
@@ -499,11 +499,11 @@ Section LowerPipeline.
       exists argnames retnames fbody,
         map.get p1 fname = Some (argnames, retnames, fbody) /\
       riscv_call p2 fname
-        (fun p_funcs f_rel_pos stack_start (fuel: nat) (tL : list LeakageEvent) => rnext_fun iset compile_ext_call leak_ext_call finfo p_funcs p1 fuel (next fuel) t f_rel_pos stack_start argnames retnames fbody tL (fun _ _ => Some qendLE))
+        (fun p_funcs f_rel_pos stack_pastend (fuel: nat) (tL : list LeakageEvent) => rnext_fun iset compile_ext_call leak_ext_call finfo p_funcs p1 fuel (next fuel) nil f_rel_pos stack_pastend argnames retnames fbody tL (fun _ _ => Some qendLE))
         t m argvals post.
   Proof.
     unfold riscv_call.
-    intros. destruct p2 as ((finstrs & finfo) & req_stack_size).
+    intros p1 p2. destruct p2 as ((finstrs & finfo) & req_stack_size). intros.
     match goal with
     | H: riscvPhase _ = _ |- _ => pose proof H as RP; unfold riscvPhase in H
     end.
@@ -512,7 +512,7 @@ Section LowerPipeline.
     rewrite E0 in P.
     specialize P with (1 := H1p0). cbn in P.
     pose proof (compile_funs_finfo_idemp _ _ _ E0) as Q. subst r. fwd.
-    eexists. split. 1: eassumption.
+    do 3 eexists. split; [eassumption|]. eexists. split. 1: eassumption.
     intros.
     assert (word.unsigned p_funcs mod 4 = 0). {
       unfold machine_ok in *. fwd.
@@ -530,7 +530,7 @@ Section LowerPipeline.
     unfold map.of_list_zip in Hpost.
     unfold valid_FlatImp_fun in V. fwd.
     eapply runsTo_weaken.
-    - pose proof compile_function_body_correct as Q.
+    - pose proof compile_function_body_correct as Q. Check compile_function_body_correct.
       specialize Q with
           (e_impl := map.remove p1 fname)
           (e_pos := FlatToRiscvDef.build_fun_pos_env iset compile_ext_call p1)
@@ -540,7 +540,12 @@ Section LowerPipeline.
           (l := l)
           (post := fun t' m' l' mc' =>
                      (exists retvals,
-                         map.getmany_of_list l' retnames = Some retvals /\ post t' m' retvals)).
+                         map.getmany_of_list l' retnames = Some retvals /\
+                           post (Semantics.filterio t') m' retvals) /\
+                       (exists (t'' : list Semantics.event) (F : nat),
+                  t' = t'' ++ t /\
+                  (forall fuel : nat, (F <= fuel)%nat -> Semantics.predicts (next fuel) (rev t''))))
+          .
       eapply Q with
           (g := {| rem_stackwords :=
                      word.unsigned (word.sub stack_pastend stack_start) / bytes_per_word;
@@ -585,6 +590,7 @@ Section LowerPipeline.
           unfold reg_class.all.
           eapply List.NoDup_filter.
           eapply List.NoDup_unfoldn_Z_seq.
+        * eauto.
       + rewrite Vp1. rewrite List.firstn_length.
         change (Datatypes.length (reg_class.all reg_class.arg)) with 8%nat. clear. blia.
       + eassumption.
@@ -680,7 +686,7 @@ Section LowerPipeline.
           | E: Z.of_nat _ = word.unsigned (word.sub _ _) |- _ => simpl in E|-*; rewrite <- E
           end.
           apply Hlength_stack_trash_words. }
-        { reflexivity. }
+        { assumption. }
         { assumption. }
     - cbv beta. unfold goodMachine. simpl_g_get. unfold machine_ok in *. intros. fwd.
       assert (0 < bytes_per_word). { (* TODO: deduplicate *)
@@ -699,15 +705,15 @@ Section LowerPipeline.
         symmetry.
         eapply map.getmany_of_list_length.
         exact GM.
-      + eassumption.
+      + Search post. Search (getLog final). rewrite H9p4p7. eassumption.
       + eapply only_differ_subset. 1: eassumption.
         rewrite ListSet.of_list_list_union.
         rewrite ?singleton_set_eq_of_list.
         repeat apply subset_union_l;
           unfold subset, of_list, elem_of, reg_class.caller_saved; intros k HI.
         * eapply List.In_firstn_to_In in HI.
-          pose proof arg_range_Forall as F.
-          eapply Forall_forall in F. 2: eassumption.
+          pose proof arg_range_Forall as FF.
+          eapply Forall_forall in FF. 2: eassumption.
           unfold reg_class.get.
           repeat match goal with
                  | |- _ => progress cbn [andb]
@@ -795,6 +801,15 @@ Section LowerPipeline.
       + assumption.
     Unshelve.
     all: try exact EmptyMetricLog.
+      + eexists. exists (plus F F0). split; [eassumption|]. intros.
+        replace (rev rt') with (rev rt' ++ nil) by apply List.app_nil_r.
+        Check Hpost.
+        eapply H9p5p2.
+        -- simpl. Search Semantics.predicts. instantiate (1 := nil). rewrite app_nil_r.
+           Search t'. Search (_ ++ _ = _ ++ _ -> _ = _). apply app_inv_tail in H9p0p1p0. subst.
+           eapply H9p0p1p1. blia.
+        -- constructor. reflexivity.
+        -- blia.
   Qed.
 
 End LowerPipeline.
