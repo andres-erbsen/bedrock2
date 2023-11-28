@@ -120,6 +120,8 @@ Section LowerPipeline.
   Context {word: word.word width} {word_ok: word.ok word}.
   Context {locals: map.map Z word} {locals_ok: map.ok locals}.
   Context {mem: map.map word byte} {mem_ok: map.ok mem}.
+  Context (leak_ext_call: list LeakageEvent).
+
 
   Add Ring wring : (word.ring_theory (word := word))
       (preprocess [autorewrite with rew_word_morphism],
@@ -341,7 +343,7 @@ Section LowerPipeline.
 
   Context {M: Type -> Type}.
   Context {MM: Monads.Monad M}.
-  Context {RVM: Machine.RiscvProgram M word}.
+  Context {RVM: Machine.RiscvProgramWithLeakage}.
   Context {PRParams: PrimitivesParams M MetricRiscvMachine}.
   Context {PR: MetricPrimitives.MetricPrimitives PRParams}.
   Context {ext_spec: Semantics.ExtSpec}.
@@ -372,18 +374,19 @@ Section LowerPipeline.
     = Some vals.
 
   Hypothesis compile_ext_call_correct: forall resvars extcall argvars,
-      compiles_FlatToRiscv_correctly compile_ext_call compile_ext_call
+      compiles_FlatToRiscv_correctly compile_ext_call leak_ext_call compile_ext_call
                                      (FlatImp.SInteract resvars extcall argvars).
 
+  (*I modeled my changes to this after my changes to call_spec in Spilling.*)
   Definition riscv_call(p: list Instruction * pos_map * Z)
-             (f_name: string)(t: Semantics.trace)(mH: mem)(argvals: list word)
-             (post: Semantics.trace -> mem -> list word -> Prop): Prop :=
+             (f_name: string) next (t: Semantics.trace)(mH: mem)(argvals: list word)
+             (post: Semantics.io_trace -> mem -> list word -> Prop): Prop :=
     let '(instrs, finfo, req_stack_size) := p in
     exists f_rel_pos,
       map.get finfo f_name = Some f_rel_pos /\
       forall p_funcs stack_start stack_pastend ret_addr Rdata Rexec (initial: MetricRiscvMachine),
         map.get initial.(getRegs) RegisterNames.ra = Some ret_addr ->
-        initial.(getLog) = t ->
+        initial.(getLog) = Semantics.filterio t ->
         word.unsigned ret_addr mod 4 = 0 ->
         arg_regs_contain initial.(getRegs) argvals ->
         req_stack_size <= word.unsigned (word.sub stack_pastend stack_start) / bytes_per_word ->
@@ -395,7 +398,12 @@ Section LowerPipeline.
           post final.(getLog) mH' retvals /\
           map.only_differ initial.(getRegs) reg_class.caller_saved final.(getRegs) /\
           final.(getPc) = ret_addr /\
-          machine_ok p_funcs stack_start stack_pastend instrs mH' Rdata Rexec final).
+            machine_ok p_funcs stack_start stack_pastend instrs mH' Rdata Rexec final /\
+            exists tL F,
+              final.(getTrace) = tL ++ initial.(getTrace) /\
+                forall fuel,
+                  le F fuel ->
+                  predictsLE (next fuel) (rev tL)).
 
   Definition same_finfo_and_length:
     list Instruction * pos_map -> list Instruction * pos_map -> Prop :=
