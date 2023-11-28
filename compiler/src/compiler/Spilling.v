@@ -2394,6 +2394,10 @@ Section Spilling.
       rewrite app_nil_r in H2. eassumption.
   Qed.
 
+  (*here our precondition requires the function to behave as specified by some predictor function.
+    This seems not good.  Options to fix it:
+    - add a flag 'is_ct' to call_spec, only require to be predicted by next if flag is true
+    - ??? *)
   Lemma spill_fun_correct: forall e1 e2 argnames1 retnames1 body1 argnames2 retnames2 body2,
       spill_functions e1 = Success e2 ->
       spill_fun (argnames1, retnames1, body1) = Success (argnames2, retnames2, body2) ->
