@@ -22,6 +22,7 @@ Notation write := Semantics.write.
 Notation read := Semantics.read.
 Notation branch := Semantics.branch.
 Notation IO := Semantics.IO.
+Notation table := Semantics.table.
 
 Open Scope Z_scope.
 
@@ -66,7 +67,7 @@ Section Spilling.
 
   Definition leak_load_iarg_reg(fpval: word) (r: Z): trace :=
     match stack_loc r with
-    | Some o => [read Syntax.access_size.word (word.add fpval (word.of_Z o))]
+    | Some o => [read (word.add fpval (word.of_Z o))]
     | None => nil
     end.
 
@@ -78,7 +79,7 @@ Section Spilling.
 
   Definition leak_save_ires_reg(fpval: word) (r: Z) : trace :=
     match stack_loc r with
-    | Some o => [write Syntax.access_size.word (word.add fpval (word.of_Z o))]
+    | Some o => [write (word.add fpval (word.of_Z o))]
     | None => nil
     end.
 
@@ -93,7 +94,7 @@ Section Spilling.
 
   Definition leak_set_reg_to_var(fpval: word) (var: Z) : trace :=
     match stack_loc var with
-    | Some o => [read Syntax.access_size.word (word.add fpval (word.of_Z o))]
+    | Some o => [read (word.add fpval (word.of_Z o))]
     | None => nil
     end.
 
@@ -118,7 +119,7 @@ Section Spilling.
 
   Definition leak_set_var_to_reg(fpval: word) (var: Z) : trace :=
     match stack_loc var with
-    | Some o => [write Syntax.access_size.word (word.add fpval (word.of_Z o))]
+    | Some o => [write (word.add fpval (word.of_Z o))]
     | None => nil
     end.
 
@@ -196,6 +197,7 @@ Section Spilling.
   Notation qbranch := Semantics.qbranch.
   Notation qIO := Semantics.qIO.
   Notation qend := Semantics.qend.
+  Notation qtable := Semantics.qtable.
 
   Notation predicts := Semantics.predicts.
   Notation predict_with_prefix := Semantics.predict_with_prefix.
@@ -212,27 +214,31 @@ Section Spilling.
         match s with
         | SLoad sz x y o =>
             match next t_so_far with
-            | Some (qread sz a) =>
+            | Some (qread a) =>
                 predict_with_prefix
-                  (leak_load_iarg_reg fpval y ++ [read sz a] ++ leak_save_ires_reg fpval x)
-                  (f (t_so_far ++ [read sz a]))
+                  (leak_load_iarg_reg fpval y ++ [read a] ++ leak_save_ires_reg fpval x)
+                  (f (t_so_far ++ [read a]))
                   st_so_far
             | _ => None
             end
         | SStore sz x y o =>
             match next t_so_far with
-            | Some (qwrite sz a) =>
+            | Some (qwrite a) =>
                 predict_with_prefix
-                  (leak_load_iarg_reg fpval x ++ leak_load_iarg_reg fpval y ++ [write sz a])
-                  (f (t_so_far ++ [write sz a]))
+                  (leak_load_iarg_reg fpval x ++ leak_load_iarg_reg fpval y ++ [write a])
+                  (f (t_so_far ++ [write a]))
                   st_so_far
             | _ => None
             end
         | SInlinetable _ x _ i =>
-            predict_with_prefix
-              (leak_load_iarg_reg fpval i ++ leak_save_ires_reg fpval x)
-              (f t_so_far)
-              st_so_far
+            match next t_so_far with
+            | Some (qtable i') =>
+                predict_with_prefix
+                  (leak_load_iarg_reg fpval i ++ [table i'] ++ leak_save_ires_reg fpval x)
+                  (f (t_so_far ++ [table i']))
+                  st_so_far
+            | _ => None
+            end
         | SStackalloc x _ body =>
             match st_so_far with (*could generalize predict_with_prefix so it does this for me?*)
             | salloc a :: st_so_far' =>
@@ -1720,7 +1726,7 @@ Section Spilling.
           exists (S O). intros.
           repeat (rewrite rev_app_distr || rewrite rev_involutive || cbn [rev List.app]).
           destruct fuel' as [|fuel']; [blia|]. simpl.
-          simpl in H5. apply predict_cons in H5. rewrite H5.
+          simpl in H5. apply Semantics.predict_cons in H5. rewrite H5.
           simpl. apply predict_with_prefix_works.
           apply H6.
           (*end ct stuff for interact*)
@@ -1984,7 +1990,7 @@ Section Spilling.
         intros. exists (S O). intros.
         repeat (rewrite rev_app_distr || rewrite rev_involutive || cbn [rev List.app]).
         destruct fuel' as [|fuel']; [blia|]. simpl. 
-        simpl in H3. apply predict_cons in H3. rewrite H3. simpl.
+        simpl in H3. apply Semantics.predict_cons in H3. rewrite H3. simpl.
         apply predict_with_prefix_works. assumption.
     (*end ct stuff for load*)
         
@@ -2021,7 +2027,8 @@ Section Spilling.
       intros. exists (S O). intros.
       repeat (rewrite rev_app_distr || rewrite rev_involutive || cbn [rev List.app]).
       destruct fuel' as [|fuel']; [blia|]. simpl. 
-      simpl in H1. apply predict_cons in H1. rewrite H1. simpl. apply predict_with_prefix_works. assumption.
+      simpl in H1. apply Semantics.predict_cons in H1. rewrite H1. simpl.
+      apply predict_with_prefix_works. assumption.
       (*end ct stuff for store*)
     - (* exec.inlinetable *)
       eapply exec.seq_cps. eapply load_iarg_reg_correct; (blia || eassumption || idtac).
@@ -2034,14 +2041,15 @@ Section Spilling.
       eapply save_ires_reg_correct''.
       + eassumption.
       + blia.
-      + intros. do 6 eexists.
-        split; [eassumption|]. split; [eassumption|]. split.
-        { instantiate (1 := nil). reflexivity. } split.
-        { subst t2'0 t2'. rewrite app_assoc. reflexivity. }
+      + intros. do 6 eexists. split; [|split].
+        2: eassumption. 1: assumption. split.
+        { instantiate (1 := [_]). reflexivity. } split.
+        { subst t2'0 t2'. rewrite app_one_cons. repeat rewrite app_assoc. reflexivity. }
         intros. exists (S O). intros.
         repeat (rewrite rev_app_distr || rewrite rev_involutive || cbn [rev List.app]).
-        destruct fuel' as [|fuel']; [blia|]. simpl. 
-        apply predict_with_prefix_works. rewrite app_nil_r in H6. assumption.
+        destruct fuel' as [|fuel']; [blia|]. simpl.
+        apply Semantics.predict_cons in H5. rewrite H5.
+        apply predict_with_prefix_works. assumption.
     - (* exec.stackalloc *)
       rename H1 into IH.
       eapply exec.stackalloc. 1: assumption.
@@ -2154,8 +2162,9 @@ Section Spilling.
         destruct CT as [F' CT]. exists (S F'). intros.
         repeat (rewrite rev_app_distr || rewrite rev_involutive || cbn [rev List.app]).
         destruct fuel' as [|fuel']; [blia|]. simpl. 
-        rewrite rev_app_distr in H3, H4. simpl in H3. assert (H3' := predict_cons _ _ _ _ H3).
-        rewrite H3'. simpl. rewrite (app_one_cons _ (rev t2'')).
+        rewrite rev_app_distr in H3, H4. simpl in H3.
+        assert (H3' := Semantics.predict_cons _ _ _ _ H3). rewrite H3'. simpl.
+        rewrite (app_one_cons _ (rev t2'')).
         repeat rewrite app_assoc. rewrite <- (app_assoc _ _ t2''').
         apply predict_with_prefix_works. clear IHexec. Search snext_stmt'. Search t2''.
         eapply CT.
@@ -2177,8 +2186,9 @@ Section Spilling.
         destruct CT as [F' CT]. exists (S F'). intros.
         repeat (rewrite rev_app_distr || rewrite rev_involutive || cbn [rev List.app]).
         destruct fuel' as [|fuel']; [blia|]. simpl. 
-        rewrite rev_app_distr in H2, H3. simpl in H2. assert (H2' := predict_cons _ _ _ _ H2).
-        rewrite H2'. simpl. rewrite (app_one_cons _ (rev t2'')).
+        rewrite rev_app_distr in H2, H3. simpl in H2.
+        assert (H2' := Semantics.predict_cons _ _ _ _ H2). rewrite H2'. simpl.
+        rewrite (app_one_cons _ (rev t2'')).
         repeat rewrite app_assoc. rewrite <- (app_assoc _ _ t2''').
         apply predict_with_prefix_works. clear IHexec. Search snext_stmt'. Search t2''.
         eapply CT.
@@ -2204,8 +2214,9 @@ Section Spilling.
         destruct CT as [F' CT]. exists (S F'). intros.
         repeat (rewrite rev_app_distr || rewrite rev_involutive || cbn [rev List.app]).
         destruct fuel' as [|fuel']; [blia|]. simpl. 
-        rewrite rev_app_distr in H3, H4. simpl in H3. assert (H3' := predict_cons _ _ _ _ H3).
-        rewrite H3'. simpl. rewrite (app_one_cons _ (rev t2'')).
+        rewrite rev_app_distr in H3, H4. simpl in H3.
+        assert (H3' := Semantics.predict_cons _ _ _ _ H3). rewrite H3'. simpl.
+        rewrite (app_one_cons _ (rev t2'')).
         repeat rewrite app_assoc. rewrite <- (app_assoc _ _ t2''').
         apply predict_with_prefix_works. clear IHexec. Search snext_stmt'. Search t2''.
         eapply CT.
@@ -2228,8 +2239,9 @@ Section Spilling.
         destruct CT as [F' CT]. exists (S F'). intros.
         repeat (rewrite rev_app_distr || rewrite rev_involutive || cbn [rev List.app]).
         destruct fuel' as [|fuel']; [blia|]. simpl. 
-        rewrite rev_app_distr in H1, H2. simpl in H1. assert (H1' := predict_cons _ _ _ _ H1).
-        rewrite H1'. simpl. rewrite (app_one_cons _ (rev t2'')).
+        rewrite rev_app_distr in H1, H2. simpl in H1.
+        assert (H1' := Semantics.predict_cons _ _ _ _ H1). rewrite H1'. simpl.
+        rewrite (app_one_cons _ (rev t2'')).
         repeat rewrite app_assoc. rewrite <- (app_assoc _ _ t2''').
         apply predict_with_prefix_works. clear IHexec. Search snext_stmt'. Search t2''.
         eapply CT.
@@ -2264,7 +2276,7 @@ Section Spilling.
           repeat (rewrite rev_involutive || rewrite rev_app_distr || rewrite <- app_assoc).
           simpl in H5, H6. rewrite <- app_assoc in H5. eapply H3p4. 
           { apply H5. }
-          { rewrite (app_assoc t10) in H5. apply predict_cons in H5. rewrite H5. simpl.
+          { rewrite (app_assoc t10) in H5. apply Semantics.predict_cons in H5. rewrite H5. simpl.
             rewrite (app_one_cons _ t2'''). repeat rewrite (app_assoc _ _ t2''').
             apply predict_with_prefix_works. rewrite <- app_assoc. assumption. }
           { blia. }
@@ -2287,8 +2299,8 @@ Section Spilling.
                 repeat (rewrite rev_involutive in H5 || rewrite rev_app_distr in H5 || rewrite <- app_assoc in H5). Search body1.
                 eapply H3p4.
                 { eassumption. }
-                { rewrite (app_assoc t10) in H5. assert (H5' := predict_cons _ _ _ _ H5).
-                  rewrite H5'. simpl.
+                { rewrite (app_assoc t10) in H5.
+                  assert (H5' := Semantics.predict_cons _ _ _ _ H5). rewrite H5'. simpl.
                   rewrite (app_one_cons _ (_ ++ _)).
                   repeat rewrite app_assoc. repeat rewrite <- (app_assoc ((_ ++ _) ++ _)).
                   apply predict_with_prefix_works. Search body2. eapply H5p4.
@@ -2317,8 +2329,9 @@ Section Spilling.
           Search body1. eapply H3p4.
           { rewrite rev_app_distr in H5. repeat rewrite <- app_assoc in H5. eassumption. }
           { rewrite rev_app_distr in H5. repeat rewrite <- app_assoc in H5. simpl in H5.
-            rewrite app_assoc in H5. assert (H5' := predict_cons _ _ _ _ H5). rewrite H5'.
-            simpl. rewrite (app_one_cons _ t2'''). rewrite (app_assoc _ _ t2''').
+            rewrite app_assoc in H5.
+            assert (H5' := Semantics.predict_cons _ _ _ _ H5). rewrite H5'. simpl.
+            rewrite (app_one_cons _ t2'''). rewrite (app_assoc _ _ t2''').
             apply predict_with_prefix_works. simpl in H6. repeat rewrite <- app_assoc.
             eassumption. }
           blia.
@@ -2341,8 +2354,8 @@ Section Spilling.
                 repeat (rewrite rev_involutive in H5 || rewrite rev_app_distr in H5 || rewrite <- app_assoc in H5). Search body1.
                 eapply H3p4.
                 { eassumption. }
-                { rewrite (app_assoc t10) in H5. assert (H5' := predict_cons _ _ _ _ H5).
-                  rewrite H5'. simpl.
+                { rewrite (app_assoc t10) in H5.
+                  assert (H5' := Semantics.predict_cons _ _ _ _ H5). rewrite H5'. simpl.
                   rewrite (app_one_cons _ (_ ++ _)).
                   repeat rewrite app_assoc. rewrite <- (app_assoc ((_ ++ _) ++ _)). rewrite <- (app_assoc ((_ ++ _))).
                   apply predict_with_prefix_works. Search body2. eapply H5p4.
