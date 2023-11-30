@@ -379,7 +379,7 @@ Section LowerPipeline.
 
   (*I modeled my changes to this after my changes to call_spec in Spilling.*)
   Definition riscv_call(p: list Instruction * pos_map * Z)
-             (f_name: string) (next: word -> Z -> word -> nat -> _ -> _) (t: Semantics.trace)(mH: mem)(argvals: list word)
+             (f_name: string) (next: (word*Z*word) -> nat -> _ -> _) (t: Semantics.trace)(mH: mem)(argvals: list word)
              (post: Semantics.io_trace -> mem -> list word -> Prop): Prop :=
     let '(instrs, finfo, req_stack_size) := p in
     exists f_rel_pos,
@@ -403,7 +403,7 @@ Section LowerPipeline.
               final.(getTrace) = tL ++ initial.(getTrace) /\
                 forall fuel,
                   le F fuel ->
-                  predictsLE (next p_funcs f_rel_pos stack_pastend fuel) (rev tL)). Check riscv_call.
+                  predictsLE (next (p_funcs, f_rel_pos, stack_pastend) fuel) (rev tL)). Check riscv_call.
   Print machine_ok.
 
   Definition same_finfo_and_length:
@@ -481,7 +481,8 @@ Section LowerPipeline.
   Check (rnext_fun iset compile_ext_call leak_ext_call finfo p_funcs p1). Check riscvPhase.*)
 
   Lemma flat_to_riscv_correct: forall p1 p2,
-      let '(instrs, finfo, req_stack_size) := p2 in
+    forall instrs finfo req_stack_size,
+      p2 = (instrs, finfo, req_stack_size) ->
       map.forall_values FlatToRiscvDef.valid_FlatImp_fun p1 ->
       riscvPhase p1 = Success p2 ->
       forall fname next t m argvals post argnames retnames fbody,
@@ -497,7 +498,7 @@ Section LowerPipeline.
                                                  le F fuel ->
                                                  Semantics.predicts (next fuel) (rev t''))) ->
       riscv_call p2 fname
-        (fun p_funcs f_rel_pos stack_pastend (fuel: nat) (tL : list LeakageEvent) => rnext_fun iset compile_ext_call leak_ext_call finfo p_funcs p1 fuel (next fuel) nil f_rel_pos stack_pastend argnames retnames fbody tL (fun _ _ => Some qendLE))
+        (fun '(p_funcs, f_rel_pos, stack_pastend) (fuel: nat) (tL : list LeakageEvent) => rnext_fun iset compile_ext_call leak_ext_call finfo p_funcs p1 fuel (next fuel) nil f_rel_pos stack_pastend argnames retnames fbody tL (fun _ _ => Some qendLE))
         t m argvals post.
   Proof.
     unfold riscv_call.
@@ -508,7 +509,7 @@ Section LowerPipeline.
     fwd.
     pose proof (get_compile_funs_pos p1 (build_fun_pos_env iset compile_ext_call p1)) as P.
     rewrite E0 in P.
-    specialize P with (1 := H1p0). cbn in P.
+    specialize P with (1 := H2p0). cbn in P.
     pose proof (compile_funs_finfo_idemp _ _ _ E0) as Q. subst r. fwd.
     eexists. split. 1: eassumption.
     intros.
@@ -517,11 +518,11 @@ Section LowerPipeline.
       eapply program_mod_4_0. 2: ecancel_assumption.
       eapply compile_funs_nonnil; eassumption.
     }
-    unfold map.forall_values in H.
+    unfold map.forall_values in H0.
     match goal with
     | H: map.get p1 fname = Some _ |- _ => rename H into GetFun
     end.
-    specialize H with (1 := GetFun) as V.
+    specialize H0 with (1 := GetFun) as V.
     match goal with
     | H: context[post] |- _ => rename H into Hpost
     end.
