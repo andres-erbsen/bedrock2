@@ -14,6 +14,14 @@ Require Import Coq.Lists.List.
 Definition io_event {width: Z}{BW: Bitwidth width}{word: word.word width}{mem: map.map word byte} : Type :=
   (mem * String.string * list word) * (mem * list word).
 
+(*should I name this leakage_event, now that it doesn't contain the IO events?*)
+Inductive event {width: Z}{BW: Bitwidth width}{word: word.word width}{mem: map.map word byte} : Type :=
+| branch : bool -> event
+| read : word -> event
+| write : word -> event
+| table: word(*the index*) -> event
+| salloc : word -> event.
+
 Section WithIOEvent.
   Context {width: Z}{BW: Bitwidth width}{word: word.word width}{mem: map.map word byte}.
 
@@ -23,16 +31,8 @@ Section WithIOEvent.
   (*I think I'll leave IO in the leakage trace and abstract trace for now, just because it's
     unclear what is the best way to remove it.  I lean towards separating leakage trace and IO
     trace as two separate arguments to exec, but I should ask about this.*)
-  Inductive event  : Type :=
-  | IO : io_event -> event
-  | branch : bool -> event
-  | read : word -> event
-  | write : word -> event
-  | table: word(*the index*) -> event
-  | salloc : word -> event.
 
   Inductive qevent : Type :=
-  | qIO : io_event -> qevent
   | qbranch : bool -> qevent
   | qread : word -> qevent
   | qwrite : word -> qevent
@@ -42,19 +42,19 @@ Section WithIOEvent.
 
   Definition q e : qevent :=
     match e with
-    | IO i => qIO i
     | branch b => qbranch b
     | read a => qread a
     | write a => qwrite a
     | table i => qtable i
     | salloc a => qsalloc
     end.
-
+  
+  (*should I call this leakage_trace, now that it doesn't contain io events?
+    shame to lengthen the name. *)
   Definition trace : Type := list event.
 
   Inductive abstract_trace : Type :=
   | empty
-  | cons_IO (e: io_event) (after : abstract_trace)
   | cons_branch (b : bool) (after : abstract_trace)
   | cons_read (a : word) (after : abstract_trace)
   | cons_write (a : word) (after : abstract_trace)
@@ -67,7 +67,6 @@ Section WithIOEvent.
   Import ListNotations.
   Inductive generates : abstract_trace -> trace -> Prop :=
   | nil_gen : generates empty nil
-  | IO_gen : forall x a t_rev, generates a t_rev -> generates (cons_IO x a) (IO x :: t_rev)
   | branch_gen : forall x a t_rev, generates a t_rev -> generates (cons_branch x a) (branch x :: t_rev)
   | read_gen : forall x a t_rev, generates a t_rev -> generates (cons_read x a) (read x :: t_rev)
   | write_gen : forall x a t_rev, generates a t_rev -> generates (cons_write x a) (write x :: t_rev)
@@ -77,7 +76,6 @@ Section WithIOEvent.
   Fixpoint abstract_app (a1 a2 : abstract_trace) : abstract_trace :=
     match a1 with
     | empty => a2
-    | cons_IO e a1' => cons_IO e (abstract_app a1' a2)
     | cons_branch b a1' => cons_branch b (abstract_app a1' a2)
     | cons_read a a1' => cons_read a (abstract_app a1' a2)
     | cons_write a a1' => cons_write a (abstract_app a1' a2)
@@ -95,7 +93,6 @@ Section WithIOEvent.
   Fixpoint generator (t_rev : trace) : abstract_trace :=
     match t_rev with
     | nil => empty
-    | IO x :: t_rev' => cons_IO x (generator t_rev')
     | branch x :: t_rev' => cons_branch x (generator t_rev')
     | read x :: t_rev' => cons_read x (generator t_rev')
     | write x :: t_rev' => cons_write x (generator t_rev')
@@ -111,7 +108,6 @@ Section WithIOEvent.
   Definition head (a : abstract_trace) : qevent :=
     match a with
     | empty => qend
-    | cons_IO i _ => qIO i
     | cons_branch b _ => qbranch b
     | cons_read a _ => qread a
     | cons_write a _ => qwrite a
@@ -121,7 +117,6 @@ Section WithIOEvent.
   Fixpoint predictor (a(*the whole thing*) : abstract_trace) (t(*so far*) : trace) : option qevent :=
     match a, t with
     | _, nil => Some (head a)
-    | cons_IO _ a', cons (IO _) t' => predictor a' t'
     | cons_branch _ a', cons (branch _) t' => predictor a' t'
     | cons_read _ a', cons (read _) t' => predictor a' t'
     | cons_write _ a', cons (write _) t' => predictor a' t'
@@ -201,13 +196,6 @@ Section WithIOEvent.
     - intros. simpl in H. inversion H. subst. assumption.
     - intros. simpl in H. inversion H. subst. rewrite H4. apply IHt1. assumption.
   Qed.
-  
-  Definition filterio (t : trace) : io_trace :=
-    flat_map (fun e =>
-                match e with
-                | IO i => cons i nil
-                | _ => nil
-                end) t.
 End WithIOEvent. (*maybe extend this to the end?*)
                             
   Definition ExtSpec{width: Z}{BW: Bitwidth width}{word: word.word width}{mem: map.map word byte} :=
@@ -370,118 +358,133 @@ Module exec. Section WithEnv.
 
   Local Notation metrics := MetricLog.
 
-  Implicit Types post : trace -> mem -> locals -> metrics -> Prop. (* COQBUG(unification finds Type instead of Prop and fails to downgrade *)
-  
+  Implicit Types post : trace -> io_trace -> mem -> locals -> metrics -> Prop. (* COQBUG(unification finds Type instead of Prop and fails to downgrade *)
+
+  (*I really want to do the semantics like this:
+    cmd -> io_trace -> mem -> locals -> metrics ->
+    (trace -> io_trace -> mem -> locals -> metrics -> Prop) -> Prop.
+    But it would be ugly.  Using app, screwing up simple postconditions
+    (e.g., in seq case) in semantics.
+    
+    So I suppose I'll do 
+    cmd -> trace -> io_trace -> mem -> locals -> metrics ->
+    (trace -> io_trace -> mem -> locals -> metrics -> Prop) -> Prop.
+    
+    Then we can state a lemma, saying that exec c nil t m l mc post -> exec c k t m l mc (fun k' => post (k' ++ k)).
+    Then use that wherever we want, and it's *almost* like leakage trace isn't passed as a parameter to exec.
+    Still ugly though.  But better?  No, not really.  Would be horribly obnoxious to apply that lemma.  Hm.
+
+    I suppose I had better keep the append-style for leakage traces?  :(
+    Is it still worthwhile to split up the io trace and leakage trace then?
+    I think so.
+    It still should be less of a pain to deal with them if they're separated.
+   *)
   Inductive exec :
-    cmd -> trace -> mem -> locals -> metrics ->
-    (trace -> mem -> locals -> metrics -> Prop) -> Prop :=
+    cmd -> trace -> io_trace -> mem -> locals -> metrics ->
+    (trace -> io_trace -> mem -> locals -> metrics -> Prop) -> Prop :=
   | skip
-    t m l mc post
-    (_ : post t m l mc)
-    : exec cmd.skip t m l mc post
+    k t m l mc post
+    (_ : post k t m l mc)
+    : exec cmd.skip k t m l mc post
   | set x e
-    t m l mc post
-    v mc' t' (_ : eval_expr m l e mc t = Some (v, mc', t'))
-    (_ : post t' m (map.put l x v) (addMetricInstructions 1
+    m l mc post
+    k t v mc' k' (_ : eval_expr m l e mc k = Some (v, mc', k'))
+    (_ : post k' t m (map.put l x v) (addMetricInstructions 1
                                       (addMetricLoads 1 mc')))
-    : exec (cmd.set x e) t m l mc post
+    : exec (cmd.set x e) k t m l mc post
   | unset x
-    t m l mc post
-    (_ : post t m (map.remove l x) mc)
-    : exec (cmd.unset x) t m l mc post
+    k t m l mc post
+    (_ : post k t m (map.remove l x) mc)
+    : exec (cmd.unset x) k t m l mc post
   | store sz ea ev
-    t m l mc post
-    a mc' t' (_ : eval_expr m l ea mc t = Some (a, mc', t'))
-    v mc'' t'' (_ : eval_expr m l ev mc' t' = Some (v, mc'', t''))
+    k t m l mc post
+    a mc' k' (_ : eval_expr m l ea mc k = Some (a, mc', k'))
+    v mc'' k'' (_ : eval_expr m l ev mc' k' = Some (v, mc'', k''))
     m' (_ : store sz m a v = Some m')
-    (_ : post (write a :: t'') m' l (addMetricInstructions 1
+    (_ : post (write a :: k'') t m' l (addMetricInstructions 1
                                           (addMetricLoads 1
                                              (addMetricStores 1 mc''))))
-    : exec (cmd.store sz ea ev) t m l mc post
+    : exec (cmd.store sz ea ev) k t m l mc post
   | stackalloc x n body
-    t mSmall l mc post
+    k t mSmall l mc post
     (_ : Z.modulo n (bytes_per_word width) = 0)
     (_ : forall a mStack mCombined,
         anybytes a n mStack ->
         map.split mCombined mSmall mStack ->
-        exec body (salloc a :: t) mCombined (map.put l x a) (addMetricInstructions 1 (addMetricLoads 1 mc))
-          (fun t' mCombined' l' mc' =>
+        exec body (salloc a :: k) t mCombined (map.put l x a) (addMetricInstructions 1 (addMetricLoads 1 mc))
+          (fun k' t' mCombined' l' mc' =>
              exists mSmall' mStack',
               anybytes a n mStack' /\
               map.split mCombined' mSmall' mStack' /\
-              post t' mSmall' l' mc'))
-    : exec (cmd.stackalloc x n body) t mSmall l mc post
-  | if_true t m l mc e c1 c2 post
-    v mc' t' (_ : eval_expr m l e mc t = Some (v, mc', t'))
+              post k' t' mSmall' l' mc'))
+    : exec (cmd.stackalloc x n body) k t mSmall l mc post
+  | if_true k t m l mc e c1 c2 post
+    v mc' k' (_ : eval_expr m l e mc k = Some (v, mc', k'))
     (_ : word.unsigned v <> 0)
-    (_ : exec c1 (branch true :: t') m l (addMetricInstructions 2
-                                                    (addMetricLoads 2
-                                                       (addMetricJumps 1 mc'))) post)
-    : exec (cmd.cond e c1 c2) t m l mc post
+    (_ : exec c1 (branch true :: k') t m l (addMetricInstructions 2 (addMetricLoads 2 (addMetricJumps 1 mc'))) post)
+    : exec (cmd.cond e c1 c2) k t m l mc post
   | if_false e c1 c2
-    t m l mc post
-    v mc' t' (_ : eval_expr m l e mc t = Some (v, mc', t'))
+    k t m l mc post
+    v mc' k' (_ : eval_expr m l e mc k = Some (v, mc', k'))
     (_ : word.unsigned v = 0)
-    (_ : exec c2 (branch false :: t') m l (addMetricInstructions 2
-                                             (addMetricLoads 2
-                                                (addMetricJumps 1 mc'))) post)
-    : exec (cmd.cond e c1 c2) t m l mc post
+    (_ : exec c2 (branch false :: k') t m l (addMetricInstructions 2 (addMetricLoads 2 (addMetricJumps 1 mc'))) post)
+    : exec (cmd.cond e c1 c2) k t m l mc post
   | seq c1 c2
-    t m l mc post
-    mid (_ : exec c1 t m l mc mid)
-    (_ : forall t' m' l' mc', mid t' m' l' mc' -> exec c2 t' m' l' mc' post)
-    : exec (cmd.seq c1 c2) t m l mc post
+    k t m l mc post
+    mid (_ : exec c1 k t m l mc mid)
+    (_ : forall k' t' m' l' mc', mid k' t' m' l' mc' -> exec c2 k' t' m' l' mc' post)
+    : exec (cmd.seq c1 c2) k t m l mc post
   | while_false e c
-    t m l mc post
-    v mc' t' (_ : eval_expr m l e mc t = Some (v, mc', t'))
+    k t m l mc post
+    v mc' k' (_ : eval_expr m l e mc k = Some (v, mc', k'))
     (_ : word.unsigned v = 0)
-    (_ : post (branch false :: t') m l (addMetricInstructions 1
+    (_ : post (branch false :: k') t m l (addMetricInstructions 1
                                                 (addMetricLoads 1
                                                    (addMetricJumps 1 mc'))))
-    : exec (cmd.while e c) t m l mc post
+    : exec (cmd.while e c) k t m l mc post
   | while_true e c
-      t m l mc post
-      v mc' t' (_ : eval_expr m l e mc t = Some (v, mc', t'))
+      k t m l mc post
+      v mc' k' (_ : eval_expr m l e mc k = Some (v, mc', k'))
       (_ : word.unsigned v <> 0)
-      mid (_ : exec c (branch true :: t') m l mc' mid)
-      (_ : forall t'' m' l' mc'', mid t'' m' l' mc'' ->
-                                      exec (cmd.while e c) t'' m' l' (addMetricInstructions 2
-                                                                        (addMetricLoads 2
-                                                                           (addMetricJumps 1 mc''))) post)
-    : exec (cmd.while e c) t m l mc post
+      mid (_ : exec c (branch true :: k') t m l mc' mid)
+      (_ : forall k'' t' m' l' mc'', mid k'' t' m' l' mc'' ->
+                                      exec (cmd.while e c) k'' t' m' l' (addMetricInstructions 2
+                                                                           (addMetricLoads 2
+                                                                              (addMetricJumps 1 mc''))) post)
+    : exec (cmd.while e c) k t m l mc post
   | call binds fname arges
-      t m l mc post
+      k t m l mc post
       params rets fbody (_ : map.get e fname = Some (params, rets, fbody))
-      args mc' t' (_ : evaluate_call_args_log m l arges mc t = Some (args, mc', t'))
+      args mc' k' (_ : evaluate_call_args_log m l arges mc k = Some (args, mc', k'))
       lf (_ : map.of_list_zip params args = Some lf)
-      mid (_ : exec fbody t' m lf (addMetricInstructions 100 (addMetricJumps 100 (addMetricLoads 100 (addMetricStores 100 mc')))) mid)
-      (_ : forall t'' m' st1 mc'', mid t'' m' st1 mc'' ->
+      mid (_ : exec fbody k' t m lf (addMetricInstructions 100 (addMetricJumps 100 (addMetricLoads 100 (addMetricStores 100 mc')))) mid)
+      (_ : forall k'' t' m' st1 mc'', mid k'' t' m' st1 mc'' ->
           exists retvs, map.getmany_of_list st1 rets = Some retvs /\
           exists l', map.putmany_of_list_zip binds retvs l = Some l' /\
-          post t'' m' l' (addMetricInstructions 100 (addMetricJumps 100 (addMetricLoads 100 (addMetricStores 100 mc'')))))
-    : exec (cmd.call binds fname arges) t m l mc post
+          post k'' t' m' l' (addMetricInstructions 100 (addMetricJumps 100 (addMetricLoads 100 (addMetricStores 100 mc'')))))
+    : exec (cmd.call binds fname arges) k t m l mc post
   | interact binds action arges
-      t m l mc post
+      k t m l mc post
       mKeep mGive (_: map.split m mKeep mGive)
-      args mc' t' (_ :  evaluate_call_args_log m l arges mc t = Some (args, mc', t'))
-      mid (_ : ext_spec (filterio t') mGive action args mid)
+      args mc' k' (_ :  evaluate_call_args_log m l arges mc k = Some (args, mc', k'))
+      mid (_ : ext_spec t mGive action args mid)
       (_ : forall mReceive resvals, mid mReceive resvals ->
           exists l', map.putmany_of_list_zip binds resvals l = Some l' /\
           forall m', map.split m' mKeep mReceive ->
-          post (IO ((mGive, action, args), (mReceive, resvals)) :: t') m' l'
+          post k' (((mGive, action, args), (mReceive, resvals)) :: t) m' l'
             (addMetricInstructions 1
-            (addMetricStores 1
-            (addMetricLoads 2 mc'))))
-    : exec (cmd.interact binds action arges) t m l mc post
+               (addMetricStores 1
+                  (addMetricLoads 2 mc'))))
+    : exec (cmd.interact binds action arges) k t m l mc post
   .
 
   Context {word_ok: word.ok word} {mem_ok: map.ok mem} {ext_spec_ok: ext_spec.ok ext_spec}.
 
-  Lemma weaken: forall t l m mc s post1,
-      exec s t m l mc post1 ->
-      forall post2: _ -> _ -> _ -> _ -> Prop,
-        (forall t' m' l' mc', post1 t' m' l' mc' -> post2 t' m' l' mc') ->
-        exec s t m l mc post2.
+  Lemma weaken: forall k t l m mc s post1,
+      exec s k t m l mc post1 ->
+      forall post2: _ -> _ -> _ -> _ -> _ -> Prop,
+        (forall k' t' m' l' mc', post1 k' t' m' l' mc' -> post2 k' t' m' l' mc') ->
+        exec s k t m l mc post2.
   Proof.
     induction 1; intros; try solve [econstructor; eauto].
     - eapply stackalloc. 1: assumption.
@@ -500,16 +503,16 @@ Module exec. Section WithEnv.
       eauto 10.
   Qed.
 
-  Lemma intersect: forall t l m mc s post1,
-      exec s t m l mc post1 ->
+  Lemma intersect: forall k t l m mc s post1,
+      exec s k t m l mc post1 ->
       forall post2,
-        exec s t m l mc post2 ->
-        exec s t m l mc (fun t' m' l' mc' => post1 t' m' l' mc' /\ post2 t' m' l' mc').
+        exec s k t m l mc post2 ->
+        exec s k t m l mc (fun k' t' m' l' mc' => post1 k' t' m' l' mc' /\ post2 k' t' m' l' mc').
   Proof.
     induction 1;
       intros;
       match goal with
-      | H: exec _ _ _ _ _ _ |- _ => inversion H; subst; clear H
+      | H: exec _ _ _ _ _ _ _ |- _ => inversion H; subst; clear H
       end;
       repeat match goal with
              | H1: ?e = Some (?v1, ?mc1, ?t1), H2: ?e = Some (?v2, ?mc2, ?t2) |- _ =>
@@ -522,10 +525,10 @@ Module exec. Section WithEnv.
                replace v2 with v1 in * by congruence; clear H2
              end;
       try solve [econstructor; eauto | exfalso; congruence].
-
+    
     - econstructor. 1: eassumption.
       intros.
-      rename H0 into Ex1, H12 into Ex2.
+      rename H0 into Ex1, H13 into Ex2.
       eapply weaken. 1: eapply H1. 1,2: eassumption.
       1: eapply Ex2. 1,2: eassumption.
       cbv beta.
@@ -543,23 +546,23 @@ Module exec. Section WithEnv.
       + eapply IHexec. exact H9. (* not H1 *)
       + simpl. intros *. intros [? ?]. eauto.
     - eapply call. 1, 2, 3: eassumption.
-      + eapply IHexec. exact H16. (* not H2 *)
+      + eapply IHexec. exact H17. (* not H2 *)
       + simpl. intros *. intros [? ?].
         edestruct H3 as (? & ? & ? & ? & ?); [eassumption|].
-        edestruct H17 as (? & ? & ? & ? & ?); [eassumption|].
+        edestruct H18 as (? & ? & ? & ? & ?); [eassumption|].
         repeat match goal with
                | H1: ?e = Some ?v1, H2: ?e = Some ?v2 |- _ =>
                  replace v2 with v1 in * by congruence; clear H2
                end.
         eauto 10.
     - pose proof ext_spec.unique_mGive_footprint as P.
-      specialize P with (1 := H1) (2 := H14).
+      specialize P with (1 := H1) (2 := H15).
       destruct (map.split_diff P H H7). subst mKeep0 mGive0. clear H7.
       eapply interact. 1,2: eassumption.
-      + eapply ext_spec.intersect; [ exact H1 | exact H14 ].
+      + eapply ext_spec.intersect; [ exact H1 | exact H15 ].
       + simpl. intros *. intros [? ?].
         edestruct H2 as (? & ? & ?); [eassumption|].
-        edestruct H15 as (? & ? & ?); [eassumption|].
+        edestruct H16 as (? & ? & ?); [eassumption|].
         repeat match goal with
                | H1: ?e = Some ?v1, H2: ?e = Some ?v2 |- _ =>
                  replace v2 with v1 in * by congruence; clear H2

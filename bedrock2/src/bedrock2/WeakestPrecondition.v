@@ -8,7 +8,7 @@ Section WeakestPrecondition.
   Context {locals: map.map String.string word}.
   Context {env: map.map String.string (list String.string * list String.string * cmd)}.
   Context {ext_spec: ExtSpec}.
-  Implicit Types (t : trace) (m : mem) (l : locals).
+  Implicit Types (k : trace) (t : io_trace) (m : mem) (l : locals).
 
   Definition literal v (post : word -> Prop) : Prop :=
     dlet! v := word.of_Z v in post v.
@@ -24,28 +24,28 @@ Section WeakestPrecondition.
     (* conceptually, maybe it doesn't make a great deal of sense to pass in the trace, and we
        should just rewrite this function so that it's like we're always passing in a trace of nil.
        it's easier to work with this way, though. *)
-    Definition expr_body rec (t : trace) (e : Syntax.expr) (post : trace -> word -> Prop) : Prop :=
+    Definition expr_body rec (k : trace) (e : Syntax.expr) (post : trace -> word -> Prop) : Prop :=
       match e with
       | expr.literal v =>
-        literal v (post t)
+        literal v (post k)
       | expr.var x =>
-        get l x (post t)
+        get l x (post k)
       | expr.op op e1 e2 =>
-        rec t e1 (fun t' v1 =>
-        rec t' e2 (fun t'' v2 =>
-        post t'' (interp_binop op v1 v2)))
+        rec k e1 (fun k' v1 =>
+        rec k' e2 (fun k'' v2 =>
+        post k'' (interp_binop op v1 v2)))
       | expr.load s e =>
-        rec t e (fun t' a =>
-        load s m a (post (cons (read a) t')))
+        rec k e (fun k' a =>
+        load s m a (post (cons (read a) k')))
       | expr.inlinetable s tbl e =>
-        rec t e (fun t' a =>
-        load s (map.of_list_word tbl) a (post (cons (table a ) t')))
+        rec k e (fun k' a =>
+        load s (map.of_list_word tbl) a (post (cons (table a ) k')))
       | expr.ite c e1 e2 =>
-        rec t c (fun t' b =>
-        rec (cons (if word.eqb b (word.of_Z 0) then branch false else branch true) t') (if word.eqb b (word.of_Z 0) then e2 else e1) (fun t'' v =>
-        post t'' v))
+        rec k c (fun k' b =>
+        rec (cons (if word.eqb b (word.of_Z 0) then branch false else branch true) k') (if word.eqb b (word.of_Z 0) then e2 else e1) (fun k'' v =>
+        post k'' v))
     end.
-    Fixpoint expr t e := expr_body expr t e.
+    Fixpoint expr k e := expr_body expr k e.
   End WithMemAndLocals.
 
    Section WithF.
@@ -88,86 +88,86 @@ Section WeakestPrecondition.
   End WithF2.*)
   
   Section WithFunctions.
-    Context (call : String.string -> trace -> mem -> list word -> (trace -> mem -> list word -> Prop) -> Prop).
-    Definition dexpr m l t e v t' := expr m l t e (fun t'2 v2 => eq t' t'2 /\ eq v v2).
-    Definition dexprs m l t es vs t' := list_map' (expr m l) t es (fun t'2 vs2 => eq t' t'2 /\ eq vs vs2).
-    Goal (forall m l t, dexprs m l t (cons (expr.load access_size.one (expr.literal 5)) nil) = dexprs m l t nil). cbv [dexprs]. simpl. Abort.
-    Definition cmd_body (rec:_->_->_->_->_->Prop) (c : cmd) (t : trace) (m : mem) (l : locals)
-             (post : trace -> mem -> locals -> Prop) : Prop :=
+    Context (call : String.string -> trace -> io_trace -> mem -> list word -> (trace -> io_trace -> mem -> list word -> Prop) -> Prop).
+    Definition dexpr m l k e v k' := expr m l k e (fun k'2 v2 => eq k' k'2 /\ eq v v2).
+    Definition dexprs m l k es vs k' := list_map' (expr m l) k es (fun k'2 vs2 => eq k' k'2 /\ eq vs vs2).
+    Goal (forall m l k, dexprs m l k (cons (expr.load access_size.one (expr.literal 5)) nil) = dexprs m l k nil). cbv [dexprs]. simpl. Abort.
+    Definition cmd_body (rec:_->_->_->_->_->(trace->io_trace->_)->Prop) (c : cmd) (k : trace) (t : io_trace) (m : mem) (l : locals)
+             (post : trace -> io_trace -> mem -> locals -> Prop) : Prop :=
       (* give value of each pure expression when stating its subproof *)
       match c with
-      | cmd.skip => post t m l
+      | cmd.skip => post k t m l
       | cmd.set x ev =>
-        exists v t', dexpr m l t ev v t' /\
+        exists v k', dexpr m l k ev v k' /\
         dlet! l := map.put l x v in
-        post t' m l
+        post k' t m l
       | cmd.unset x =>
         dlet! l := map.remove l x in
-        post t m l
+        post k t m l
       | cmd.store sz ea ev =>
-        exists a t', dexpr m l t ea a t' /\
-        exists v t'', dexpr m l t' ev v t'' /\
+        exists a k', dexpr m l k ea a k' /\
+        exists v k'', dexpr m l k' ev v k'' /\
         store sz m a v (fun m =>
-        post (cons (write a) t'') m l)
+        post (cons (write a) k'') t m l)
       | cmd.stackalloc x n c =>
         Z.modulo n (bytes_per_word width) = 0 /\
         forall a mStack mCombined,
           anybytes a n mStack -> map.split mCombined m mStack ->
           dlet! l := map.put l x a in
-          rec c (cons (salloc a) t) mCombined l (fun t' mCombined' l' =>
+          rec c (cons (salloc a) k) t mCombined l (fun k' t' mCombined' l' =>
           exists m' mStack',
           anybytes a n mStack' /\ map.split mCombined' m' mStack' /\
-          post t' m' l')
+          post k' t' m' l')
       | cmd.cond br ct cf =>
-        exists v t', dexpr m l t br v t' /\
-        (word.unsigned v <> 0%Z -> rec ct (cons (branch true) t') m l post) /\
-        (word.unsigned v = 0%Z -> rec cf (cons (branch false) t') m l post)
+        exists v k', dexpr m l k br v k' /\
+        (word.unsigned v <> 0%Z -> rec ct (cons (branch true) k') t m l post) /\
+        (word.unsigned v = 0%Z -> rec cf (cons (branch false) k') t m l post)
       | cmd.seq c1 c2 =>
-        rec c1 t m l (fun t m l => rec c2 t m l post)
+        rec c1 k t m l (fun k t m l => rec c2 k t m l post)
       | cmd.while e c =>
-        exists measure (lt:measure->measure->Prop) (inv:measure->trace->mem->locals->Prop),
+        exists measure (lt:measure->measure->Prop) (inv:measure->trace->io_trace->mem->locals->Prop),
         Coq.Init.Wf.well_founded lt /\
-        (exists v, inv v t m l) /\
-        (forall v t m l, inv v t m l ->
-          exists b t', dexpr m l t e b t' /\
-          (word.unsigned b <> 0%Z -> rec c (cons (branch true) t') m l (fun t' m l =>
-            exists v', inv v' t' m l /\ lt v' v)) /\
-            (word.unsigned b = 0%Z -> post (cons (branch false) t') m l))
+        (exists v, inv v k t m l) /\
+        (forall v k t m l, inv v k t m l ->
+          exists b k', dexpr m l k e b k' /\
+          (word.unsigned b <> 0%Z -> rec c (cons (branch true) k') t m l (fun k t m l =>
+            exists v', inv v' k t m l /\ lt v' v)) /\
+            (word.unsigned b = 0%Z -> post (cons (branch false) k') t m l))
       | cmd.call binds fname arges =>
-        exists args t', dexprs m l t arges args t' /\ (* (call : String.string -> trace -> mem -> list word -> (trace -> mem -> list word -> Prop) -> Prop) *)
-        call fname t' m args (fun t'' m rets =>
+        exists args k', dexprs m l k arges args k' /\ (* (call : String.string -> trace -> mem -> list word -> (trace -> mem -> list word -> Prop) -> Prop) *)
+        call fname k' t m args (fun k'' t m rets =>
           exists l', map.putmany_of_list_zip binds rets l = Some l' /\
-          post t'' m l')
+          post k'' t m l')
       | cmd.interact binds action arges =>
-        exists args t', dexprs m l t arges args t' /\
+        exists args k', dexprs m l k arges args k' /\
         exists mKeep mGive, map.split m mKeep mGive /\
-        ext_spec (filterio t') mGive action args (fun mReceive rets =>
+        ext_spec t mGive action args (fun mReceive rets =>
           exists l', map.putmany_of_list_zip binds rets l = Some l' /\
           forall m', map.split m' mKeep mReceive ->
-          post (cons (IO ((mGive, action, args), (mReceive, rets))) t') m' l')
+          post k' (cons ((mGive, action, args), (mReceive, rets)) t) m' l')
       end.
     Fixpoint cmd c := cmd_body cmd c.
   End WithFunctions.
 
-  Definition func call '(innames, outnames, c) (t : trace) (m : mem) (args : list word) (post : trace -> mem -> list word -> Prop) :=
+  Definition func call '(innames, outnames, c) (k : trace) (t : io_trace) (m : mem) (args : list word) (post : trace -> io_trace -> mem -> list word -> Prop) :=
       exists l, map.of_list_zip innames args = Some l /\
-      cmd call c t m l (fun t m l =>
+      cmd call c k t m l (fun k t m l =>
         list_map (get l) outnames (fun rets =>
-        post t m rets)).
+        post k t m rets)). Check func.
 
   Definition call_body rec (functions : list (String.string * (list String.string * list String.string * cmd.cmd)))
-                (fname : String.string) (t : trace) (m : mem) (args : list word)
-                (post : trace -> mem -> list word -> Prop) : Prop :=
+                (fname : String.string) (k : trace) (t : io_trace) (m : mem) (args : list word)
+                (post : trace -> io_trace -> mem -> list word -> Prop) : Prop :=
     match functions with
     | nil => False
     | cons (f, decl) functions =>
       if String.eqb f fname
-      then func (rec functions) decl t m args post
-      else rec functions fname t m args post
+      then func (rec functions) decl k t m args post
+      else rec functions fname k t m args post
     end.
   Fixpoint call functions := call_body call functions.
 
-  Definition program funcs main t m l post : Prop := cmd (call funcs) main t m l post.
+  Definition program funcs main k t m l post : Prop := cmd (call funcs) main k t m l post.
 End WeakestPrecondition.
 Check @cmd_body.
 Ltac unfold1_cmd e :=

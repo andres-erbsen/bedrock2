@@ -81,13 +81,14 @@ Section WeakestPrecondition.
   
   Global Instance Proper_cmd :
     Proper (
-        (pointwise_relation _ (pointwise_relation _ (pointwise_relation _ (pointwise_relation _ (pointwise_relation _ ((pointwise_relation _ (pointwise_relation _ Basics.impl))) ==> Basics.impl)))) ==>
+        (pointwise_relation _ (pointwise_relation _ (pointwise_relation _ (pointwise_relation _ (pointwise_relation _ (pointwise_relation _ ((pointwise_relation _ (pointwise_relation _ (pointwise_relation _ Basics.impl)))) ==> Basics.impl))))) ==>
      pointwise_relation _ (
      pointwise_relation _ (
      pointwise_relation _ (
      pointwise_relation _ (
-     (pointwise_relation _ (pointwise_relation _ (pointwise_relation _ Basics.impl))) ==>
-     Basics.impl)))))) WeakestPrecondition.cmd.
+     pointwise_relation _ (
+     (pointwise_relation _ (pointwise_relation _ (pointwise_relation _ (pointwise_relation _ Basics.impl)))) ==>
+     Basics.impl))))))) WeakestPrecondition.cmd.
   Proof using env_ok ext_spec_ok locals_ok mem_ok word_ok.
     cbv [Proper respectful pointwise_relation Basics.flip Basics.impl]; ind_on Syntax.cmd.cmd;
       cbn in *; cbv [dlet.dlet] in *; intuition eauto.
@@ -101,7 +102,7 @@ Section WeakestPrecondition.
       { destruct H2 as (?&?&?&?). eexists. eexists. split.
         { eapply Proper_expr; eauto; cbv [pointwise_relation Basics.impl]; eauto. }
         { eapply Proper_store; eauto; cbv [pointwise_relation Basics.impl]; eauto. } } }
-    { eapply H1; eauto. intros ? ? ? (?&?&?&?&?). eauto 6. }
+    { eapply H1; eauto. intros ? ? ? ? (?&?&?&?&?). eauto 6. }
     { destruct H1 as (?&?&?&?). eexists. eexists. split.
       { eapply Proper_expr; eauto; cbv [pointwise_relation Basics.impl]; eauto. }
       { intuition eauto. } }
@@ -113,9 +114,9 @@ Section WeakestPrecondition.
       eassumption || eexists.
       eassumption || eexists. { eassumption || eexists. }
       eassumption || eexists. { eassumption || eexists. }
-      intros X Y Z T W.
-      specialize (HH X Y Z T W).
-      destruct HH as (?&?&?&?). eexists. eexists. split.
+      intros X Y Z T W V.
+      specialize (HH X Y Z T W V).
+      destruct HH as (?&?&?&?&?). eexists. eexists. split.
       1: eapply Proper_expr; eauto.
       1: cbv [pointwise_relation Basics.impl].
       all:intuition eauto 2.
@@ -129,7 +130,7 @@ Section WeakestPrecondition.
         (* COQBUG (performance), measured in Coq 8.9:
            "firstorder eauto" works, but takes ~100s and increases memory usage by 1.8GB.
            On the other hand, the line below takes just 5ms *)
-        cbv beta; intros ? ? ? (?&?&?); eauto. } }
+        cbv beta; intros ? ? ? ? (?&?&?); eauto. } }
     { destruct H1 as (?&?&?&?). eexists. eexists. split.
       { eapply Proper_list_map'; eauto; try exact H4; cbv [respectful pointwise_relation Basics.impl].
         { eapply Proper_expr; eauto. }
@@ -143,13 +144,14 @@ Section WeakestPrecondition.
 
   Global Instance Proper_func :
     Proper (
-     (pointwise_relation _ (pointwise_relation _ (pointwise_relation _ (pointwise_relation _ (pointwise_relation _ ((pointwise_relation _ (pointwise_relation _ Basics.impl))) ==> Basics.impl)))) ==>
+     (pointwise_relation _ (pointwise_relation _ (pointwise_relation _ (pointwise_relation _ (pointwise_relation _ (pointwise_relation _ ((pointwise_relation _ (pointwise_relation _ (pointwise_relation _ Basics.impl)))) ==> Basics.impl))))) ==>
+     pointwise_relation _ (
+     pointwise_relation _ (     
      pointwise_relation _ (
      pointwise_relation _ (
      pointwise_relation _ (
-     pointwise_relation _ (
-     (pointwise_relation _ (pointwise_relation _ (pointwise_relation _ Basics.impl))) ==>
-     Basics.impl)))))) WeakestPrecondition.func.
+     (pointwise_relation _ (pointwise_relation _ (pointwise_relation _ (pointwise_relation _ Basics.impl)))) ==>
+     Basics.impl))))))) WeakestPrecondition.func.
   Proof using word_ok mem_ok locals_ok ext_spec_ok env_ok.
     cbv [Proper respectful pointwise_relation Basics.flip Basics.impl  WeakestPrecondition.func]; intros.
     destruct a. destruct p.
@@ -174,11 +176,12 @@ Section WeakestPrecondition.
     Proper (
      (pointwise_relation _ (
      (pointwise_relation _ (
+     pointwise_relation _ (          
      pointwise_relation _ (
      pointwise_relation _ (
      pointwise_relation _ (
-     (pointwise_relation _ (pointwise_relation _ (pointwise_relation _ Basics.impl))) ==>
-     Basics.impl)))))))) WeakestPrecondition.call.
+     (pointwise_relation _ (pointwise_relation _ (pointwise_relation _ (pointwise_relation _ Basics.impl)))) ==>
+     Basics.impl))))))))) WeakestPrecondition.call.
   Proof using word_ok mem_ok locals_ok ext_spec_ok env_ok.
       cbv [Proper respectful pointwise_relation Basics.impl]; ind_on (list (String.string * (list String.string * list String.string * Syntax.cmd.cmd)));
       cbn in *; intuition (try typeclasses eauto with core).
@@ -197,8 +200,9 @@ Section WeakestPrecondition.
      pointwise_relation _ (
      pointwise_relation _ (
      pointwise_relation _ (
-     (pointwise_relation _ (pointwise_relation _ (pointwise_relation _ Basics.impl))) ==>
-     Basics.impl)))))) WeakestPrecondition.program.
+     pointwise_relation _ (
+     (pointwise_relation _ (pointwise_relation _ (pointwise_relation _ (pointwise_relation _ Basics.impl)))) ==>
+     Basics.impl))))))) WeakestPrecondition.program.
   Proof using word_ok mem_ok locals_ok ext_spec_ok env_ok.
     cbv [Proper respectful pointwise_relation Basics.impl  WeakestPrecondition.program]; intros.
     eapply Proper_cmd;
@@ -299,25 +303,25 @@ Section WeakestPrecondition.
     all : cbv [respectful pointwise_relation Basics.impl WeakestPrecondition.get]; intros; cbv beta; t.
   Qed.
 
-  Local Notation semantics_call := (fun e n t m args post =>
+  Local Notation semantics_call := (fun e n k t m args post =>
     exists params rets fbody, map.get e n = Some (params, rets, fbody) /\
     exists lf, map.putmany_of_list_zip params args map.empty = Some lf /\
-    forall mc', Semantics.exec e fbody t m lf mc' (fun t' m' st1 mc'' =>
+    forall mc', Semantics.exec e fbody k t m lf mc' (fun k' t' m' st1 mc'' =>
       exists retvs, map.getmany_of_list st1 rets = Some retvs /\
-      post t' m' retvs)).
+      post k' t' m' retvs)).
 
   Local Hint Constructors Semantics.exec : core.
-  Lemma sound_cmd' e c t m l mc post
-        (H:WeakestPrecondition.cmd (semantics_call e) c t m l post)
-    : Semantics.exec e c t m l mc (fun t' m' l' mc' => post t' m' l').
+  Lemma sound_cmd' e c k t m l mc post
+        (H:WeakestPrecondition.cmd (semantics_call e) c k t m l post)
+    : Semantics.exec e c k t m l mc (fun k' t' m' l' mc' => post k' t' m' l').
   Proof.
     ind_on Syntax.cmd; repeat (t; try match reverse goal with H : WeakestPrecondition.expr _ _ _ _ _ |- _ => eapply expr_sound in H end).
     { destruct (BinInt.Z.eq_dec (Interface.word.unsigned x) (BinNums.Z0)) as [Hb|Hb]; cycle 1.
       { econstructor; t. }
       { eapply Semantics.exec.if_false; t. } }
-    { revert dependent l; revert dependent m; revert dependent t; revert dependent mc; pattern x2.
+    { revert dependent l; revert dependent m; revert dependent t; revert dependent k; revert dependent mc; pattern x2.
       eapply (well_founded_ind H); t.
-      pose proof (H1 _ _ _ _ ltac:(eassumption));
+      pose proof (H1 _ _ _ _ _ ltac:(eassumption));
         repeat (t; try match goal with H : WeakestPrecondition.expr _ _ _ _ _ |- _ => eapply expr_sound in H end).
       { destruct (BinInt.Z.eq_dec (Interface.word.unsigned x4) (BinNums.Z0)) as [Hb|Hb].
         { eapply Semantics.exec.while_false; t. }
@@ -329,11 +333,11 @@ Section WeakestPrecondition.
   Section WithE.
     Context fs (E: env) (HE: List.Forall (fun '(k, v) => map.get E k = Some v) fs).
     Import coqutil.Tactics.Tactics.
-    Lemma sound_call' n t m args post
-      (H : WeakestPrecondition.call fs n t m args post)
-      : semantics_call E n t m args post.
+    Lemma sound_call' n k t m args post
+      (H : WeakestPrecondition.call fs n k t m args post)
+      : semantics_call E n k t m args post.
     Proof.
-      revert H; revert post args m t n; induction HE; intros.
+      revert H; revert post args m t k n; induction HE; intros.
       { contradiction H. }
       destruct x as [n' ((X&Y)&Z)]; t.
       destr (String.eqb n' n); t.
@@ -349,9 +353,9 @@ Section WeakestPrecondition.
       eauto using sound_getmany.
     Qed.
 
-    Lemma sound_cmd'' c t m l mc post
-      (H : WeakestPrecondition.cmd (WeakestPrecondition.call fs) c t m l post)
-      : Semantics.exec E c t m l mc (fun t' m' l' mc' => post t' m' l').
+    Lemma sound_cmd'' c k t m l mc post
+      (H : WeakestPrecondition.cmd (WeakestPrecondition.call fs) c k t m l post)
+      : Semantics.exec E c k t m l mc (fun k' t' m' l' mc' => post k' t' m' l').
     Proof.
       eapply Proper_cmd in H; [ .. | reflexivity ].
       1: apply sound_cmd'; exact H.
@@ -361,10 +365,10 @@ Section WeakestPrecondition.
     Qed.
   End WithE.
 
-  Lemma sound_cmd fs c t m l mc post
+  Lemma sound_cmd fs c k t m l mc post
     (Hnd : List.NoDup (List.map fst fs))
-    (H : WeakestPrecondition.cmd (WeakestPrecondition.call fs) c t m l post)
-    : Semantics.exec (map.of_list fs) c t m l mc (fun t' m' l' mc' => post t' m' l').
+    (H : WeakestPrecondition.cmd (WeakestPrecondition.call fs) c k t m l post)
+    : Semantics.exec (map.of_list fs) c k t m l mc (fun k' t' m' l' mc' => post k' t' m' l').
   Proof.
     eapply sound_cmd'';
       try eapply Properties.map.all_gets_from_map_of_NoDup_list; eauto.
@@ -373,15 +377,15 @@ Section WeakestPrecondition.
   (** Ad-hoc lemmas here? *)
 
   Import bedrock2.Syntax bedrock2.Semantics bedrock2.WeakestPrecondition.
-  Lemma interact_nomem call action binds arges t m l post t'
-        args (Hargs : dexprs m l t arges args t')
-        (Hext : ext_spec (filterio t') map.empty binds args (fun mReceive (rets : list word) =>
+  Lemma interact_nomem call action binds arges k t m l post k'
+        args (Hargs : dexprs m l k arges args k')
+        (Hext : ext_spec t map.empty binds args (fun mReceive (rets : list word) =>
            mReceive = map.empty /\
            exists l0 : locals, map.putmany_of_list_zip action rets l = Some l0 /\
-           post (cons (IO (map.empty, binds, args, (map.empty, rets))) t') m l0))
-    : WeakestPrecondition.cmd call (cmd.interact action binds arges) t m l post.
+           post k' (cons (map.empty, binds, args, (map.empty, rets)) t) m l0))
+    : WeakestPrecondition.cmd call (cmd.interact action binds arges) k t m l post.
   Proof using word_ok mem_ok ext_spec_ok.
-    exists args. exists t'. split; [exact Hargs|].
+    exists args. exists k'. split; [exact Hargs|].
     exists m.
     exists map.empty.
     split; [eapply Properties.map.split_empty_r; exact eq_refl|].
