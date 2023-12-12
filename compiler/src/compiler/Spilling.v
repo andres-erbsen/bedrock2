@@ -21,7 +21,6 @@ Notation salloc := Semantics.salloc.
 Notation write := Semantics.write.
 Notation read := Semantics.read.
 Notation branch := Semantics.branch.
-Notation IO := Semantics.IO.
 Notation table := Semantics.table.
 
 Open Scope Z_scope.
@@ -195,7 +194,6 @@ Section Spilling.
   Notation qwrite := Semantics.qwrite.
   Notation qsalloc := Semantics.qsalloc.
   Notation qbranch := Semantics.qbranch.
-  Notation qIO := Semantics.qIO.
   Notation qend := Semantics.qend.
   Notation qtable := Semantics.qtable.
 
@@ -326,14 +324,10 @@ Section Spilling.
             | None => None
             end
         | SInteract resvars _ argvars =>
-            match next t_so_far with
-            | Some (qIO i) =>
-                predict_with_prefix
-                  (leak_set_reg_range_to_vars fpval argvars ++ [IO i] ++ leak_set_vars_to_reg_range fpval resvars)
-                  (f (t_so_far ++ [IO i]))
-                  st_so_far
-            | _ => None
-            end
+            predict_with_prefix
+              (leak_set_reg_range_to_vars fpval argvars ++ leak_set_vars_to_reg_range fpval resvars)
+              (f (t_so_far))
+              st_so_far
         end
     end.
 
@@ -652,7 +646,7 @@ Section Spilling.
            nth_error stackwords (Z.to_nat (r - 32)) = Some v) /\
         length stackwords = Z.to_nat (maxvar - 31).
 
-  Implicit Types post : Semantics.trace -> mem -> locals -> MetricLog -> Prop.
+  Implicit Types post : Semantics.trace -> Semantics.io_trace -> mem -> locals -> MetricLog -> Prop.
 
   Lemma put_arg_reg: forall l r v fpval lRegs,
       (eq lRegs * arg_regs * ptsto fp fpval)%sep l ->
@@ -700,18 +694,16 @@ Section Spilling.
     unfold spill_tmp. eapply put_arg_reg; eassumption.
   Qed.
 
-  Notation fio := Semantics.filterio.
-
-  Lemma load_iarg_reg_correct(i: Z): forall r e2 t1 t2 m1 m2 l1 l2 mc2 fpval post frame maxvar v,
+  Lemma load_iarg_reg_correct(i: Z): forall r e2 k2 t1 t2 m1 m2 l1 l2 mc2 fpval post frame maxvar v,
       i = 1 \/ i = 2 ->
-      related maxvar frame fpval (fio t1) m1 l1 (fio t2) m2 l2 ->
+      related maxvar frame fpval t1 m1 l1 t2 m2 l2 ->
       fp < r <= maxvar /\ (r < a0 \/ a7 < r) ->
       map.get l1 r = Some v ->
       (forall mc2,
-          let t2' := rev (leak_load_iarg_reg fpval r) ++ t2 in
-          related maxvar frame fpval (fio t1) m1 l1 (fio t2') m2 (map.put l2 (iarg_reg i r) v) ->
-          post t2' m2 (map.put l2 (iarg_reg i r) v) mc2) ->
-      exec e2 (load_iarg_reg i r) t2 m2 l2 mc2 post.
+          let k2' := rev (leak_load_iarg_reg fpval r) ++ k2 in
+          related maxvar frame fpval t1 m1 l1 t2 m2 (map.put l2 (iarg_reg i r) v) ->
+          post k2' t2 m2 (map.put l2 (iarg_reg i r) v) mc2) ->
+      exec e2 (load_iarg_reg i r) k2 t2 m2 l2 mc2 post.
   Proof.
     intros.
     unfold leak_load_iarg_reg, load_iarg_reg, stack_loc, iarg_reg, related in *. fwd.
@@ -749,15 +741,15 @@ Section Spilling.
              end.
   Qed.
 
-  Lemma load_iarg_reg_correct'(i: Z): forall r e2 t1 t2 m1 m2 l1 l2 mc1 mc2 post frame maxvar v fpval,
+  Lemma load_iarg_reg_correct'(i: Z): forall r e2 k1 k2 t1 t2 m1 m2 l1 l2 mc1 mc2 post frame maxvar v fpval,
       i = 1 \/ i = 2 ->
-      related maxvar frame fpval (fio t1) m1 l1 (fio t2) m2 l2 ->
+      related maxvar frame fpval t1 m1 l1 t2 m2 l2 ->
       fp < r <= maxvar /\ (r < a0 \/ a7 < r) ->
       map.get l1 r = Some v ->
-      post t1 m1 l1 mc1 ->
-      exec e2 (load_iarg_reg i r) t2 m2 l2 mc2
-        (fun t2' m2' l2' mc2' => exists t1' m1' l1' mc1',
-             related maxvar frame fpval (fio t1') m1' l1' (fio t2') m2' l2' /\ post t1' m1' l1' mc1').
+      post k1 t1 m1 l1 mc1 ->
+      exec e2 (load_iarg_reg i r) k2 t2 m2 l2 mc2
+        (fun k2' t2' m2' l2' mc2' => exists k1' t1' m1' l1' mc1',
+             related maxvar frame fpval t1' m1' l1' t2' m2' l2' /\ post k1' t1' m1' l1' mc1').
   Proof.
     intros.
     unfold load_iarg_reg, leak_load_iarg_reg, stack_loc, iarg_reg, related in *. fwd.
@@ -799,15 +791,15 @@ Section Spilling.
      when the new postcondition is used as a "mid1" in exec.loop, and body1 is a seq
      in which this lemma was used, t2, m2, l2, mc2 are introduced after the evar "?mid1"
      is created (i.e. after exec.loop is applied), so they are not in the scope of "?mid1". *)
-  Lemma load_iarg_reg_correct''(i: Z): forall r e2 t1 t2 m1 m2 l1 l2 mc2 frame maxvar v fpval,
+  Lemma load_iarg_reg_correct''(i: Z): forall r e2 k2 t1 t2 m1 m2 l1 l2 mc2 frame maxvar v fpval,
       i = 1 \/ i = 2 ->
-      related maxvar frame fpval (fio t1) m1 l1 (fio t2) m2 l2 ->
+      related maxvar frame fpval t1 m1 l1 t2 m2 l2 ->
       fp < r <= maxvar /\ (r < a0 \/ a7 < r) ->
       map.get l1 r = Some v ->
-      exec e2 (load_iarg_reg i r) t2 m2 l2 mc2 (fun t2' m2' l2' mc2' =>
-      t2' = rev (leak_load_iarg_reg fpval r) ++ t2
+      exec e2 (load_iarg_reg i r) k2 t2 m2 l2 mc2 (fun k2' t2' m2' l2' mc2' =>
+      k2' = rev (leak_load_iarg_reg fpval r) ++ k2
       /\ m2' = m2 /\ l2' = map.put l2 (iarg_reg i r) v /\
-        related maxvar frame fpval (fio t1) m1 l1 (fio t2') m2' l2').
+        related maxvar frame fpval t1 m1 l1 t2' m2' l2').
   Proof.
     intros.
     unfold load_iarg_reg, leak_load_iarg_reg, stack_loc, iarg_reg, related in *. fwd.
@@ -847,13 +839,13 @@ Section Spilling.
      `related` does not hold: the result is already in l1 and lStack, but not yet in stackwords.
      So we request the `related` that held *before* SOp, i.e. the one where the result is not
      yet in l1 and l2. *)
-  Lemma save_ires_reg_correct: forall e t1 t2 m1 m2 l1 l2 mc1 mc2 x v maxvar frame post fpval,
-      post t1 m1 (map.put l1 x v) mc1 ->
-      related maxvar frame fpval (fio t1) m1 l1 (fio t2) m2 l2 ->
+  Lemma save_ires_reg_correct: forall e k1 k2 t1 t2 m1 m2 l1 l2 mc1 mc2 x v maxvar frame post fpval,
+      post k1 t1 m1 (map.put l1 x v) mc1 ->
+      related maxvar frame fpval t1 m1 l1 t2 m2 l2 ->
       fp < x <= maxvar /\ (x < a0 \/ a7 < x) ->
-      exec e (save_ires_reg x) t2 m2 (map.put l2 (ires_reg x) v) mc2
-        (fun t2' m2' l2' mc2' => exists t1' m1' l1' mc1',
-                related maxvar frame fpval (fio t1') m1' l1' (fio t2') m2' l2' /\ post t1' m1' l1' mc1').
+      exec e (save_ires_reg x) k2 t2 m2 (map.put l2 (ires_reg x) v) mc2
+        (fun k2' t2' m2' l2' mc2' => exists k1' t1' m1' l1' mc1',
+                related maxvar frame fpval t1' m1' l1' t2' m2' l2' /\ post k1' t1' m1' l1' mc1').
   Proof.
     intros.
     unfold save_ires_reg, stack_loc, ires_reg, related in *. fwd.
@@ -871,7 +863,7 @@ Section Spilling.
                  | |- _ /\ _ => split
                  end.
           9: eassumption.
-          1: assumption.
+          1: reflexivity.
           1: ecancel_assumption.
           3: {
             unfold sep, map.split in H0p3|-*.
@@ -909,7 +901,7 @@ Section Spilling.
              | |- _ /\ _ => split
              end.
       9: eassumption.
-      1: assumption.
+      1: reflexivity.
       1: ecancel_assumption.
       3: {
         apply sep_comm. apply sep_comm in H0p4.
@@ -936,7 +928,7 @@ Section Spilling.
         unfold ptsto, map.disjoint in *. subst.
         rewrite ?map.get_putmany_dec, ?map.get_put_dec, ?map.get_empty in H1.
         repeat destruct_one_match_hyp; subst; fwd; try congruence; try blia.
-        specialize H0p9 with (1 := H1). blia.
+        specialize H0p8 with (1 := H1). blia.
       }
       all: try eassumption.
   Qed.
@@ -945,14 +937,14 @@ Section Spilling.
      `related` does not hold: the result is already in l1 and lStack, but not yet in stackwords.
      So we request the `related` that held *before* SOp, i.e. the one where the result is not
      yet in l1 and l2. *)
-  Lemma save_ires_reg_correct'': forall e t1 t2 m1 m2 l1 l2 mc2 x v maxvar frame post fpval,
-      related maxvar frame fpval (fio t1) m1 l1 (fio t2) m2 l2 ->
+  Lemma save_ires_reg_correct'': forall e k2 t1 t2 m1 m2 l1 l2 mc2 x v maxvar frame post fpval,
+      related maxvar frame fpval t1 m1 l1 t2 m2 l2 ->
       fp < x <= maxvar /\ (x < a0 \/ a7 < x) ->
-      (forall m2' l2' mc2',
-          let t2' := rev (leak_save_ires_reg fpval x) ++ t2 in
-          related maxvar frame fpval (fio t1) m1 (map.put l1 x v) (fio t2') m2' l2' ->
-          post t2' m2' l2' mc2') ->
-      exec e (save_ires_reg x) t2 m2 (map.put l2 (ires_reg x) v) mc2 post.
+      (forall t2' m2' l2' mc2',
+          let k2' := rev (leak_save_ires_reg fpval x) ++ k2 in
+          related maxvar frame fpval t1 m1 (map.put l1 x v) t2' m2' l2' ->
+          post k2' t2' m2' l2' mc2') ->
+      exec e (save_ires_reg x) k2 t2 m2 (map.put l2 (ires_reg x) v) mc2 post.
   Proof.
     intros.
     unfold leak_save_ires_reg, save_ires_reg, stack_loc, ires_reg, related in *. fwd.
@@ -970,7 +962,7 @@ Section Spilling.
                  | |- exists _, _ => eexists
                  | |- _ /\ _ => split
                  end.
-          1: { cbn [rev List.app]. rewrite ProgramLogic.filterio_cons. assumption. }
+          1: reflexivity.
           1: ecancel_assumption.
           3: {
             unfold sep, map.split in Hp3|-*.
@@ -1008,7 +1000,7 @@ Section Spilling.
              | |- exists _, _ => eexists
              | |- _ /\ _ => split
              end.
-      1: assumption.
+      1: reflexivity.
       1: ecancel_assumption.
       3: {
         apply sep_comm. apply sep_comm in Hp4.
@@ -1035,7 +1027,7 @@ Section Spilling.
         unfold ptsto, map.disjoint in *. subst.
         rewrite ?map.get_putmany_dec, ?map.get_put_dec, ?map.get_empty in H0.
         repeat destruct_one_match_hyp; subst; fwd; try congruence; try blia.
-        specialize Hp9 with (1 := H0). blia.
+        specialize Hp8 with (1 := H0). blia.
       }
       all: try eassumption.
   Qed.
@@ -1086,19 +1078,19 @@ Section Spilling.
   Qed.
 
   Lemma set_vars_to_reg_range_correct:
-    forall args start argvs e t1 t2 m1 m2 l1 l1' l2 mc2 maxvar frame post fpval,
-      related maxvar frame fpval (fio t1) m1 l1 (fio t2) m2 l2 ->
+    forall args start argvs e k2 t1 t2 m1 m2 l1 l1' l2 mc2 maxvar frame post fpval,
+      related maxvar frame fpval t1 m1 l1 t2 m2 l2 ->
       map.putmany_of_list_zip args argvs l1 = Some l1' ->
       map.getmany_of_list l2 (List.unfoldn (Z.add 1) (List.length args) start) = Some argvs ->
       (List.length args <= 8)%nat ->
       a0 <= start ->
       start + Z.of_nat (List.length args) <= a7 + 1 ->
       Forall (fun x => fp < x <= maxvar /\ (x < a0 \/ a7 < x)) args ->
-      (forall m2' l2' mc2',
-          let t2' := rev (leak_set_vars_to_reg_range fpval args) ++ t2 in
-          related maxvar frame fpval (fio t1) m1 l1' (fio t2') m2' l2' ->
-          post t2' m2' l2' mc2') ->
-      exec e (set_vars_to_reg_range args start) t2 m2 l2 mc2 post.
+      (forall t2' m2' l2' mc2',
+          let k2' := rev (leak_set_vars_to_reg_range fpval args) ++ k2 in
+          related maxvar frame fpval t1 m1 l1' t2' m2' l2' ->
+          post k2' t2' m2' l2' mc2') ->
+      exec e (set_vars_to_reg_range args start) k2 t2 m2 l2 mc2 post.
   Proof.
     induction args; intros.
     - simpl. eapply exec.skip. fwd. eauto.
@@ -1122,7 +1114,7 @@ Section Spilling.
         unfold related.
         eexists (map.put lStack a v), lRegs, _.
         ssplit.
-        { cbn [List.app]. rewrite ProgramLogic.filterio_cons. assumption. }
+        { reflexivity. }
         { ecancel_assumption. }
         { eassumption. }
         { intros. rewrite map.get_put_dec in H. destr (a =? x0). 1: blia. eauto. }
@@ -1145,7 +1137,7 @@ Section Spilling.
         }
         unfold related. eexists lStack, (map.put lRegs a v), _.
         ssplit.
-        { cbn [List.app]. assumption. }
+        { reflexivity. }
         { ecancel_assumption. }
         { intros. rewrite map.get_put_dec in H. destr (a =? x). 1: blia. eauto. }
         { eassumption. }
@@ -1164,19 +1156,19 @@ Section Spilling.
   Qed.
 
   Lemma set_reg_range_to_vars_correct:
-    forall args argvs start e t1 t2 m1 m2 l1 l2 mc2 maxvar frame post fpval,
-      related maxvar frame fpval (fio t1) m1 l1 (fio t2) m2 l2 ->
+    forall args argvs start e k2 t1 t2 m1 m2 l1 l2 mc2 maxvar frame post fpval,
+      related maxvar frame fpval t1 m1 l1 t2 m2 l2 ->
       (List.length args <= 8)%nat ->
       a0 <= start ->
       start + Z.of_nat (List.length args) <= a7 + 1 ->
       Forall (fun x => fp < x <= maxvar /\ (x < a0 \/ a7 < x)) args ->
       map.getmany_of_list l1 args = Some argvs ->
-      (forall l2' mc2',
-          let t2' := rev (leak_set_reg_range_to_vars fpval args) ++ t2 in
-          related maxvar frame fpval (fio t1) m1 l1 (fio t2') m2 l2' ->
+      (forall t2' l2' mc2',
+          let k2' := rev (leak_set_reg_range_to_vars fpval args) ++ k2 in
+          related maxvar frame fpval t1 m1 l1 t2' m2 l2' ->
           map.getmany_of_list l2' (List.unfoldn (Z.add 1) (List.length args) start) = Some argvs ->
-          post t2' m2 l2' mc2') ->
-      exec e (set_reg_range_to_vars start args) t2 m2 l2 mc2 post.
+          post k2' t2' m2 l2' mc2') ->
+      exec e (set_reg_range_to_vars start args) k2 t2 m2 l2 mc2 post.
   Proof.
     induction args; intros.
     - simpl. eapply exec.skip. eapply H5. 1: eassumption. simpl.
@@ -1199,11 +1191,11 @@ Section Spilling.
         eapply exec.load.
         * eapply get_sep. ecancel_assumption.
         * eapply load_from_word_array. 1: ecancel_assumption. 2: blia.
-          eapply H3p6. 1: blia.
-          unfold sep in H3p4. simp.
+          eapply H3p5. 1: blia.
+          unfold sep in H3p3. simp.
           eapply map.get_split_r. 1,3: eassumption.
           destr (map.get mp a); [exfalso|reflexivity].
-          specialize H3p2 with (1 := E0). blia.
+          specialize H3p1 with (1 := E0). blia.
         * rewrite rev_app_distr in H5. rewrite <- List.app_assoc in H5. cbn [rev List.app] in H5.
           eapply H5.
           -- unfold related.
@@ -1226,11 +1218,11 @@ Section Spilling.
         eapply exec.set.
         * edestruct (eq_sep_to_split l2') as (l2Rest & S22 & SP22). 1: ecancel_assumption.
           eapply map.get_split_grow_r. 1: eassumption.
-          unfold sep in H3p4. destruct H3p4 as (lRegs' & lStack' & S2 & ? & ?).
+          unfold sep in H3p3. destruct H3p3 as (lRegs' & lStack' & S2 & ? & ?).
           subst lRegs' lStack'.
           eapply map.get_split_l. 1: exact S2. 2: exact G.
           destr (map.get lStack a); [exfalso|reflexivity].
-          specialize H3p3 with (1 := E0). blia.
+          specialize H3p2 with (1 := E0). blia.
         * rewrite app_nil_r in H5. eapply H5. 2: {
             cbn [List.unfoldn].
             eapply map.getmany_of_list_cons.
@@ -1411,40 +1403,40 @@ Section Spilling.
   Qed.
 
   Definition spilling_correct_for(e1 e2 : env)(s1 : stmt) : Prop :=
-    forall (t1 : Semantics.trace) (m1 : mem) (l1 : locals) (mc1 : MetricLog)
-           (post : Semantics.trace -> mem -> locals -> MetricLog -> Prop),
-      exec e1 s1 t1 m1 l1 mc1 post ->
+    forall (k1 : Semantics.trace) (t1 : Semantics.io_trace) (m1 : mem) (l1 : locals) (mc1 : MetricLog)
+           (post : Semantics.trace -> Semantics.io_trace -> mem -> locals -> MetricLog -> Prop),
+      exec e1 s1 k1 t1 m1 l1 mc1 post ->
       forall (frame : mem -> Prop) (maxvar : Z),
         valid_vars_src maxvar s1 ->
-        forall (t2 : Semantics.trace) (m2 : mem) (l2 : locals) (mc2 : MetricLog) (fpval : word),
-          related maxvar frame fpval (fio t1) m1 l1 (fio t2) m2 l2 ->
-          exec e2 (spill_stmt s1) t2 m2 l2 mc2
-            (fun (t2' : Semantics.trace) (m2' : mem) (l2' : locals) (mc2' : MetricLog) =>
-               exists t1' m1' l1' mc1' t1'' t2'',
-                 related maxvar frame fpval (fio t1') m1' l1' (fio t2') m2' l2' /\
-                   post t1' m1' l1' mc1' /\
-                   t1' = t1'' ++ t1 /\
-                   t2' = t2'' ++ t2 /\
+        forall (k2 : Semantics.trace) (t2 : Semantics.io_trace) (m2 : mem) (l2 : locals) (mc2 : MetricLog) (fpval : word),
+          related maxvar frame fpval t1 m1 l1 t2 m2 l2 ->
+          exec e2 (spill_stmt s1) k2 t2 m2 l2 mc2
+            (fun (k2' : Semantics.trace) (t2' : Semantics.io_trace) (m2' : mem) (l2' : locals) (mc2' : MetricLog) =>
+               exists k1' t1' m1' l1' mc1' k1'' k2'',
+                 related maxvar frame fpval t1' m1' l1' t2' m2' l2' /\
+                   post k1' t1' m1' l1' mc1' /\
+                   k1' = k1'' ++ k1 /\
+                   k2' = k2'' ++ k2 /\
                    exists F',
-                   forall next t10 t1''' t2''' fuel' f,
-                     predicts next (t10 ++ rev t1'' ++ t1''') ->
-                     predicts (fun t => f (t10 ++ rev t1'') t) t2''' ->
+                   forall next k10 k1''' k2''' fuel' f,
+                     predicts next (k10 ++ rev k1'' ++ k1''') ->
+                     predicts (fun k => f (k10 ++ rev k1'') k) k2''' ->
                      Nat.le F' fuel' ->
-                     predicts (fun t => snext_stmt' e1 fuel' next t10 fpval s1 t f) (rev t2'' ++ t2''')).              
+                     predicts (fun k => snext_stmt' e1 fuel' next k10 fpval s1 k f) (rev k2'' ++ k2''')).              
 
   Definition call_spec(e: env) '(argnames, retnames, fbody) next
-    (t: Semantics.trace)(m: mem)(argvals: list word)
+    (k: Semantics.trace)(t: Semantics.io_trace)(m: mem)(argvals: list word)
     (post: Semantics.io_trace -> mem -> list word -> Prop): Prop :=
     (forall l mc,
         map.of_list_zip argnames argvals = Some l ->
-        exec e fbody t m l mc (fun t' m' l' mc' =>
+        exec e fbody k t m l mc (fun k' t' m' l' mc' =>
                                  exists retvals, map.getmany_of_list l' retnames = Some retvals /\
-                                                   post (Semantics.filterio t') m' retvals /\
-                                                   exists t'' F,
-                                                     t' = t'' ++ t /\
+                                                   post t' m' retvals /\
+                                                   exists k'' F,
+                                                     k' = k'' ++ k /\
                                                        forall fuel,
                                                          le F fuel ->
-                                                         predicts (next fuel) (rev t''))).
+                                                         predicts (next fuel) (rev k''))).
 
                                                                                   
   (* In exec.call, there are many maps of locals involved:
@@ -1472,18 +1464,18 @@ Section Spilling.
      To simplify, it is helpful to have a separate lemma only talking about
      what happens in the callee. TODO: actually use that lemma in case exec.call.
      Moreover, this lemma will also be used in the pipeline, where phases
-     are composed based on the semantics of function calls. *) Check snext_fun.
-  Print Semantics.predicts. Print snext_fun. Print call_spec.
-(*(snext_fun e1 fuel next [] (argnames1, retnames1, body1))*)
+     are composed based on the semantics of function calls. *)
+
   Lemma app_one_cons {A} (x : A) (l : list A) :
     x :: l = [x] ++ l.
   Proof. reflexivity. Qed.
+  
   Lemma spill_fun_correct_aux: forall e1 e2 next argnames1 retnames1 body1 argnames2 retnames2 body2,
       spill_fun (argnames1, retnames1, body1) = Success (argnames2, retnames2, body2) ->
       spilling_correct_for e1 e2 body1 ->
-      forall argvals t m (post: Semantics.io_trace -> mem -> list word -> Prop),
-        call_spec e1 (argnames1, retnames1, body1) next t m argvals post ->
-        call_spec e2 (argnames2, retnames2, body2) (fun fuel => snext_fun e1 fuel (next fuel) [] (argnames1, retnames1, body1)) t m argvals post.
+      forall argvals k t m (post: Semantics.io_trace -> mem -> list word -> Prop),
+        call_spec e1 (argnames1, retnames1, body1) next k t m argvals post ->
+        call_spec e2 (argnames2, retnames2, body2) (fun fuel => snext_fun e1 fuel (next fuel) [] (argnames1, retnames1, body1)) k t m argvals post.
   Proof.
     unfold call_spec, spilling_correct_for. intros * Sp IHexec * Ex lFL3 mc OL2.
     unfold spill_fun in Sp. fwd.
@@ -1554,7 +1546,7 @@ Section Spilling.
       2: eapply Forall_le_max.
       cbv beta.
       subst maxvar'. clear. blia. }
-    intros mL4 lFL4 mcL4 tL4 R.
+    intros tL4 mL4 lFL4 mcL4 kL4 R.
     eapply exec.seq_cps.
     eapply exec.weaken. {
       eapply IHexec. 1: apply Ex. Print related. 2: exact R.
@@ -1570,7 +1562,7 @@ Section Spilling.
       }
       cbv beta. subst maxvar'. blia.
     }
-    cbv beta. intros tL5 mL5 lFL5 mcL5 (tH5 & mH5 & lFH5 & mcH5 & t1'' & t2'' & R5 & OC & Et1'' & Et2'' & F' & CT).
+    cbv beta. intros kL5 tL5 mL5 lFL5 mcL5 (kH5 & tH5 & mH5 & lFH5 & mcH5 & t1'' & t2'' & R5 & OC & Et1'' & Et2'' & F' & CT).
     fwd.
     eapply set_reg_range_to_vars_correct.
     { eassumption. }
@@ -1590,7 +1582,7 @@ Section Spilling.
       subst maxvar'. clear. blia. }
     { eassumption. }
     rename R into R0.
-    intros tL6 lFL6 mcL6 R GM.
+    intros tL6 lFL6 mcL6 kL6 R GM.
     (* prove that if we remove the additional stack provided by exec.stackalloc
        and store the result vars back into the arg registers, the postcondition holds *)
     unfold related in R. fwd. rename lStack into lStack5, lRegs into lRegs5.
@@ -1604,7 +1596,7 @@ Section Spilling.
            | |- exists _, _ => eexists
            | |- _ /\ _ => split
            end.
-    4: { rewrite <- Rp0. eassumption. }
+    4: { eassumption. }
     2: {
       unfold map.split. eauto.
     }
@@ -1620,13 +1612,13 @@ Section Spilling.
       }
       blia. }
     1: eassumption.
-    { subst mcL6. subst tL4. rewrite app_one_cons. repeat rewrite app_assoc. reflexivity. }
-    { intros fuel. intros Hfuel. cbv [snext_fun]. subst mcL6 tL4.
+    { subst kL6. subst kL4. rewrite app_one_cons. repeat rewrite app_assoc. reflexivity. }
+    { intros fuel. intros Hfuel. cbv [snext_fun]. subst kL6 kL4.
       repeat (rewrite rev_app_distr || rewrite rev_involutive || cbn [rev List.app]).
       econstructor; eauto.
       apply predict_with_prefix_works.
       eapply CT. Print snext_fun.
-      { Search t. Search (_ ++ _ = _ ++ _ -> _ = _). apply app_inv_tail in Et1''. subst.
+      { apply app_inv_tail in Et1''. subst.
         simpl. Search predicts. instantiate (1 := nil). rewrite app_nil_r.
         instantiate (1 := (plus F F')) in Hfuel. eapply OCp2p1. blia. }
       { apply predict_with_prefix_works_end. constructor. reflexivity. }
@@ -1639,32 +1631,32 @@ Section Spilling.
       (e1 e2 : env)
       (Ev : spill_functions e1 = Success e2)
       (s1 : stmt)
-      (t1 : Semantics.trace)
+      (k1 : Semantics.trace)
+      (t1 : Semantics.io_trace)
       (m1 : mem)
       (l1 : locals)
       (mc1 : MetricLog)
-      (post : Semantics.trace -> mem -> locals -> MetricLog -> Prop),
-      exec e1 s1 t1 m1 l1 mc1 post ->
+      (post : Semantics.trace -> Semantics.io_trace -> mem -> locals -> MetricLog -> Prop),
+      exec e1 s1 k1 t1 m1 l1 mc1 post ->
       forall (frame : mem -> Prop) (maxvar : Z),
         valid_vars_src maxvar s1 ->
-        forall (t2 : Semantics.trace) (m2 : mem) (l2 : locals) (mc2 : MetricLog) (fpval : word),
-          related maxvar frame fpval (fio t1) m1 l1 (fio t2) m2 l2 ->
-          exec e2 (spill_stmt s1) t2 m2 l2 mc2
-            (fun (t2' : Semantics.trace) (m2' : mem) (l2' : locals) (mc2' : MetricLog) =>
-               exists t1' m1' l1' mc1' t1'' t2'',
-                 related maxvar frame fpval (fio t1') m1' l1' (fio t2') m2' l2' /\
-                   post t1' m1' l1' mc1' /\
-                   t1' = t1'' ++ t1 /\
-                   t2' = t2'' ++ t2 /\
+        forall (k2 : Semantics.trace) (t2 : Semantics.io_trace) (m2 : mem) (l2 : locals) (mc2 : MetricLog) (fpval : word),
+          related maxvar frame fpval t1 m1 l1 t2 m2 l2 ->
+          exec e2 (spill_stmt s1) k2 t2 m2 l2 mc2
+            (fun (k2' : Semantics.trace) (t2' : Semantics.io_trace) (m2' : mem) (l2' : locals) (mc2' : MetricLog) =>
+               exists k1' t1' m1' l1' mc1' k1'' k2'',
+                 related maxvar frame fpval t1' m1' l1' t2' m2' l2' /\
+                   post k1' t1' m1' l1' mc1' /\
+                   k1' = k1'' ++ k1 /\
+                   k2' = k2'' ++ k2 /\
                    exists F',
-                   forall next t10 t1''' t2''' fuel' f,
-                     (*may be nice to change exec so that only new trace is output*)
-                     predicts next (t10 ++ rev t1'' ++ t1''') ->
-                     predicts (fun t => f (t10 ++ rev t1'') t) t2''' ->
+                   forall next k10 k1''' k2''' fuel' f,
+                     predicts next (k10 ++ rev k1'' ++ k1''') ->
+                     predicts (fun k => f (k10 ++ rev k1'') k) k2''' ->
                      Nat.le F' fuel' ->
-                     predicts (fun t => snext_stmt' e1 fuel' next t10 fpval s1 t f) (rev t2'' ++ t2''')).
+                     predicts (fun k => snext_stmt' e1 fuel' next k10 fpval s1 k f) (rev k2'' ++ k2''')).
   Proof.
-    intros e1 e2 Ev. intros s1 t1 m1 l1 mc1 post.
+    intros e1 e2 Ev. intros s1 k1 t1 m1 l1 mc1 post.
     induction 1; intros; cbn [spill_stmt valid_vars_src Forall_vars_stmt] in *; fwd.
     - (* exec.interact *)
       eapply exec.seq_cps.
@@ -1680,7 +1672,7 @@ Section Spilling.
       eapply @exec.interact with (mGive := mGive).
       + eapply map.split_comm. exact B.
       + rewrite arg_regs_alt by blia. 1: eassumption.
-      + rewrite <- Rp0. eassumption.
+      + eassumption.
       + intros.
         match goal with
         | H: context[outcome], A: context[outcome] |- _ =>
@@ -1707,7 +1699,7 @@ Section Spilling.
         { reflexivity. }
         { unfold a0, a7. blia. }
         { eassumption. }
-        { intros. do 6 eexists.
+        { intros. do 7 eexists.
           split. 1: eassumption.
           eenough _ as Hpost.
           2: { eapply H2p1.
@@ -1719,22 +1711,21 @@ Section Spilling.
           clear H2p1.
           split. 1: eassumption.
           split.
-          { instantiate (1 := [_]). reflexivity. }
+          { instantiate (1 := []). reflexivity. }
           split.
-          { subst t2'0 t2'. rewrite app_one_cons. repeat rewrite app_assoc. reflexivity. }
+          { subst k2'0 k2'. rewrite app_assoc. reflexivity. }
           (*begin ct stuff for interact*)
           exists (S O). intros.
           repeat (rewrite rev_app_distr || rewrite rev_involutive || cbn [rev List.app]).
           destruct fuel' as [|fuel']; [blia|]. simpl.
-          simpl in H5. apply Semantics.predict_cons in H5. rewrite H5.
-          simpl. apply predict_with_prefix_works.
-          apply H6.
+          apply predict_with_prefix_works.
+          rewrite app_nil_r in H6. apply H6.
           (*end ct stuff for interact*)
         }
         (* related for set_vars_to_reg_range_correct: *)
         unfold related.
         eexists _, _, _. ssplit.
-        * simpl. f_equal. assumption.
+        * reflexivity.
         * eenough ((eq _ * (word_array fpval stackwords * frame))%sep m') as En.
           1: ecancel_assumption.
           move C at bottom.
@@ -1775,7 +1766,7 @@ Section Spilling.
       apply_in_hyps @map.getmany_of_list_length.
       apply_in_hyps @map.putmany_of_list_zip_sameLength.
       eapply set_reg_range_to_vars_correct; try eassumption || (unfold a0, a7 in *; blia).
-      intros lCL2 ? ? ? ?.
+      intros ? lCL2 ? ? ? ?.
       assert (bytes_per_word = 4 \/ bytes_per_word = 8) as B48. {
         unfold bytes_per_word. destruct width_cases as [E' | E']; rewrite E'; cbv; auto.
       }
@@ -1844,11 +1835,11 @@ Section Spilling.
         2: eapply Forall_le_max.
         cbv beta.
         subst maxvar'. clear. blia. }
-      intros mL4 lFL4 mcL4 tL4 R.
+      intros tL4 mL4 lFL4 mcL4 kL4 R.
       eapply exec.seq_cps.
       eapply exec.weaken. {
         eapply IHexec.
-        2: { Search (fio t). rewrite H4p0. exact R. }
+        2: exact R.
         unfold valid_vars_src.
         eapply Forall_vars_stmt_impl.
         2: eapply max_var_sound.
@@ -1861,7 +1852,7 @@ Section Spilling.
         }
         cbv beta. subst maxvar'. blia.
       }
-      cbv beta. intros tL5 mL5 lFL5 mcL5 (tH5 & mH5 & lFH5 & mcH5 & tH5' & tL5' & R5 & OC & EtH5 & EtL5 & CT).
+      cbv beta. intros kL5 tL5 mL5 lFL5 mcL5 (kH5 & tH5 & mH5 & lFH5 & mcH5 & kH5' & tH5' & tL5' & R5 & OC & EkL5 & F & CT).
       match goal with
       | H: context[outcome], A: context[outcome] |- _ =>
         specialize H with (1 := A); move H at bottom; rename H into Q
@@ -1877,15 +1868,15 @@ Section Spilling.
         3: eassumption.
         2: {
           unfold is_valid_src_var.
-          intros *. intro F.
-          rewrite ?Bool.andb_true_iff, ?Bool.orb_true_iff, ?Z.ltb_lt in F. exact F.
+          intros *. intro FF.
+          rewrite ?Bool.andb_true_iff, ?Bool.orb_true_iff, ?Z.ltb_lt in FF. exact FF.
         }
         2: eapply Forall_le_max.
         cbv beta.
         subst maxvar'. clear. blia. }
       { eassumption. }
       rename R into R0.
-      intros lFL6 mcL6 t2L6 R GM.
+      intros tL6 lFL6 mcL6 kL6 R GM.
       (* prove that if we remove the additional stack provided by exec.stackalloc
          and store the result vars back into the caller's registers,
          states are still related and postcondition holds *)
@@ -1944,16 +1935,15 @@ Section Spilling.
       { reflexivity. }
       { unfold a0, a7. blia. }
       { eassumption. }
-      { intros m22 l22 mc22 t22 R22. do 6 eexists. split.
-        { Search t2L6. rewrite <- Rp0 in R22. eassumption. }
+      { intros t22 m22 l22 mc22 k22 R22. do 7 eexists. split; [eassumption|].
         split; [eassumption|].
         (* begin ct stuff for call*)
         split.
-        { subst tH5. reflexivity. }
+        { subst kH5. reflexivity. }
         split.
-        { subst t22. subst t2L6. subst tL5. subst tL4. subst t2'.
+        { subst k22. subst kL6. subst kL5. subst kL4. subst k2'.
           rewrite app_one_cons. repeat rewrite app_assoc. reflexivity. }
-        intros. exists (S F'). intros. destruct fuel' as [|fuel']; [blia|].
+        intros. exists (S F). intros. destruct fuel' as [|fuel']; [blia|].
         repeat (rewrite rev_app_distr || rewrite rev_involutive || cbn [rev List.app]).
         simpl. rewrite H. repeat rewrite <- app_assoc. apply predict_with_prefix_works.
         simpl. econstructor; auto. repeat rewrite <- app_assoc. apply predict_with_prefix_works.
@@ -1981,11 +1971,11 @@ Section Spilling.
       + eassumption.
       + blia.
       + (*begin ct stuff for load*)
-        intros. do 6 eexists. split; [|split]. 2: eassumption. 1: eassumption.
+        intros. do 7 eexists. split; [|split]. 2: eassumption. 1: eassumption.
         split.
         { rewrite app_one_cons. reflexivity. }
         split.
-        { subst t2'0. subst t2'. rewrite app_one_cons. repeat rewrite app_assoc.
+        { subst k2'0. subst k2'. rewrite app_one_cons. repeat rewrite app_assoc.
           reflexivity. }
         intros. exists (S O). intros.
         repeat (rewrite rev_app_distr || rewrite rev_involutive || cbn [rev List.app]).
@@ -2009,7 +1999,7 @@ Section Spilling.
       { unfold Memory.store, Memory.store_Z, Memory.store_bytes.
         unfold Memory.load_bytes in *.
         erewrite map.getmany_of_tuple_in_disjoint_putmany; eauto. }
-      do 6 eexists. split; [|split]. 2: eassumption.
+      do 7 eexists. split; [|split]. 2: eassumption.
       { unfold related.
         repeat match goal with
                | |- exists _, _ => eexists
@@ -2020,10 +2010,10 @@ Section Spilling.
         all: ecancel_assumption. }
       (*begin ct stuff for store*)
       split.
-      { subst t2'0. subst t2'. rewrite app_one_cons. repeat rewrite app_assoc.
+      { subst k2'0. subst k2'. rewrite app_one_cons. repeat rewrite app_assoc.
         reflexivity. }
       split.
-      { subst t2'0. subst t2'. rewrite app_one_cons. repeat rewrite app_assoc. reflexivity. }
+      { subst k2'0. subst k2'. rewrite app_one_cons. repeat rewrite app_assoc. reflexivity. }
       intros. exists (S O). intros.
       repeat (rewrite rev_app_distr || rewrite rev_involutive || cbn [rev List.app]).
       destruct fuel' as [|fuel']; [blia|]. simpl. 
@@ -2041,10 +2031,10 @@ Section Spilling.
       eapply save_ires_reg_correct''.
       + eassumption.
       + blia.
-      + intros. do 6 eexists. split; [|split].
+      + intros. do 7 eexists. split; [|split].
         2: eassumption. 1: assumption. split.
         { instantiate (1 := [_]). reflexivity. } split.
-        { subst t2'0 t2'. rewrite app_one_cons. repeat rewrite app_assoc. reflexivity. }
+        { subst k2'0 k2'. rewrite app_one_cons. repeat rewrite app_assoc. reflexivity. }
         intros. exists (S O). intros.
         repeat (rewrite rev_app_distr || rewrite rev_involutive || cbn [rev List.app]).
         destruct fuel' as [|fuel']; [blia|]. simpl.
@@ -2068,7 +2058,7 @@ Section Spilling.
              end.
       1,2,3,4: eassumption.
       { rewrite app_one_cons. rewrite app_assoc. reflexivity. }
-      { subst t2'. rewrite app_one_cons. repeat rewrite app_assoc. reflexivity. }
+      { subst k2'. rewrite app_one_cons. repeat rewrite app_assoc. reflexivity. }
       intros. rename H7p4 into CT. intros.
       repeat (rewrite rev_app_distr || rewrite rev_involutive || cbn [rev List.app]).
       Unshelve. 2: apply (S F').
@@ -2085,9 +2075,9 @@ Section Spilling.
       eapply save_ires_reg_correct''.
       { eassumption. }
       { blia. }
-      intros. do 6 eexists. split; [eassumption|]. split; [eassumption|]. split.
+      intros. do 7 eexists. split; [eassumption|]. split; [eassumption|]. split.
       { instantiate (1 := nil). reflexivity. } split.
-      { subst t2'. reflexivity. }
+      { subst k2'. reflexivity. }
       intros. exists (S O). intros.
       repeat (rewrite rev_app_distr || rewrite rev_involutive || cbn [rev List.app]).
       destruct fuel' as [|fuel']; [blia|]. simpl. 
@@ -2105,9 +2095,9 @@ Section Spilling.
         { unfold exec.lookup_op_locals in *. apply map.get_put_same. }
         eapply save_ires_reg_correct''; try (eassumption || blia).
         (*begin ct stuff for op*)
-        intros. do 6 eexists. split; [eassumption|]. split; [eassumption|]. split.
+        intros. do 7 eexists. split; [eassumption|]. split; [eassumption|]. split.
         { instantiate (1 := nil). reflexivity. } split.
-        { subst t2'1 t2'0 t2'. repeat rewrite app_assoc. reflexivity. }
+        { subst k2'1 k2'0 k2'. repeat rewrite app_assoc. reflexivity. }
         intros. exists (S O). intros.
         repeat (rewrite rev_app_distr || rewrite rev_involutive || cbn [rev List.app]).
         destruct fuel' as [|fuel']; [blia|]. simpl. 
@@ -2120,9 +2110,9 @@ Section Spilling.
         { unfold exec.lookup_op_locals in *. reflexivity. }
         eapply save_ires_reg_correct''; try (eassumption || blia).
         (*begin ct stuff for op*)
-        intros. do 6 eexists. split; [eassumption|]. split; [eassumption|]. split.
+        intros. do 7 eexists. split; [eassumption|]. split; [eassumption|]. split.
         { instantiate (1 := nil). reflexivity. } split.
-        { subst t2'0 t2'. repeat rewrite app_assoc. reflexivity. }
+        { subst k2'0 k2'. repeat rewrite app_assoc. reflexivity. }
         intros. exists (S O). intros.
         repeat (rewrite rev_app_distr || rewrite rev_involutive || cbn [rev List.app]).
         destruct fuel' as [|fuel']; [blia|]. simpl. 
@@ -2135,9 +2125,9 @@ Section Spilling.
       eapply exec.seq_cps.
       eapply exec.set. 1: apply map.get_put_same.
       eapply save_ires_reg_correct''; [eassumption|blia|].
-      intros. do 6 eexists. split; [eassumption|]. split; [eassumption|]. split.
+      intros. do 7 eexists. split; [eassumption|]. split; [eassumption|]. split.
       { instantiate (1 := nil). reflexivity. } split.
-      { subst t2'0 t2'. repeat rewrite app_assoc. reflexivity. }
+      { subst k2'0 k2'. repeat rewrite app_assoc. reflexivity. }
       intros. exists (S O). intros.
       repeat (rewrite rev_app_distr || rewrite rev_involutive || cbn [rev List.app]).
       destruct fuel' as [|fuel']; [blia|]. simpl. 
@@ -2154,19 +2144,19 @@ Section Spilling.
         }
         eapply exec.weaken.
         { eapply IHexec; eassumption. }
-        cbv beta. intros t' m' l' mc' (t1' & m1' & l1' & mc1' & t1'' & t2'' & R & Hpost & Et1'' & Et2'' & CT). subst.
-        do 6 eexists.
+        cbv beta. intros k' t' m' l' mc' (k1' & t1' & m1' & l1' & mc1' & k1'' & k2'' & R & Hpost & Ek1'' & Ek2'' & CT). subst.
+        do 7 eexists.
         split; [eassumption|]. split; [eassumption|]. split.
         { rewrite app_one_cons. rewrite app_assoc. reflexivity. } split.
-        { subst t2'0 t2'. rewrite app_one_cons. repeat rewrite app_assoc. reflexivity. }
+        { subst k2'0 k2'. rewrite app_one_cons. repeat rewrite app_assoc. reflexivity. }
         destruct CT as [F' CT]. exists (S F'). intros.
         repeat (rewrite rev_app_distr || rewrite rev_involutive || cbn [rev List.app]).
         destruct fuel' as [|fuel']; [blia|]. simpl. 
         rewrite rev_app_distr in H3, H4. simpl in H3.
         assert (H3' := Semantics.predict_cons _ _ _ _ H3). rewrite H3'. simpl.
-        rewrite (app_one_cons _ (rev t2'')).
-        repeat rewrite app_assoc. rewrite <- (app_assoc _ _ t2''').
-        apply predict_with_prefix_works. clear IHexec. Search snext_stmt'. Search t2''.
+        rewrite (app_one_cons _ (rev k2'')).
+        repeat rewrite app_assoc. rewrite <- (app_assoc _ _ k2''').
+        apply predict_with_prefix_works. clear IHexec.
         eapply CT.
         { rewrite <- app_assoc. simpl. eassumption. }
         { rewrite <- app_assoc. simpl. eassumption. }
@@ -2178,18 +2168,18 @@ Section Spilling.
         }
         eapply exec.weaken.
         { eapply IHexec; eassumption. }
-        cbv beta. intros t' m' l' mc' (t1' & m1' & l1' & mc1' & t1'' & t2'' & R & Hpost & Et1'' & Et2'' & CT). subst.
-        do 6 eexists.
+        cbv beta. intros k' t' m' l' mc' (k1' & t1' & m1' & l1' & mc1' & t1'' & t2'' & R & Hpost & Ek1'' & Ek2'' & CT). subst.
+        do 7 eexists.
         split; [eassumption|]. split; [eassumption|]. split.
         { rewrite app_one_cons. rewrite app_assoc. reflexivity. } split.
-        { subst t2'. rewrite app_one_cons. repeat rewrite app_assoc. reflexivity. }
+        { subst k2'. rewrite app_one_cons. repeat rewrite app_assoc. reflexivity. }
         destruct CT as [F' CT]. exists (S F'). intros.
         repeat (rewrite rev_app_distr || rewrite rev_involutive || cbn [rev List.app]).
         destruct fuel' as [|fuel']; [blia|]. simpl. 
         rewrite rev_app_distr in H2, H3. simpl in H2.
         assert (H2' := Semantics.predict_cons _ _ _ _ H2). rewrite H2'. simpl.
         rewrite (app_one_cons _ (rev t2'')).
-        repeat rewrite app_assoc. rewrite <- (app_assoc _ _ t2''').
+        repeat rewrite app_assoc. rewrite <- (app_assoc _ _ k2''').
         apply predict_with_prefix_works. clear IHexec. Search snext_stmt'. Search t2''.
         eapply CT.
         { rewrite <- app_assoc. simpl. eassumption. }
@@ -2206,19 +2196,19 @@ Section Spilling.
         }
         eapply exec.weaken.
         { apply IHexec; eassumption. }
-        cbv beta. intros t' m' l' mc' (t1' & m1' & l1' & mc1' & t1'' & t2'' & R & Hpost & Et1'' & Et2'' & CT). subst.
-        do 6 eexists.
+        cbv beta. intros k' t' m' l' mc' (k1' & t1' & m1' & l1' & mc1' & k1'' & k2'' & R & Hpost & Ek1'' & Ek2'' & CT). subst.
+        do 7 eexists.
         split; [eassumption|]. split; [eassumption|]. split.
         { rewrite app_one_cons. rewrite app_assoc. reflexivity. } split.
-        { subst t2'0 t2'. rewrite app_one_cons. repeat rewrite app_assoc. reflexivity. }
+        { subst k2'0 k2'. rewrite app_one_cons. repeat rewrite app_assoc. reflexivity. }
         destruct CT as [F' CT]. exists (S F'). intros.
         repeat (rewrite rev_app_distr || rewrite rev_involutive || cbn [rev List.app]).
         destruct fuel' as [|fuel']; [blia|]. simpl. 
         rewrite rev_app_distr in H3, H4. simpl in H3.
         assert (H3' := Semantics.predict_cons _ _ _ _ H3). rewrite H3'. simpl.
-        rewrite (app_one_cons _ (rev t2'')).
-        repeat rewrite app_assoc. rewrite <- (app_assoc _ _ t2''').
-        apply predict_with_prefix_works. clear IHexec. Search snext_stmt'. Search t2''.
+        rewrite (app_one_cons _ (rev k2'')).
+        repeat rewrite app_assoc. rewrite <- (app_assoc _ _ k2''').
+        apply predict_with_prefix_works. clear IHexec.
         eapply CT.
         { rewrite <- app_assoc. simpl. eassumption. }
         { rewrite <- app_assoc. simpl. eassumption. }
@@ -2231,18 +2221,18 @@ Section Spilling.
         }
         eapply exec.weaken.
         { apply IHexec; eassumption. }
-        cbv beta. intros t' m' l' mc' (t1' & m1' & l1' & mc1' & t1'' & t2'' & R & Hpost & Et1'' & Et2'' & CT). subst.
-        do 6 eexists.
+        cbv beta. intros k' t' m' l' mc' (k1' & t1' & m1' & l1' & mc1' & t1'' & t2'' & R & Hpost & Ek1'' & Ek2'' & CT). subst.
+        do 7 eexists.
         split; [eassumption|]. split; [eassumption|]. split.
         { rewrite app_one_cons. rewrite app_assoc. reflexivity. } split.
-        { subst t2'. rewrite app_one_cons. repeat rewrite app_assoc. reflexivity. }
+        { subst k2'. rewrite app_one_cons. repeat rewrite app_assoc. reflexivity. }
         destruct CT as [F' CT]. exists (S F'). intros.
         repeat (rewrite rev_app_distr || rewrite rev_involutive || cbn [rev List.app]).
         destruct fuel' as [|fuel']; [blia|]. simpl. 
         rewrite rev_app_distr in H1, H2. simpl in H1.
         assert (H1' := Semantics.predict_cons _ _ _ _ H1). rewrite H1'. simpl.
         rewrite (app_one_cons _ (rev t2'')).
-        repeat rewrite app_assoc. rewrite <- (app_assoc _ _ t2''').
+        repeat rewrite app_assoc. rewrite <- (app_assoc _ _ k2''').
         apply predict_with_prefix_works. clear IHexec. Search snext_stmt'. Search t2''.
         eapply CT.
         { rewrite <- app_assoc. simpl. eassumption. }
@@ -2267,7 +2257,7 @@ Section Spilling.
         erewrite get_iarg_reg_1 by eauto with zarith.
         rewrite map.get_put_same. eexists. split; [reflexivity|].
         split; intros.
-        * do 6 eexists. split; [|split].
+        * do 7 eexists. split; [|split].
           2: { Search post. eapply H1. 1: eassumption. cbn. rewrite E, E0. congruence. }
           { eassumption. } split.
           { rewrite app_one_cons. rewrite app_assoc. reflexivity. } split.
@@ -2276,8 +2266,8 @@ Section Spilling.
           repeat (rewrite rev_involutive || rewrite rev_app_distr || rewrite <- app_assoc).
           simpl in H5, H6. rewrite <- app_assoc in H5. eapply H3p4. 
           { apply H5. }
-          { rewrite (app_assoc t10) in H5. apply Semantics.predict_cons in H5. rewrite H5. simpl.
-            rewrite (app_one_cons _ t2'''). repeat rewrite (app_assoc _ _ t2''').
+          { rewrite (app_assoc k10) in H5. apply Semantics.predict_cons in H5. rewrite H5. simpl.
+            rewrite (app_one_cons _ k2'''). repeat rewrite (app_assoc _ _ k2''').
             apply predict_with_prefix_works. rewrite <- app_assoc. assumption. }
           { blia. }
         * Check exec.loop_cps. eapply exec.weaken. 1: eapply IH2.
@@ -2288,8 +2278,8 @@ Section Spilling.
           -- cbv beta. intros. fwd. eapply exec.weaken.
              ++ eapply IH12; eauto 10.
              ++ cbv beta. intros.
-                destruct H5 as [t1' [m1'1 [l1'1 [mc1'1 [t1''1 [t2''1 [R [Hpost [E1 [E2 [F'1 CT]]]]]]]]]]].
-                subst. do 6 eexists.
+                destruct H5 as [k1' [t1'1 [m1'1 [l1'1 [mc1'1 [t1''1 [t2''1 [R [Hpost [E1 [E2 [F'1 CT]]]]]]]]]]]].
+                subst. do 7 eexists.
                 split; [eassumption|]. split; [eassumption|]. split.
                 { rewrite app_one_cons. repeat rewrite app_assoc. reflexivity. } split. 
                 { rewrite app_one_cons. repeat rewrite app_assoc. reflexivity. }
@@ -2299,7 +2289,7 @@ Section Spilling.
                 repeat (rewrite rev_involutive in H5 || rewrite rev_app_distr in H5 || rewrite <- app_assoc in H5). Search body1.
                 eapply H3p4.
                 { eassumption. }
-                { rewrite (app_assoc t10) in H5.
+                { rewrite (app_assoc k10) in H5.
                   assert (H5' := Semantics.predict_cons _ _ _ _ H5). rewrite H5'. simpl.
                   rewrite (app_one_cons _ (_ ++ _)).
                   repeat rewrite app_assoc. repeat rewrite <- (app_assoc ((_ ++ _) ++ _)).
@@ -2319,7 +2309,7 @@ Section Spilling.
         cbv beta. intros. fwd. cbn [eval_bcond spill_bcond].
         rewrite map.get_put_same. eexists. split; [reflexivity|].
         split; intros.
-        * do 6 eexists. split; [|split].
+        * do 7 eexists. split; [|split].
           2: { eapply H1. 1: eassumption. cbn. rewrite E. congruence. }
           { simpl. eassumption. } split.
           { rewrite app_one_cons. rewrite app_assoc. reflexivity. } split.
@@ -2331,7 +2321,7 @@ Section Spilling.
           { rewrite rev_app_distr in H5. repeat rewrite <- app_assoc in H5. simpl in H5.
             rewrite app_assoc in H5.
             assert (H5' := Semantics.predict_cons _ _ _ _ H5). rewrite H5'. simpl.
-            rewrite (app_one_cons _ t2'''). rewrite (app_assoc _ _ t2''').
+            rewrite (app_one_cons _ k2'''). rewrite (app_assoc _ _ k2''').
             apply predict_with_prefix_works. simpl in H6. repeat rewrite <- app_assoc.
             eassumption. }
           blia.
@@ -2343,8 +2333,8 @@ Section Spilling.
           -- cbv beta. intros. fwd. eapply exec.weaken.
              ++ eapply IH12; eauto 10.
              ++ cbv beta. intros.
-                destruct H5 as [t1' [m1'1 [l1'1 [mc1'1 [t1''1 [t2''1 [R [Hpost [E1 [E2 [F'1 CT]]]]]]]]]]].
-                subst. do 6 eexists.
+                destruct H5 as [k1' [t1'1 [m1'1 [l1'1 [mc1'1 [t1''1 [t2''1 [R [Hpost [E1 [E2 [F'1 CT]]]]]]]]]]]].
+                subst. do 7 eexists.
                 split; [eassumption|]. split; [eassumption|]. split.
                 { rewrite app_one_cons. repeat rewrite app_assoc. reflexivity. } split. 
                 { rewrite app_one_cons. repeat rewrite app_assoc. reflexivity. }
@@ -2354,7 +2344,7 @@ Section Spilling.
                 repeat (rewrite rev_involutive in H5 || rewrite rev_app_distr in H5 || rewrite <- app_assoc in H5). Search body1.
                 eapply H3p4.
                 { eassumption. }
-                { rewrite (app_assoc t10) in H5.
+                { rewrite (app_assoc k10) in H5.
                   assert (H5' := Semantics.predict_cons _ _ _ _ H5). rewrite H5'. simpl.
                   rewrite (app_one_cons _ (_ ++ _)).
                   repeat rewrite app_assoc. rewrite <- (app_assoc ((_ ++ _) ++ _)). rewrite <- (app_assoc ((_ ++ _))).
@@ -2374,8 +2364,8 @@ Section Spilling.
       + eapply IH1. 1: eassumption. eauto 15.
       + cbn. intros. fwd. eapply exec.weaken.
         -- eapply IH2; eauto.
-        -- cbv beta. intros. destruct H1 as [t1' [m1'1 [l1'1 [mc1'1 [t1''1 [t2''1 [R [Hpost [E1 [E2 [F'1 CT]]]]]]]]]]]. subst.
-           do 6 eexists. split; [eassumption|]. split; [eassumption|]. split.
+        -- cbv beta. intros. destruct H1 as [k1' [t1'1 [m1'1 [l1'1 [mc1'1 [t1''1 [t2''1 [R [Hpost [E1 [E2 [F'1 CT]]]]]]]]]]]]. subst.
+           do 7 eexists. split; [eassumption|]. split; [eassumption|]. split.
            { rewrite app_assoc. reflexivity. } split.
            { rewrite app_assoc. reflexivity. }
            exists (S (plus F' F'1)).
@@ -2388,7 +2378,7 @@ Section Spilling.
              blia. }
            blia.
     - (* exec.skip *)
-      eapply exec.skip. do 6 eexists. repeat (split; [eauto|]). 1: instantiate (1 := nil).
+      eapply exec.skip. do 7 eexists. repeat (split; [eauto|]). 1: instantiate (1 := nil).
       2: instantiate (1 := nil). all: eauto. exists (S O). intros.
       destruct fuel' as [|fuel']; [blia|]. simpl. simpl in H2.
       rewrite app_nil_r in H2. eassumption.
@@ -2401,9 +2391,9 @@ Section Spilling.
   Lemma spill_fun_correct: forall e1 e2 argnames1 retnames1 body1 argnames2 retnames2 body2,
       spill_functions e1 = Success e2 ->
       spill_fun (argnames1, retnames1, body1) = Success (argnames2, retnames2, body2) ->
-      forall argvals t m next (post: Semantics.io_trace -> mem -> list word -> Prop),
-        call_spec e1 (argnames1, retnames1, body1) next t m argvals post ->
-        call_spec e2 (argnames2, retnames2, body2) (fun fuel => snext_fun e1 fuel (next fuel) [] (argnames1, retnames1, body1)) t m argvals post.
+      forall argvals k t m next (post: Semantics.io_trace -> mem -> list word -> Prop),
+        call_spec e1 (argnames1, retnames1, body1) next k t m argvals post ->
+        call_spec e2 (argnames2, retnames2, body2) (fun fuel => snext_fun e1 fuel (next fuel) [] (argnames1, retnames1, body1)) k t m argvals post.
   Proof.
     intros. eapply spill_fun_correct_aux; try eassumption.
     unfold spilling_correct_for.

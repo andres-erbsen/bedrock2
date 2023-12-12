@@ -30,9 +30,9 @@ Section WithArguments.
   Lemma useImmediate_correct_aux:
     forall eH eL,
        (useimmediate_functions is5BitImmediate is12BitImmediate) eH = Success eL ->
-       forall sH t m mcH lH post,
-       exec eH sH t m lH mcH post ->
-       exec eL (useImmediate is5BitImmediate is12BitImmediate sH) t m lH mcH post.
+       forall sH k t m mcH lH post,
+       exec eH sH k t m lH mcH post ->
+       exec eL (useImmediate is5BitImmediate is12BitImmediate sH) k t m lH mcH post.
   Proof.
     induction 2.
     (* most cases stay the same *)
@@ -62,17 +62,17 @@ Section WithArguments.
       all: eapply @exec.seq_cps; eapply @exec.lit.
 
       all: match goal with
-           | H: exec _ _ _ _ _ _ ?mid,
-               H': forall t m l mc,
-                 ?mid _ _ _ _ -> exec ?eL _ _ _ _ _ ?post
+           | H: exec _ _ _ _ _ _ _ ?mid,
+               H': forall k t m l mc,
+                 ?mid _ _ _ _ _ -> exec ?eL _ _ _ _ _ _ ?post
                  |- _ => inversion H
            end.
 
       all: match goal with
-           | H: ?mid _ _ _ _,
-               H0: forall t m l mc,
-                 ?mid t m l mc -> exec ?eL _ _ _ _ _ ?post
-                 |- exec ?eL _ _ _ _ _ ?post
+           | H: ?mid _ _ _ _ _,
+               H0: forall k t m l mc,
+                 ?mid k t m l mc -> exec ?eL _ _ _ _ _ _ ?post
+                 |- exec ?eL _ _ _ _ _ _ ?post
              => apply H0 in H; inversion H
            end.
 

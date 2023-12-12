@@ -530,7 +530,6 @@ Section FlatToRiscv1.
     Notation qtable := Semantics.qtable.
     Notation qsalloc := Semantics.qsalloc.
     Notation qbranch := Semantics.qbranch.
-    Notation qIO := Semantics.qIO.
     Notation qend := Semantics.qend.
 
     Notation salloc := Semantics.salloc.
@@ -538,14 +537,13 @@ Section FlatToRiscv1.
     Notation write := Semantics.write.
     Notation read := Semantics.read.
     Notation branch := Semantics.branch.
-    Notation IO := Semantics.IO.
 
     Fixpoint predictLE_with_prefix (prefix : list LeakageEvent) (predict_rest : list LeakageEvent -> option qLeakageEvent) (t : list LeakageEvent) : option qLeakageEvent :=
     match prefix, t with
     | _ :: prefix', _ :: t' => predictLE_with_prefix prefix' predict_rest t'
     | e :: start', nil => Some (quotLE e)
     | nil, _ => predict_rest t
-    end. Print word.word.
+    end. Print Semantics.qevent.
 
     Definition rnext_fun' rnext_stmt (fuel : nat) (next : trace -> option qevent) (t_so_far : trace)
       (mypos : Z)

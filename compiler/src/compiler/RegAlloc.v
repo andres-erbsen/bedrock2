@@ -1093,14 +1093,14 @@ Section CheckerCorrect.
   Hint Resolve states_compat_put : checker_hints.
   Hint Resolve states_compat_get_op : checker_hints.
   Hint Resolve states_compat_then_op : checker_hints. 
-  Lemma checker_correct: forall (e: srcEnv) (e': impEnv) s t m lH mc post,
+  Lemma checker_correct: forall (e: srcEnv) (e': impEnv) s k t m lH mc post,
       check_funcs e e' = Success tt ->
-      exec e s t m lH mc post ->
+      exec e s k t m lH mc post ->
       forall lL corresp corresp' s',
       check corresp s s' = Success corresp' ->
       states_compat lH (precond corresp s s') lL ->
-      exec e' s' t m lL mc (fun t' m' lL' mc' =>
-        exists lH', states_compat lH' corresp' lL' /\ post t' m' lH' mc').
+      exec e' s' k t m lL mc (fun k' t' m' lL' mc' =>
+        exists lH', states_compat lH' corresp' lL' /\ post k' t' m' lH' mc').
   Proof.
     induction 2; intros;
       match goal with

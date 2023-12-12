@@ -27,10 +27,10 @@ Section ExprImp1.
   Notation func := String.string (only parsing).
   Notation vars := (var -> Prop).
 
-  Definition SimState: Type := trace * mem * locals * bedrock2.MetricLogging.MetricLog.
+  Definition SimState: Type := trace * io_trace * mem * locals * bedrock2.MetricLogging.MetricLog.
   Definition SimExec(e: env)(c: cmd): SimState -> (SimState -> Prop) -> Prop :=
-    fun '(t, m, l, mc) post => exec e c t m l mc
-                                    (fun t' m' l' mc' => post (t', m', l', mc')).
+    fun '(k, t, m, l, mc) post => exec e c k t m l mc
+                                    (fun k' t' m' l' mc' => post (k', t', m', l', mc')).
 
   (*Hypothesis String.string_empty: String.string = Empty_set.*)
   Local Notation varname := String.string.
@@ -412,18 +412,18 @@ Section ExprImp2.
       try solve [state_calc | refine (map.only_differ_putmany _ _ _ _ _); eassumption].
   Qed.
 
-  Lemma weaken_exec: forall env t l m mc s post1,
-      exec env s t m l mc post1 ->
-      forall post2: _ -> _ -> _ -> _ -> Prop,
-        (forall t' m' l' mc', post1 t' m' l' mc' -> post2 t' m' l' mc') ->
-        exec env s t m l mc post2.
+  Lemma weaken_exec: forall env k t l m mc s post1,
+      exec env s k t m l mc post1 ->
+      forall post2: _ -> _ -> _ -> _ -> _ -> Prop,
+        (forall k' t' m' l' mc', post1 k' t' m' l' mc' -> post2 k' t' m' l' mc') ->
+        exec env s k t m l mc post2.
   Proof. eapply exec.weaken. Qed.
 
-  Lemma intersect_exec: forall env t l m mc s post1,
-      exec env s t m l mc post1 ->
+  Lemma intersect_exec: forall env k t l m mc s post1,
+      exec env s k t m l mc post1 ->
       forall post2,
-        exec env s t m l mc post2 ->
-        exec env s t m l mc (fun t' m' l' mc' => post1 t' m' l' mc' /\ post2 t' m' l' mc').
+        exec env s k t m l mc post2 ->
+        exec env s k t m l mc (fun k' t' m' l' mc' => post1 k' t' m' l' mc' /\ post2 k' t' m' l' mc').
   Proof. intros. eapply exec.intersect; eassumption. Qed.
 
   (* As we see, one can prove this lemma as is, but the proof is a bit cumbersome because
@@ -435,9 +435,9 @@ Section ExprImp2.
      in combination with intersect_exec.
      So it makes more sense to directly prove the conjunction version which follows after
      this proof. *)
-  Lemma modVarsSound_less_useful: forall e s t m l mc post,
-      exec e s t m l mc post ->
-      exec e s t m l mc (fun t' m' l' mc' => map.only_differ l (modVars s) l').
+  Lemma modVarsSound_less_useful: forall e s k t m l mc post,
+      exec e s k t m l mc post ->
+      exec e s k t m l mc (fun k' t' m' l' mc' => map.only_differ l (modVars s) l').
   Proof.
     induction 1;
       try solve [ econstructor; [eassumption..|simpl; map_solver locals_ok] ].
@@ -455,14 +455,14 @@ Section ExprImp2.
       eapply weaken_exec; [eassumption|].
       simpl; intros. map_solver locals_ok.
     - eapply @exec.seq with
-          (mid := fun t' m' l' mc' => mid t' m' l' mc' /\ map.only_differ l (modVars c1) l').
+          (mid := fun k' t' m' l' mc' => mid k' t' m' l' mc' /\ map.only_differ l (modVars c1) l').
       + eapply intersect_exec; eassumption.
       + simpl. intros *. intros [? ?].
         eapply weaken_exec; [eapply H1; eauto|].
         simpl; intros.
         map_solver locals_ok.
     - eapply @exec.while_true with
-          (mid := fun t' m' l' mc' => mid t' m' l' mc' /\ map.only_differ l (modVars c) l');
+          (mid := fun k' t' m' l' mc' => mid k' t' m' l' mc' /\ map.only_differ l (modVars c) l');
         try eassumption.
       + eapply intersect_exec; eassumption.
       + intros *. intros [? ?]. simpl in *.
@@ -483,9 +483,9 @@ Section ExprImp2.
       eapply map.only_differ_putmany. eassumption.
   Qed.
 
-  Lemma modVarsSound: forall e s t m l mc post,
-      exec e s t m l mc post ->
-      exec e s t m l mc (fun t' m' l' mc' => map.only_differ l (modVars s) l' /\ post t' m' l' mc').
+  Lemma modVarsSound: forall e s k t m l mc post,
+      exec e s k t m l mc post ->
+      exec e s k t m l mc (fun k' t' m' l' mc' => map.only_differ l (modVars s) l' /\ post k' t' m' l' mc').
   Proof.
     induction 1;
       try solve [econstructor; repeat split; try eassumption; simpl; map_solver locals_ok].

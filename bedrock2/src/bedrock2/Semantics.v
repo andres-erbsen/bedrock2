@@ -14,6 +14,7 @@ Require Import Coq.Lists.List.
 Definition io_event {width: Z}{BW: Bitwidth width}{word: word.word width}{mem: map.map word byte} : Type :=
   (mem * String.string * list word) * (mem * list word).
 
+(*could reduce this to many fewer cases, at the cost of being a bit more confusing.*)
 (*should I name this leakage_event, now that it doesn't contain the IO events?*)
 Inductive event {width: Z}{BW: Bitwidth width}{word: word.word width}{mem: map.map word byte} : Type :=
 | branch : bool -> event
@@ -22,23 +23,18 @@ Inductive event {width: Z}{BW: Bitwidth width}{word: word.word width}{mem: map.m
 | table: word(*the index*) -> event
 | salloc : word -> event.
 
-Section WithIOEvent.
-  Context {width: Z}{BW: Bitwidth width}{word: word.word width}{mem: map.map word byte}.
-
-  Definition io_trace : Type := list io_event.
-
-  (*could reduce this to many fewer cases, at the cost of being a bit more confusing.*)
-  (*I think I'll leave IO in the leakage trace and abstract trace for now, just because it's
-    unclear what is the best way to remove it.  I lean towards separating leakage trace and IO
-    trace as two separate arguments to exec, but I should ask about this.*)
-
-  Inductive qevent : Type :=
+Inductive qevent {width: Z}{BW: Bitwidth width}{word: word.word width}{mem: map.map word byte} : Type :=
   | qbranch : bool -> qevent
   | qread : word -> qevent
   | qwrite : word -> qevent
   | qtable : word -> qevent
   | qsalloc : qevent
   | qend: qevent.
+
+Section WithIOEvent.
+  Context {width: Z}{BW: Bitwidth width}{word: word.word width}{mem: map.map word byte}.
+
+  Definition io_trace : Type := list io_event.
 
   Definition q e : qevent :=
     match e with

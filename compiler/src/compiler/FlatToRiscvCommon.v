@@ -338,8 +338,8 @@ Section WithParameters.
   Definition compiles_FlatToRiscv_correctly{BWM: bitwidth_iset width iset}
     (f: pos_map -> Z -> Z -> stmt -> list Instruction)
     (s: stmt): Prop :=
-    forall e_impl_full initialTrace initialMH initialRegsH initialMetricsH postH,
-    exec e_impl_full s initialTrace (initialMH: mem) initialRegsH initialMetricsH postH ->
+    forall e_impl_full initialTrace initialIOTrace initialMH initialRegsH initialMetricsH postH,
+    exec e_impl_full s initialTrace initialIOTrace (initialMH: mem) initialRegsH initialMetricsH postH ->
     forall g e_impl e_pos program_base insts xframe (initialL: MetricRiscvMachine) pos,
     map.extends e_impl_full e_impl ->
     good_e_impl e_impl e_pos ->
@@ -353,9 +353,9 @@ Section WithParameters.
     iff1 g.(allx) (xframe *
                    program iset (word.add program_base (word.of_Z pos)) insts *
                    functions program_base e_pos e_impl)%sep ->
-    goodMachine (Semantics.filterio initialTrace) initialMH initialRegsH g initialL ->
-    runsTo initialL (fun finalL => exists finalTrace finalMH finalRegsH finalMetricsH,
-         postH finalTrace finalMH finalRegsH finalMetricsH /\
+    goodMachine initialIOTrace initialMH initialRegsH g initialL ->
+    runsTo initialL (fun finalL => exists finalTrace finalIOTrace finalMH finalRegsH finalMetricsH,
+         postH finalTrace finalIOTrace finalMH finalRegsH finalMetricsH /\
          finalL.(getPc) = word.add initialL.(getPc)
                                    (word.of_Z (4 * Z.of_nat (List.length insts))) /\
          map.only_differ initialL.(getRegs)
@@ -363,7 +363,7 @@ Section WithParameters.
                  finalL.(getRegs) /\
          (finalL.(getMetrics) - initialL.(getMetrics) <=
           lowerMetrics (finalMetricsH - initialMetricsH))%metricsL /\
-         goodMachine (Semantics.filterio finalTrace) finalMH finalRegsH g finalL /\
+         goodMachine finalIOTrace finalMH finalRegsH g finalL /\
            exists t' rt',
              finalTrace = t' ++ initialTrace /\
                getTrace finalL = rt' ++ getTrace initialL /\
@@ -373,7 +373,6 @@ Section WithParameters.
                  predictsLE (fun t => f (t0 ++ rev t') t) rt'' ->
                  Nat.le F fuel ->
                  predictsLE (fun t => rnext_stmt iset compile_ext_call leak_ext_call e_pos program_base e_impl_full fuel next t0 pos g.(p_sp) (bytes_per_word * rem_framewords g) s t f) (rev rt' ++ rt'')).
-Print rnext_stmt.
 End WithParameters.
 
 Ltac simpl_g_get :=

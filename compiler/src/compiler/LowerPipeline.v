@@ -379,14 +379,14 @@ Section LowerPipeline.
 
   (*I modeled my changes to this after my changes to call_spec in Spilling.*)
   Definition riscv_call(p: list Instruction * pos_map * Z)
-             (f_name: string) (next: (word*Z*word) -> nat -> _ -> _) (t: Semantics.trace)(mH: mem)(argvals: list word)
+             (f_name: string) (next: (word*Z*word) -> nat -> _ -> _) (k: Semantics.trace)(t: Semantics.io_trace)(mH: mem)(argvals: list word)
              (post: Semantics.io_trace -> mem -> list word -> Prop): Prop :=
     let '(instrs, finfo, req_stack_size) := p in
     exists f_rel_pos,
       map.get finfo f_name = Some f_rel_pos /\
       forall p_funcs stack_start stack_pastend ret_addr Rdata Rexec (initial: MetricRiscvMachine),
         map.get initial.(getRegs) RegisterNames.ra = Some ret_addr ->
-        initial.(getLog) = Semantics.filterio t ->
+        initial.(getLog) = t ->
         word.unsigned ret_addr mod 4 = 0 ->
         arg_regs_contain initial.(getRegs) argvals ->
         req_stack_size <= word.unsigned (word.sub stack_pastend stack_start) / bytes_per_word ->
@@ -399,11 +399,11 @@ Section LowerPipeline.
           map.only_differ initial.(getRegs) reg_class.caller_saved final.(getRegs) /\
           final.(getPc) = ret_addr /\
             machine_ok p_funcs stack_start stack_pastend instrs mH' Rdata Rexec final /\
-            exists tL F,
-              final.(getTrace) = tL ++ initial.(getTrace) /\
+            exists kL F,
+              final.(getTrace) = kL ++ initial.(getTrace) /\
                 forall fuel,
                   le F fuel ->
-                  predictsLE (next (p_funcs, f_rel_pos, stack_pastend) fuel) (rev tL)). Check riscv_call.
+                  predictsLE (next (p_funcs, f_rel_pos, stack_pastend) fuel) (rev kL)).
   Print machine_ok.
 
   Definition same_finfo_and_length:
@@ -485,21 +485,21 @@ Section LowerPipeline.
       p2 = (instrs, finfo, req_stack_size) ->
       map.forall_values FlatToRiscvDef.valid_FlatImp_fun p1 ->
       riscvPhase p1 = Success p2 ->
-      forall fname next t m argvals post argnames retnames fbody,
+      forall fname next k t m argvals post argnames retnames fbody,
       (exists (*argnames retnames fbody*) l,
           map.get p1 fname = Some (argnames, retnames, fbody) /\
           map.of_list_zip argnames argvals = Some l /\
-          forall mc, FlatImp.exec p1 fbody t m l mc (fun t' m' l' mc' =>
+          forall mc, FlatImp.exec p1 fbody k t m l mc (fun k' t' m' l' mc' =>
                          exists retvals, map.getmany_of_list l' retnames = Some retvals /\
-                                           post (Semantics.filterio t') m' retvals /\
-                                           exists t'' F,
-                                             t' = t'' ++ t /\
+                                           post t' m' retvals /\
+                                           exists k'' F,
+                                             k' = k'' ++ k /\
                                                forall fuel,
                                                  le F fuel ->
-                                                 Semantics.predicts (next fuel) (rev t''))) ->
+                                                 Semantics.predicts (next fuel) (rev k''))) ->
       riscv_call p2 fname
-        (fun '(p_funcs, f_rel_pos, stack_pastend) (fuel: nat) (tL : list LeakageEvent) => rnext_fun iset compile_ext_call leak_ext_call finfo p_funcs p1 fuel (next fuel) nil f_rel_pos stack_pastend argnames retnames fbody tL (fun _ _ => Some qendLE))
-        t m argvals post.
+        (fun '(p_funcs, f_rel_pos, stack_pastend) (fuel: nat) (kL : list LeakageEvent) => rnext_fun iset compile_ext_call leak_ext_call finfo p_funcs p1 fuel (next fuel) nil f_rel_pos stack_pastend argnames retnames fbody kL (fun _ _ => Some qendLE))
+        k t m argvals post.
   Proof.
     unfold riscv_call.
     intros p1 p2. destruct p2 as ((finstrs & finfo) & req_stack_size). intros.
@@ -537,13 +537,13 @@ Section LowerPipeline.
           (pos := pos2)
           (program_base := p_funcs)
           (l := l)
-          (post := fun t' m' l' mc' =>
+          (post := fun k' t' m' l' mc' =>
                      (exists retvals,
                          map.getmany_of_list l' retnames = Some retvals /\
-                           post (Semantics.filterio t') m' retvals) /\
-                       (exists (t'' : list Semantics.event) (F : nat),
-                  t' = t'' ++ t /\
-                  (forall fuel : nat, (F <= fuel)%nat -> Semantics.predicts (next fuel) (rev t''))))
+                           post t' m' retvals) /\
+                       (exists (k'' : list Semantics.event) (F : nat),
+                  k' = k'' ++ k /\
+                  (forall fuel : nat, (F <= fuel)%nat -> Semantics.predicts (next fuel) (rev k''))))
           .
       eapply Q with
           (g := {| rem_stackwords :=
@@ -685,7 +685,7 @@ Section LowerPipeline.
           | E: Z.of_nat _ = word.unsigned (word.sub _ _) |- _ => simpl in E|-*; rewrite <- E
           end.
           apply Hlength_stack_trash_words. }
-        { assumption. }
+        { reflexivity. }
         { assumption. }
     - cbv beta. unfold goodMachine. simpl_g_get. unfold machine_ok in *. intros. fwd.
       assert (0 < bytes_per_word). { (* TODO: deduplicate *)
@@ -704,12 +704,12 @@ Section LowerPipeline.
         symmetry.
         eapply map.getmany_of_list_length.
         exact GM.
-      + Search post. Search (getLog final). rewrite H9p4p7. eassumption.
+      + eassumption.
       + eapply only_differ_subset. 1: eassumption.
         rewrite ListSet.of_list_list_union.
         rewrite ?singleton_set_eq_of_list.
         repeat apply subset_union_l;
-          unfold subset, of_list, elem_of, reg_class.caller_saved; intros k HI.
+          unfold subset, of_list, elem_of, reg_class.caller_saved; intros kk HI.
         * eapply List.In_firstn_to_In in HI.
           pose proof arg_range_Forall as FF.
           eapply Forall_forall in FF. 2: eassumption.
@@ -720,11 +720,11 @@ Section LowerPipeline.
                      destr b; try Lia.lia; []
                  | |- context[if ?b then _ else _] => destr b; try Lia.lia; []
                  end.
-          destr (k <=? 17)%bool.
+          destr (kk <=? 17)%bool.
           1: exact I.
           Lia.lia.
         * cbn in HI. contradiction.
-        * unfold reg_class.get. subst k. cbn. exact I.
+        * unfold reg_class.get. subst kk. cbn. exact I.
         * contradiction.
       + reflexivity.
       + cbv [mem_available].
@@ -801,11 +801,10 @@ Section LowerPipeline.
     Unshelve.
     all: try exact EmptyMetricLog.
       + eexists. exists (plus F F0). split; [eassumption|]. intros.
-        replace (rev rt') with (rev rt' ++ nil) by apply List.app_nil_r.
-        Check Hpost.
+        replace (rev rk') with (rev rk' ++ nil) by apply List.app_nil_r.
         eapply H9p5p2.
         -- simpl. Search Semantics.predicts. instantiate (1 := nil). rewrite app_nil_r.
-           Search t'. Search (_ ++ _ = _ ++ _ -> _ = _). apply app_inv_tail in H9p0p1p0. subst.
+           apply app_inv_tail in H9p0p1p0. subst.
            eapply H9p0p1p1. blia.
         -- constructor. reflexivity.
         -- blia.

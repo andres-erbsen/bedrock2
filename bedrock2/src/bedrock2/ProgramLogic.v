@@ -16,18 +16,11 @@ Lemma align_trace_cons {T} x xs cont t (H : xs = app cont t) : @cons T x xs = ap
 Proof. intros. cbn. congruence. Qed.
 Lemma align_trace_app {T} x xs cont t (H : xs = app cont t) : @app T x xs = app (app x cont) t.
 Proof. intros. cbn. subst. rewrite List.app_assoc; trivial. Qed.
-Check filterio. Print filterio.
-Lemma filterio_cons {width: BinNums.Z}{BW: Bitwidth.Bitwidth width}{word: Interface.word.word width}{mem: Interface.map.map Interface.word.rep Init.Byte.byte} (t : trace) (e : event) :
-  filterio (cons e t) = match e with | IO i => cons i (filterio t) | _ => filterio t end.
-Proof. destruct e; try reflexivity. Qed.
 
 Ltac trace_alignment :=
     repeat match goal with
       | t := cons _ _ |- _ => subst t
       end;
-    repeat match goal with
-      | H1 : filterio _ = _ |- context [ filterio _ ]  => repeat rewrite filterio_cons; repeat rewrite filterio_cons in H1; rewrite H1
-      end;          
     repeat (eapply align_trace_app
       || eapply align_trace_cons
       || exact (eq_refl (app nil _))).

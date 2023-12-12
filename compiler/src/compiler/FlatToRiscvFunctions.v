@@ -429,11 +429,11 @@ Section Proofs.
   Check FlatToRiscvCommon.predictsLE. Print rnext_stmt. Print rnext_fun.
 
   Lemma compile_function_body_correct: forall (e_impl_full : env) m l mc (argvs : list word)
-    (st0 : locals) (post outcome : Semantics.trace -> mem -> locals -> MetricLog -> Prop)
+    (st0 : locals) (post outcome : Semantics.trace -> Semantics.io_trace -> mem -> locals -> MetricLog -> Prop)
     (argnames retnames : list Z) (body : stmt Z) (program_base : word)
     (pos : Z) (ret_addr : word) (mach : RiscvMachineL) (e_impl : env)
     (e_pos : pos_map) (binds_count : nat) (insts : list Instruction)
-    (xframe : mem -> Prop) (t : Semantics.trace) (g : GhostConsts)
+    (xframe : mem -> Prop) (k : Semantics.trace) (t : Semantics.io_trace) (g : GhostConsts)
     (IH: forall (g0 : GhostConsts) (insts0 : list Instruction) (xframe0 : mem -> Prop)
                 (initialL : RiscvMachineL) (pos0 : Z),
         fits_stack (rem_framewords g0) (rem_stackwords g0) e_impl body ->
@@ -444,35 +444,35 @@ Section Proofs.
         iff1 (allx g0)
              ((xframe0 * program iset (program_base + !pos0) insts0)%sep *
               FlatToRiscvCommon.functions compile_ext_call program_base e_pos e_impl) ->
-        goodMachine (Semantics.filterio t) m st0 g0 initialL ->
+        goodMachine t m st0 g0 initialL ->
         runsTo initialL (fun finalL =>
-          exists finalTrace finalMH finalRegsH finalMetricsH,
-            outcome finalTrace finalMH finalRegsH finalMetricsH /\
+          exists finalTrace finalIOTrace finalMH finalRegsH finalMetricsH,
+            outcome finalTrace finalIOTrace finalMH finalRegsH finalMetricsH /\
             getPc finalL = getPc initialL + !(4 * #(Datatypes.length insts0)) /\
             map.only_differ (getRegs initialL)
                    (union (of_list (modVars_as_list Z.eqb body)) (singleton_set RegisterNames.ra))
                    (getRegs finalL) /\
             (getMetrics finalL - getMetrics initialL <= lowerMetrics (finalMetricsH - mc))%metricsL /\
-              goodMachine (Semantics.filterio finalTrace) finalMH finalRegsH g0 finalL /\
-              exists t' rt',
-                finalTrace = t' ++ t /\
-                  getTrace finalL = rt' ++ getTrace initialL /\
+              goodMachine finalIOTrace finalMH finalRegsH g0 finalL /\
+              exists k' rk',
+                finalTrace = k' ++ k /\
+                  getTrace finalL = rk' ++ getTrace initialL /\
                   exists F,
-                  forall next t0 t'' rt'' fuel f,
-                    predicts next (t0 ++ rev t' ++ t'') ->
-                    predictsLE (fun t => f (t0 ++ rev t') t) rt'' ->
+                  forall next k0 k'' rk'' fuel f,
+                    predicts next (k0 ++ rev k' ++ k'') ->
+                    predictsLE (fun t => f (k0 ++ rev k') t) rk'' ->
                     Nat.le F fuel ->
-                    predictsLE (fun t => rnext_stmt iset compile_ext_call leak_ext_call e_pos program_base e_impl_full fuel next t0 pos0 g0.(p_sp) (bytes_per_word * rem_framewords g0) body t f) (rev rt' ++ rt'')))
-    (HOutcome: forall (t' : Semantics.trace) (m' : mem) (mc' : MetricLog) (st1 : locals),
-        outcome t' m' st1 mc' ->
+                    predictsLE (fun t => rnext_stmt iset compile_ext_call leak_ext_call e_pos program_base e_impl_full fuel next k0 pos0 g0.(p_sp) (bytes_per_word * rem_framewords g0) body t f) (rev rk' ++ rk'')))
+    (HOutcome: forall (k' : Semantics.trace) (t' : Semantics.io_trace) (m' : mem) (mc' : MetricLog) (st1 : locals),
+        outcome k' t' m' st1 mc' ->
         exists (retvs : list word) (l' : locals),
           map.getmany_of_list st1 retnames = Some retvs /\
           map.putmany_of_list_zip (List.firstn binds_count (reg_class.all reg_class.arg)) retvs l =
           Some l' /\
-          post t' m' l' mc'),
+          post k' t' m' l' mc'),
       (binds_count <= 8)%nat ->
       map.of_list_zip argnames argvs = Some st0 ->
-      exec e_impl_full body t m st0 mc outcome ->
+      exec e_impl_full body k t m st0 mc outcome ->
       map.getmany_of_list l (List.firstn (List.length argnames) (reg_class.all reg_class.arg)) =
       Some argvs ->
       map.extends e_impl_full e_impl ->
@@ -490,10 +490,10 @@ Section Proofs.
       iff1 (allx g)
            ((xframe * program iset (program_base + !pos) insts)%sep *
             FlatToRiscvCommon.functions compile_ext_call program_base e_pos e_impl) ->
-      goodMachine (Semantics.filterio t) m l g mach ->
+      goodMachine t m l g mach ->
       runsToNonDet.runsTo (mcomp_sat (Run.run1 iset)) mach (fun finalL =>
-        exists finalTrace finalMH finalRegsH finalMetricsH,
-          post finalTrace finalMH finalRegsH finalMetricsH /\
+        exists finalTrace finalIOTrace finalMH finalRegsH finalMetricsH,
+          post finalTrace finalIOTrace finalMH finalRegsH finalMetricsH /\
           getPc finalL = ret_addr /\
           map.only_differ (getRegs mach)
            (union
@@ -505,16 +505,16 @@ Section Proofs.
                                     (Platform.MetricLogging.addMetricLoads 100
                                        (Platform.MetricLogging.addMetricStores 100 (getMetrics mach)))) <=
                lowerMetrics (finalMetricsH - mc))%metricsL /\
-            goodMachine (Semantics.filterio finalTrace) finalMH finalRegsH g finalL /\
-            exists t' rt',
-              finalTrace = t' ++ t /\
-                getTrace finalL = rt' ++ getTrace mach /\
+            goodMachine finalIOTrace finalMH finalRegsH g finalL /\
+            exists k' rk',
+              finalTrace = k' ++ k /\
+                getTrace finalL = rk' ++ getTrace mach /\
                 exists F,
-                forall next t0 t'' rt'' fuel f,
-                  predicts next (t0 ++ rev t' ++ t'') ->
-                  predictsLE (fun t => f (t0 ++ rev t') t) rt'' ->
+                forall next k0 k'' rk'' fuel f,
+                  predicts next (k0 ++ rev k' ++ k'') ->
+                  predictsLE (fun k => f (k0 ++ rev k') k) rk'' ->
                   Nat.le F fuel ->
-                  predictsLE (fun t => rnext_fun iset compile_ext_call leak_ext_call e_pos program_base e_impl_full fuel next t0 pos g.(p_sp) argnames retnames body t f) (rev rt' ++ rt'')
+                  predictsLE (fun k => rnext_fun iset compile_ext_call leak_ext_call e_pos program_base e_impl_full fuel next k0 pos g.(p_sp) argnames retnames body k f) (rev rk' ++ rk'')
         ).
   Proof.
     intros * IHexec OC BC OL Exb GetMany Ext GE FS C V Mo Mo' Gra RaM GPC A GM.
@@ -767,7 +767,7 @@ Section Proofs.
            end. Check H2p10p1. Search getTrace.
     subst.
     match goal with
-    | H: outcome _ _ _ _ |- _ => rename H into HO
+    | H: outcome _ _ _ _ _ |- _ => rename H into HO
     end.
     match goal with
     | H: forall _, _ |- _ =>
@@ -941,7 +941,7 @@ Section Proofs.
     (* computed postcondition satisfies required postcondition: *)
     apply runsToDone.
     simpl_MetricRiscvMachine_get_set.
-    do 4 eexists.
+    do 5 eexists.
     match goal with
     | |- _ /\ _ /\ ?ODGoal /\ _ => assert ODGoal as OD
     end. (* getTrace1 exists here *)
@@ -1381,8 +1381,6 @@ Section Proofs.
       subst. solve_word_eq word_ok.
   Qed.
 
-  Print compiles_FlatToRiscv_correctly. Check compile_ext_call. Check compiles_FlatToRiscv_correctly.
-
   Lemma predictLE_cons e f t1 t2 :
     predictsLE f (t1 ++ e :: t2) ->
     f t1 = Some (quotLE e).
@@ -1428,7 +1426,7 @@ Section Proofs.
         all: eauto using exec.interact, fits_stack_interact.
       + simpl. intros finalL A. destruct_RiscvMachine finalL. unfold goodMachine in *. simpl in *.
         destruct_products. subst.
-        do 4 eexists; ssplit; eauto.
+        do 5 eexists; ssplit; eauto.
         do 2 eexists; ssplit; eauto.
 
     - idtac "Case compile_stmt_correct/SCall".
@@ -1475,7 +1473,7 @@ Section Proofs.
       intro mid. set (mach := mid). intros. fwd. destruct_RiscvMachine mid. subst.
 
       remember mach.(getLog) as log.
-      assert (GM: goodMachine (Semantics.filterio t) m l
+      assert (GM: goodMachine log m l
                               {| p_sp := p_sp;
                                  rem_stackwords := #(List.length old_stackvals);
                                  rem_framewords := #(List.length unused_part_of_caller_frame);
@@ -1493,31 +1491,31 @@ Section Proofs.
       | |- ?G => replace G with
             (runsToNonDet.runsTo (mcomp_sat (Run.run1 iset)) mach
               (fun finalL : RiscvMachineL => exists
-                   finalTrace finalMH finalRegsH finalMetricsH,
-       post finalTrace finalMH finalRegsH finalMetricsH /\
+                   finalTrace finalIOTrace finalMH finalRegsH finalMetricsH,
+       post finalTrace finalIOTrace finalMH finalRegsH finalMetricsH /\
        getPc finalL = program_base + !pos + !(4 * #1) /\
        map.only_differ initialL_regs
          (union (of_list (list_union Z.eqb binds [])) (singleton_set RegisterNames.ra))
          (getRegs finalL) /\
        (getMetrics finalL - initialL_metrics <= lowerMetrics (finalMetricsH - mc))%metricsL /\
-         goodMachine (Semantics.filterio finalTrace) finalMH finalRegsH g finalL /\
-            (exists (t' : list Semantics.event) (rt' : list LeakageEvent),
-          finalTrace = t' ++ t /\
-          RiscvMachine.getTrace finalL = rt' ++ getTrace /\
+         goodMachine finalIOTrace finalMH finalRegsH g finalL /\
+            (exists (k' : list Semantics.event) (rk' : list LeakageEvent),
+          finalTrace = k' ++ k /\
+          RiscvMachine.getTrace finalL = rk' ++ getTrace /\
           (exists F : nat,
              forall (next : Semantics.trace -> option Semantics.qevent)
-               (t0 t'' : list Semantics.event) (rt'' : list LeakageEvent) 
+               (k0 k'' : list Semantics.event) (rk'' : list LeakageEvent) 
                (fuel : nat)
                (f : list Semantics.event -> list LeakageEvent -> option qLeakageEvent),
-             predicts next (t0 ++ rev t' ++ t'') ->
-             predictsLE (fun t1 : list LeakageEvent => f (t0 ++ rev t') t1) rt'' ->
+             predicts next (k0 ++ rev k' ++ k'') ->
+             predictsLE (fun k1 : list LeakageEvent => f (k0 ++ rev k') k1) rk'' ->
              Nat.le F fuel ->
              predictsLE
-               (fun t1 : list LeakageEvent =>
+               (fun k1 : list LeakageEvent =>
                 rnext_stmt iset compile_ext_call leak_ext_call e_pos program_base e_impl_full
-                  fuel next t0 pos p_sp
+                  fuel next k0 pos p_sp
                   (bytes_per_word * #(Datatypes.length unused_part_of_caller_frame))
-                  (SCall binds fname args) t1 f) (rev rt' ++ rt'')))))
+                  (SCall binds fname args) k1 f) (rev rk' ++ rk'')))))
       end.
       2: { subst. reflexivity. }
 
@@ -1553,7 +1551,7 @@ Section Proofs.
       }
       move C after A.
       match goal with
-      | H: exec _ body _ _ _ _ _ |- _ => rename H into Exb
+      | H: exec _ body _ _ _ _ _ _ |- _ => rename H into Exb
       end.
       move Exb before C.
       assert (Ext: map.extends e_impl_full e_impl). {
@@ -1629,20 +1627,20 @@ Section Proofs.
            iff1 (FlatToRiscvCommon.allx g)
              ((xframe * program iset (program_base + !pos) insts)%sep *
               functions program_base e_pos e_impl) ->
-           goodMachine (Semantics.filterio t) m st0 g initialL ->
+           goodMachine log m st0 g initialL ->
            runsTo initialL
              (fun finalL : RiscvMachineL =>
               exists
-                (finalTrace : Semantics.trace) (finalMH : mem) (finalRegsH : locals)
-              (finalMetricsH : MetricLog),
-                outcome finalTrace finalMH finalRegsH finalMetricsH /\
+                (finalTrace : Semantics.trace) (finalIOTrace : Semantics.io_trace)
+                (finalMH : mem) (finalRegsH : locals) (finalMetricsH : MetricLog),
+                outcome finalTrace finalIOTrace finalMH finalRegsH finalMetricsH /\
                 getPc finalL = getPc initialL + !(4 * #(Datatypes.length insts)) /\
                 map.only_differ (getRegs initialL)
                   (union (of_list (modVars_as_list Z.eqb body)) (singleton_set RegisterNames.ra))
                   (getRegs finalL) /\
                   (*                (getMetrics finalL - initialL_metrics <= lowerMetrics (finalMetricsH - mc))%metricsL /\ *)
                   _ /\
-                  goodMachine (Semantics.filterio finalTrace) finalMH finalRegsH g finalL /\
+                  goodMachine finalIOTrace finalMH finalRegsH g finalL /\
              _))
         ) in replace T with T' in IHexec.
       2: {
@@ -1671,9 +1669,8 @@ Section Proofs.
       }
       move Gra after GPC.
       assert (word.unsigned ret_addr mod 4 = 0) as RaM by (subst ret_addr; solve_divisibleBy4).
-      move RaM before Gra. 
-      (*replace (Semantics.filterio t) with log in *. have to do this after
-        applying compile_function_body_correct *)
+      move RaM before Gra.
+      replace mid_log with log in *.
       forget (Datatypes.length binds) as binds_count.
       subst binds.
       eapply runsTo_weaken. {
@@ -1689,9 +1686,8 @@ Section Proofs.
         revert IHexec OC BC OL Exb GetMany Ext GE FS C V Mo Mo' Gra RaM GPC A GM.
         eapply compile_function_body_correct.
       }
-      replace (Semantics.filterio t) with log in *.
       subst mach. simpl_MetricRiscvMachine_get_set.
-      intros. fwd. eexists. eexists. eexists. eexists.
+      intros. fwd. eexists. eexists. eexists. eexists. eexists.
       split; [ eapply H0p0 | ].
       split; eauto 8 with map_hints.
       split; eauto 8 with map_hints.
@@ -2118,7 +2114,7 @@ Section Proofs.
           apply Semantics.predict_cons in H4. rewrite H4. cbn [Semantics.q].
           eapply predictLE_with_prefix_works_eq.
           { rewrite rev_app_distr. reflexivity. }
-          { rewrite rev_app_distr. rewrite <- (app_assoc _ _ rt''). eapply H4p11p2.
+          { rewrite rev_app_distr. rewrite <- (app_assoc _ _ rt''). eapply H4p10p2.
             { rewrite <- app_assoc. simpl. eassumption. }
             { eapply predictLE_with_prefix_works_eq.
               { reflexivity. }
@@ -2159,7 +2155,7 @@ Section Proofs.
           apply Semantics.predict_cons in H4. rewrite H4. cbn [Semantics.q].
           eapply predictLE_with_prefix_works_eq.
           { rewrite rev_app_distr. reflexivity. }
-          { eapply H4p11p2.
+          { eapply H4p10p2.
             { rewrite <- app_assoc. simpl. eassumption. }
             { eapply predictLE_with_prefix_works_eq.
               { reflexivity. }
@@ -2191,7 +2187,7 @@ Section Proofs.
         all: try safe_sidecond.
       + simpl in *. simpl. intros. destruct_RiscvMachine middle.
         match goal with
-        | H: exists _ _ _ _, _ |- _ => destruct H as [ tH' [ mH' [ lH' [ mcH' H ] ] ] ]
+        | H: exists _ _ _ _ _, _ |- _ => destruct H as [ kH' [ tH' [ mH' [ lH' [ mcH' H ] ] ] ] ]
         end.
         fwd.
         destruct (eval_bcond lH' cond) as [condB|] eqn: E.
