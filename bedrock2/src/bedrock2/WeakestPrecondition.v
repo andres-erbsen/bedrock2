@@ -172,10 +172,10 @@ End WeakestPrecondition.
 Check @cmd_body.
 Ltac unfold1_cmd e :=
   lazymatch e with
-    @cmd ?width ?BW ?word ?mem ?locals ?ext_spec ?CA ?c ?t ?m ?l ?post =>
+    @cmd ?width ?BW ?word ?mem ?locals ?ext_spec ?CA ?c ?k ?t ?m ?l ?post =>
     let c := eval hnf in c in
     constr:(@cmd_body width BW word mem locals ext_spec CA
-                      (@cmd width BW word mem locals ext_spec CA) c t m l post)
+                      (@cmd width BW word mem locals ext_spec CA) c k t m l post)
   end.
 Ltac unfold1_cmd_goal :=
   let G := lazymatch goal with |- ?G => G end in
@@ -184,9 +184,9 @@ Ltac unfold1_cmd_goal :=
 Check @expr. Check @expr_body.
 Ltac unfold1_expr e :=
   lazymatch e with
-    @expr ?width ?BW ?word ?mem ?locals ?m ?l ?t ?arg ?post =>
+    @expr ?width ?BW ?word ?mem ?locals ?m ?l ?k ?arg ?post =>
     let arg := eval hnf in arg in
-    constr:(@expr_body width BW word mem locals m l (@expr width BW word mem locals m l) t arg post)
+    constr:(@expr_body width BW word mem locals m l (@expr width BW word mem locals m l) k arg post)
   end.
 Ltac unfold1_expr_goal :=
   let G := lazymatch goal with |- ?G => G end in
@@ -218,17 +218,17 @@ Ltac unfold1_list_map'_goal :=
 Check @call. Check @call_body.
 Ltac unfold1_call e :=
   lazymatch e with
-    @call ?width ?BW ?word ?mem ?locals ?ext_spec ?fs ?fname ?t ?m ?l ?post =>
+    @call ?width ?BW ?word ?mem ?locals ?ext_spec ?fs ?fname ?k ?t ?m ?l ?post =>
     let fs := eval hnf in fs in
     constr:(@call_body width BW word mem locals ext_spec
-                       (@call width BW word mem locals ext_spec) fs fname t m l post)
+                       (@call width BW word mem locals ext_spec) fs fname k t m l post)
   end.
 Ltac unfold1_call_goal :=
   let G := lazymatch goal with |- ?G => G end in
   let G := unfold1_call G in
   change G.
 
-Import Coq.ZArith.ZArith.
+Import Coq.ZArith.ZArith. Check WeakestPrecondition.call.
 
 Notation "'fnspec!' name a0 .. an '/' g0 .. gn '~>' r0 .. rn ',' '{' 'requires' tr mem := pre ';' 'ensures' tr' mem' ':=' post '}'" :=
   (fun functions =>
@@ -236,10 +236,10 @@ Notation "'fnspec!' name a0 .. an '/' g0 .. gn '~>' r0 .. rn ',' '{' 'requires' 
          .. (forall an,
                (forall g0,
                    .. (forall gn,
-                         (forall tr mem,
+                         (forall k tr mem,
                              pre ->
                              WeakestPrecondition.call
-                               functions name tr mem (cons a0 .. (cons an nil) ..)
+                               functions name k tr mem (cons a0 .. (cons an nil) ..)
                                (fun tr' mem' rets =>
                                   (exists r0,
                                       .. (exists rn,
@@ -260,7 +260,7 @@ Definition appl {A B} (x : A) (f : A -> B) := f x.
 Notation "'ctfunc!' name a0 .. an '|' b0 .. bn '/' g0 .. gn '|' h0 .. hn '~>' r0 .. rn ',' '{' 'requires' tr mem := pre ';' 'ensures' tr' mem' ':=' post '}'" :=
   (fun functions =>
      (exists f,
-         (forall tr mem,
+         (forall k tr mem,
              (forall a0,
                  .. (forall an,
                        (forall b0,
@@ -271,10 +271,10 @@ Notation "'ctfunc!' name a0 .. an '|' b0 .. bn '/' g0 .. gn '|' h0 .. hn '~>' r0
                                                .. (forall hn,
                                                      pre ->
                                                      WeakestPrecondition.call
-                                                       functions name tr mem (cons a0 .. (cons an (cons b0 .. (cons bn nil) ..)) ..)
-                                                       (fun tr' mem' rets =>
-                                                          (exists tr'', generates ((appl a0 .. (appl an (appl g0 .. (appl gn f) ..)) ..)) (List.rev tr'') /\
-                                                                          tr' = (tr'' ++ tr)%list) /\
+                                                       functions name k tr mem (cons a0 .. (cons an (cons b0 .. (cons bn nil) ..)) ..)
+                                                       (fun k' tr' mem' rets =>
+                                                          (exists k'', generates ((appl a0 .. (appl an (appl g0 .. (appl gn f) ..)) ..)) (List.rev k'') /\
+                                                                          k' = (k'' ++ k)%list) /\
                                                             (exists r0,
                                                                 .. (exists rn,
                                                                       rets = (cons r0 .. (cons rn nil) ..) /\
@@ -294,18 +294,18 @@ Notation "'ctfunc!' name a0 .. an '|' b0 .. bn '/' g0 .. gn '|' h0 .. hn '~>' r0
 Notation "'ctfunc!' name a0 .. an '|' '/' '|' h0 .. hn ',' '{' 'requires' tr mem := pre ';' 'ensures' tr' mem' ':=' post '}'" :=
   (fun functions =>
      (exists f,
-         (forall tr mem,
+         (forall k tr mem,
              (forall a0,
                  .. (forall an,
                        (forall h0,
                            .. (forall hn,
                                  pre ->
                                  WeakestPrecondition.call
-                                   functions name tr mem (cons a0 .. (cons an nil) ..)
-                                   (fun tr' mem' rets =>
-                                      (exists tr'',
-                                          generates (appl a0 .. (appl an f) ..) (List.rev tr'') /\
-                                            tr' = (tr'' ++ tr)%list) /\
+                                   functions name k tr mem (cons a0 .. (cons an nil) ..)
+                                   (fun k' tr' mem' rets =>
+                                      (exists k'',
+                                          generates (appl a0 .. (appl an f) ..) (List.rev k'') /\
+                                            k' = (k'' ++ k)%list) /\
                                             rets = nil /\
                                             post)) ..)) ..))))
     (at level 200,
@@ -320,18 +320,18 @@ Notation "'ctfunc!' name a0 .. an '|' '/' '|' h0 .. hn ',' '{' 'requires' tr mem
 Notation "'ctfunc!' name a0 .. an '|' '/' '|' h0 .. hn '~>' r0 .. rn ',' '{' 'requires' tr mem := pre ';' 'ensures' tr' mem' ':=' post '}'" :=
   (fun functions =>
      (exists f,
-         (forall tr mem,
+         (forall k tr mem,
              (forall a0,
                  .. (forall an,
                        (forall h0,
                            .. (forall hn,
                                  pre ->
                                  WeakestPrecondition.call
-                                   functions name tr mem (cons a0 .. (cons an nil) ..)
-                                   (fun tr' mem' rets =>
-                                      (exists tr'',
-                                          generates (appl a0 .. (appl an f) ..) (List.rev tr'') /\
-                                            tr' = (tr'' ++ tr)%list) /\
+                                   functions name k tr mem (cons a0 .. (cons an nil) ..)
+                                   (fun k' tr' mem' rets =>
+                                      (exists k'',
+                                          generates (appl a0 .. (appl an f) ..) (List.rev k'') /\
+                                            k' = (k'' ++ k)%list) /\
                                         (exists r0,
                                             .. (exists rn,     
                                                   rets = (cons r0 .. (cons rn nil) ..) /\
@@ -349,16 +349,16 @@ Notation "'ctfunc!' name a0 .. an '|' '/' '|' h0 .. hn '~>' r0 .. rn ',' '{' 're
 Notation "'ctfunc!' name '|' b0 .. bn '/' '|' '~>' r0 .. rn ',' '{' 'requires' tr mem := pre ';' 'ensures' tr' mem' ':=' post '}'" :=
   (fun functions =>
      (exists f,
-         (forall tr mem,
+         (forall k tr mem,
              (forall b0,
                  .. (forall bn,
                        pre ->
                        WeakestPrecondition.call
-                         functions name tr mem (cons b0 .. (cons bn nil) ..)
-                         (fun tr' mem' rets =>
-                            (exists tr'',
-                                generates f (List.rev tr'') /\
-                                  tr' = (tr'' ++ tr)%list) /\
+                         functions name k tr mem (cons b0 .. (cons bn nil) ..)
+                         (fun k' tr' mem' rets =>
+                            (exists k'',
+                                generates f (List.rev k'') /\
+                                  k' = (k'' ++ k)%list) /\
                               (exists r0,
                                   .. (exists rn,
                                         rets = (cons r0 .. (cons rn nil) ..) /\
@@ -377,11 +377,11 @@ Notation "'fnspec!' name a0 .. an '/' g0 .. gn ',' '{' 'requires' tr mem := pre 
          .. (forall an,
                (forall g0,
                    .. (forall gn,
-                         (forall tr mem,
+                         (forall k tr mem,
                              pre ->
                              WeakestPrecondition.call
-                               functions name tr mem (cons a0 .. (cons an nil) ..)
-                               (fun tr' mem' rets =>
+                               functions name k tr mem (cons a0 .. (cons an nil) ..)
+                               (fun k' tr' mem' rets =>
                                   rets = nil /\ post))) ..)) ..))
     (at level 200,
       name at level 0,
@@ -395,10 +395,10 @@ Notation "'fnspec!' name a0 .. an '~>' r0 .. rn ',' '{' 'requires' tr mem := pre
   (fun functions =>
      (forall a0,
          .. (forall an,
-               (forall tr mem,
+               (forall k tr mem,
                    pre ->
                    WeakestPrecondition.call
-                     functions name tr mem (cons a0 .. (cons an nil) ..)
+                     functions name k tr mem (cons a0 .. (cons an nil) ..)
                      (fun tr' mem' rets =>
                         (exists r0,
                             .. (exists rn,
@@ -417,11 +417,11 @@ Notation "'fnspec!' name '/' g0 .. gn '~>' r0 .. rn ',' '{' 'requires' tr mem :=
      (forall an,
          (forall g0,
              .. (forall gn,
-                   (forall tr mem,
+                   (forall k tr mem,
                        pre ->
                        WeakestPrecondition.call
-                         functions name tr mem nil
-                         (fun tr' mem' rets =>
+                         functions name k tr mem nil
+                         (fun k' tr' mem' rets =>
                             (exists r0,
                                 .. (exists rn,
                                       rets = (cons r0 .. (cons rn nil) ..) /\
@@ -438,11 +438,11 @@ Notation "'fnspec!' name a0 .. an ',' '{' 'requires' tr mem := pre ';' 'ensures'
   (fun functions =>
      (forall a0,
          .. (forall an,
-               (forall tr mem,
+               (forall k tr mem,
                    pre ->
                    WeakestPrecondition.call
-                     functions name tr mem (cons a0 .. (cons an nil) ..)
-                     (fun tr' mem' rets =>
+                     functions name k tr mem (cons a0 .. (cons an nil) ..)
+                     (fun k' tr' mem' rets =>
                         rets = nil /\ post))) ..))
     (at level 200,
       name at level 0,
@@ -455,11 +455,11 @@ Notation "'fnspec!' name '/' g0 .. gn ',' '{' 'requires' tr mem := pre ';' 'ensu
   (fun functions =>
      (forall g0,
          .. (forall gn,
-               (forall tr mem,
+               (forall k tr mem,
                    pre ->
                    WeakestPrecondition.call
-                     functions name tr mem nil
-                     (fun tr' mem' rets =>
+                     functions name k tr mem nil
+                     (fun k' tr' mem' rets =>
                         rets = nil /\ post))) ..))
     (at level 200,
       name at level 0,
@@ -470,11 +470,11 @@ Notation "'fnspec!' name '/' g0 .. gn ',' '{' 'requires' tr mem := pre ';' 'ensu
 
 Notation "'fnspec!' name '~>' r0 .. rn ',' '{' 'requires' tr mem := pre ';' 'ensures' tr' mem' ':=' post '}'" :=
   (fun functions =>
-     (forall tr mem,
+     (forall k tr mem,
          pre ->
          WeakestPrecondition.call
-           functions name tr mem nil
-           (fun tr' mem' rets =>
+           functions name k tr mem nil
+           (fun k' tr' mem' rets =>
               (exists r0,
                   .. (exists rn,
                         rets = (cons r0 .. (cons rn nil) ..) /\

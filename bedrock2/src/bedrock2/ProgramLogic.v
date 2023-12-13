@@ -266,6 +266,7 @@ Check WeakestPrecondition.call. Check WeakestPrecondition.cmd.
 
 Ltac straightline :=
   match goal with
+  | |- Basics.impl _ _ => cbv [Basics.impl]
   | _ => idtac "1"; straightline_cleanup
   (*| |- program_logic_goal_for ?f _ => idtac "2";
     enter f; intros;
@@ -284,21 +285,21 @@ Ltac straightline :=
             end
         end;
       match goal with
-      | |- call _ _ _ _ _ _ => idtac
+      | |- call _ _ _ _ _ _ _ => idtac
       | _ => eexists
       end; intros; unfold1_call_goal; cbv beta match delta [call_body];
       lazymatch goal with
       | |- if ?test then ?T else _ => replace test with true by reflexivity; change T
       end;
       cbv beta match delta [func]
-  | |- WeakestPrecondition.cmd _ (cmd.set ?s ?e) _ _ _ ?post => idtac "3";
+  | |- WeakestPrecondition.cmd _ (cmd.set ?s ?e) _ _ _ _ _ ?post => idtac "3";
     unfold1_cmd_goal; cbv beta match delta [cmd_body];
     let __ := match s with String.String _ _ => idtac | String.EmptyString => idtac end in
     ident_of_constr_string_cps s ltac:(fun x =>
       ensure_free x;
       (* NOTE: keep this consistent with the [exists _, _ /\ _] case far below *)
       letexists _ as x; split; [solve [repeat straightline]|])
-  | |- cmd _ ?c _ _ _ ?post => idtac "4";
+  | |- cmd _ ?c _ _ _ _ ?post => idtac "4";
     let c := eval hnf in c in
     lazymatch c with
     | cmd.while _ _ => fail
@@ -415,7 +416,7 @@ Check WeakestPrecondition.call.
 (* TODO: once we can automatically prove some calls, include the success-only version of this in [straightline] *)
 Ltac straightline_call :=
   lazymatch goal with
-  | |- WeakestPrecondition.call ?functions ?callee _ _ _ _ =>
+  | |- WeakestPrecondition.call ?functions ?callee _ _ _ _ _ =>
     let callee_spec := lazymatch constr:(_:spec_of callee) with ?s => s end in
     let Hcall := lazymatch goal with H: callee_spec functions |- _ => H end in
     eapply WeakestPreconditionProperties.Proper_call; cycle -1;
@@ -425,9 +426,9 @@ Ltac straightline_call :=
 
 Ltac straightline_ct_call :=
   lazymatch goal with
-  | |- call ?functions ?callee _ _ _ _ =>
+  | |- call ?functions ?callee _ _ _ _ _ =>
       let Hcall := multimatch goal with
-                   | H: context [ call functions callee _ _ _ _ ] |- _ => H
+                   | H: context [ call functions callee _ _ _ _ _ ] |- _ => H
                    end in
       eapply WeakestPreconditionProperties.Proper_call; cycle -1;
         [ eapply Hcall | try eabstract solve [ Morphisms.solve_proper ].. ];
@@ -436,7 +437,7 @@ Ltac straightline_ct_call :=
 
 Ltac current_trace_mem_locals :=
   lazymatch goal with
-  | |- WeakestPrecondition.cmd _ _ ?t ?m ?l _ => constr:((t, m, l))
+  | |- WeakestPrecondition.cmd _ _ _ ?t ?m ?l _ => constr:((t, m, l))
   end.
 
 Ltac seprewrite Hrw :=
@@ -449,12 +450,12 @@ Ltac seprewrite_by Hrw tac :=
   let m := lazymatch tml with (_, ?m, _) => m end in
   let H := multimatch goal with H: _ m |- _ => H end in
   seprewrite_in_by Hrw H tac.
-
+Check @cmd.
 Ltac show_program :=
   lazymatch goal with
-  | |- @cmd ?width ?BW ?word ?mem ?locals ?ext_spec ?stack_addr ?E ?c ?F ?G ?H ?I =>
+  | |- @cmd ?width ?BW ?word ?mem ?locals ?ext_spec ?stack_addr ?c ?E ?F ?G ?H ?I =>
     let c' := eval cbv in c in
-    change (@cmd width BW word mem locals ext_spec stack_addr E (fst (c, c')) F G H I)
+    change (@cmd width BW word mem locals ext_spec stack_addr (fst (c, c')) E F G H I)
   end.
 
 Ltac subst_words :=

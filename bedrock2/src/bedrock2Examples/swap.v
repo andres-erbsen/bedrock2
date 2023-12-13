@@ -36,7 +36,7 @@ Section WithParameters.
   Instance ct_spec_of_swap : spec_of "swap" :=
     ctfunc! "swap" a_addr b_addr | / | a b R,
     { requires t m := m =* scalar a_addr a * scalar b_addr b * R;
-      ensures T M :=  M =* scalar a_addr b * scalar b_addr a * R /\ (filterio T) = (filterio t) }.
+      ensures T M :=  M =* scalar a_addr b * scalar b_addr a * R /\ T = t }.
 
   (* I should make this work again.
 Instance ct_bad_swap : ct_spec_of "bad_swap" :=
@@ -44,8 +44,10 @@ Instance ct_bad_swap : ct_spec_of "bad_swap" :=
     { requires t m := m =* scalar a_addr a * scalar b_addr b * R }.*)
   
   Lemma swap_ok : program_logic_goal_for_function! swap.
-  Proof. repeat straightline. split; repeat straightline. 2: split; trace_alignment; repeat straightline; auto.
-         eexists. split. 2: trace_alignment. repeat constructor. Qed.
+  Proof. repeat straightline. split.
+         { eexists. split. 2: trace_alignment. repeat constructor. }
+         split; [reflexivity|]. split; [|reflexivity]. repeat straightline. assumption.
+  Qed.
 
   (*Lemma swap_ct : program_logic_ct_goal_for_function! swap.
   Proof. repeat straightline. trace_alignment. Qed.*)
@@ -157,14 +159,11 @@ gives things that are ok to be secrets.
 Remaining problem: these fancy parameters propagate down to the assembly level and get involved 
 in the assembly-level trace.
 *)
-
-  Definition leakfxthenx :=
-    func! (secret) {
         
   
   Print io_event.
 
-  Instance ext_spec: ExtSpec :=
+  (*Instance ext_spec: ExtSpec :=
       fun t mGive action (argvals: list word) (post: (mem -> list word -> Prop)) =>
         match argvals with
         | nil => if String.eqb action "IN" then
@@ -180,12 +179,12 @@ in the assembly-level trace.
                  exists val, argvals = [addr; val] /\ post map.empty nil
           else False
         | nil => False
-        end.
+        end.*)
 
   Instance spec_of_bad_swap : spec_of "bad_swap" :=
     fnspec! "bad_swap" a_addr b_addr / a b R,
     { requires t m := m =* scalar a_addr a * scalar b_addr b * R;
-      ensures T M :=  M =* scalar a_addr b * scalar b_addr a * R /\ (filterio T) = (filterio t) }.
+      ensures T M :=  M =* scalar a_addr b * scalar b_addr a * R /\ T = t }.
   Lemma bad_swap_ok : program_logic_goal_for_function! bad_swap.
   Proof. repeat straightline; eauto. Abort.
 
@@ -195,7 +194,7 @@ in the assembly-level trace.
   Definition spec_of_swap_same : spec_of "swap" :=
     fnspec! "swap" a_addr b_addr / a R,
     { requires t m := m =* scalar a_addr a * R /\ b_addr = a_addr;
-      ensures T M :=  M =* scalar a_addr a * R /\ (filterio T) = (filterio t) }.
+      ensures T M :=  M =* scalar a_addr a * R /\ T = t }.
 
   Lemma swap_same_ok :
     let spec_of_swap := spec_of_swap_same in
@@ -205,7 +204,7 @@ in the assembly-level trace.
   Instance spec_of_swap_swap : spec_of "swap_swap" :=
     fnspec! "swap_swap" a_addr b_addr / a b R,
     { requires t m := m =* scalar a_addr a * scalar b_addr b * R;
-      ensures T M :=  M =* scalar a_addr a * scalar b_addr b * R /\ (filterio T) = (filterio t)}.
+      ensures T M :=  M =* scalar a_addr a * scalar b_addr b * R /\ T = t }.
 
   Lemma swap_swap_ok :
     let spec_of_swap := ct_spec_of_swap in program_logic_goal_for_function! swap_swap.
