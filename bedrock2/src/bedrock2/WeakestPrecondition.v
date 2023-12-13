@@ -33,7 +33,7 @@ Section WeakestPrecondition.
       | expr.op op e1 e2 =>
         rec k e1 (fun k' v1 =>
         rec k' e2 (fun k'' v2 =>
-        post k'' (interp_binop op v1 v2)))
+        post (app (leak_binop op v1 v2) k'') (interp_binop op v1 v2)))
       | expr.load s e =>
         rec k e (fun k' a =>
         load s m a (post (cons (read a) k')))

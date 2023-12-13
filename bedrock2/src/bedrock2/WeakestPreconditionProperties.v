@@ -49,12 +49,13 @@ Section WeakestPrecondition.
   Global Instance Proper_expr : Proper (pointwise_relation _ (pointwise_relation _ (pointwise_relation _ (pointwise_relation _ ((pointwise_relation _ (pointwise_relation _ Basics.impl) ==> Basics.impl)))))) WeakestPrecondition.expr.
   Proof using.
     clear.
-    cbv [Proper respectful pointwise_relation Basics.impl]; ind_on Syntax.expr.expr;
+    cbv [Proper respectful pointwise_relation Basics.impl Semantics.leak_binop]; ind_on Syntax.expr.expr;
       cbn in *; intuition (try typeclasses eauto with core).
     { eapply Proper_literal; eauto. cbv [pointwise_relation Basics.impl]. auto. }
     { eapply Proper_get; eauto. cbv [pointwise_relation Basics.impl]. auto. }
     { eapply IHa2; eauto; intuition idtac. eapply Proper_load; eauto using Proper_load. cbv [pointwise_relation Basics.impl]. auto. }
     { eapply IHa2; eauto; intuition idtac. eapply Proper_load; eauto using Proper_load. cbv [pointwise_relation Basics.impl]. auto. }
+    { eapply IHa2_1; eauto; intuition idtac. eapply IHa2_2; eauto; intuition idtac. eauto. }
     { eapply IHa2_1; eauto; intuition idtac. Tactics.destruct_one_match; eauto using Proper_load. }
   Qed.
 

@@ -15,25 +15,31 @@ Definition io_event {width: Z}{BW: Bitwidth width}{word: word.word width}{mem: m
   (mem * String.string * list word) * (mem * list word).
 
 (*could reduce this to many fewer cases, at the cost of being a bit more confusing.*)
+(*actually no, it wouldn't even be that confusing.  It's very tempting to just let
+event := bool | word | unit. *)
 (*should I name this leakage_event, now that it doesn't contain the IO events?*)
-Inductive event {width: Z}{BW: Bitwidth width}{word: word.word width}{mem: map.map word byte} : Type :=
+Inductive event {width: Z}{BW: Bitwidth width}{word: word.word width} : Type :=
 | branch : bool -> event
 | read : word -> event
 | write : word -> event
 | table: word(*the index*) -> event
-| salloc : word -> event.
+| salloc : word -> event
+| div : word (*num*) -> word (*den*) -> event
+| shift : word(*shamt*) -> event.
 
-Inductive qevent {width: Z}{BW: Bitwidth width}{word: word.word width}{mem: map.map word byte} : Type :=
-  | qbranch : bool -> qevent
-  | qread : word -> qevent
-  | qwrite : word -> qevent
-  | qtable : word -> qevent
-  | qsalloc : qevent
-  | qend: qevent.
+Inductive qevent {width: Z}{BW: Bitwidth width}{word: word.word width} : Type :=
+| qbranch : bool -> qevent
+| qread : word -> qevent
+| qwrite : word -> qevent
+| qtable : word -> qevent
+| qsalloc : qevent
+| qdiv : word (*num*) -> word (*den*) -> qevent
+| qshift : word(*shamt*) -> qevent
+| qend: qevent.
 
 Section WithIOEvent.
   Context {width: Z}{BW: Bitwidth width}{word: word.word width}{mem: map.map word byte}.
-
+  
   Definition io_trace : Type := list io_event.
 
   Definition q e : qevent :=
@@ -43,8 +49,10 @@ Section WithIOEvent.
     | write a => qwrite a
     | table i => qtable i
     | salloc a => qsalloc
+    | div num den => qdiv num den
+    | shift shamt => qshift shamt
     end.
-  
+
   (*should I call this leakage_trace, now that it doesn't contain io events?
     shame to lengthen the name. *)
   Definition trace : Type := list event.
@@ -55,7 +63,9 @@ Section WithIOEvent.
   | cons_read (a : word) (after : abstract_trace)
   | cons_write (a : word) (after : abstract_trace)
   | cons_table (i : word) (after : abstract_trace)
-  | cons_salloc (after : word -> abstract_trace).
+  | cons_salloc (after : word -> abstract_trace)
+  | cons_div (num : word) (den : word) (after : abstract_trace)
+  | cons_shift (shamt : word) (after : abstract_trace).
 
 (* IO things to do:
    set channel: input can either be private or not; output and leak a secret; output and don't leak; output and leak one function of secret,
@@ -67,7 +77,9 @@ Section WithIOEvent.
   | read_gen : forall x a t_rev, generates a t_rev -> generates (cons_read x a) (read x :: t_rev)
   | write_gen : forall x a t_rev, generates a t_rev -> generates (cons_write x a) (write x :: t_rev)
   | table_gen : forall x a t_rev, generates a t_rev -> generates (cons_table x a) (table x :: t_rev)
-  | salloc_gen : forall f x t_rev, generates (f x) t_rev -> generates (cons_salloc f) (salloc x :: t_rev).
+  | salloc_gen : forall f x t_rev, generates (f x) t_rev -> generates (cons_salloc f) (salloc x :: t_rev)
+  | div_gen : forall x1 x2 a t_rev, generates a t_rev -> generates (cons_div x1 x2 a) (div x1 x2 :: t_rev)
+  | div_shift : forall x a t_rev, generates a t_rev -> generates (cons_shift x a) (shift x :: t_rev).
 
   Fixpoint abstract_app (a1 a2 : abstract_trace) : abstract_trace :=
     match a1 with
@@ -77,6 +89,8 @@ Section WithIOEvent.
     | cons_write a a1' => cons_write a (abstract_app a1' a2)
     | cons_table a a1' => cons_table a (abstract_app a1' a2)
     | cons_salloc a1' => cons_salloc (fun w => abstract_app (a1' w) a2)
+    | cons_div a b a1' => cons_div a b (abstract_app a1' a2)
+    | cons_shift a a1' => cons_shift a (abstract_app a1' a2)
     end.
 
   Lemma generates_app :
@@ -94,6 +108,8 @@ Section WithIOEvent.
     | write x :: t_rev' => cons_write x (generator t_rev')
     | table x :: t_rev' => cons_table x (generator t_rev')
     | salloc x :: t_rev' => cons_salloc (fun _ => generator t_rev')
+    | div x1 x2 :: t_rev' => cons_div x1 x2 (generator t_rev')
+    | shift x :: t_rev' => cons_shift x (generator t_rev')
     end.
 
   Lemma generator_generates (t: trace) :
@@ -109,6 +125,8 @@ Section WithIOEvent.
     | cons_write a _ => qwrite a
     | cons_table a _ => qtable a
     | cons_salloc _ => qsalloc
+    | cons_div x1 x2 _ => qdiv x1 x2
+    | cons_shift x _ => qshift x
     end.
   Fixpoint predictor (a(*the whole thing*) : abstract_trace) (t(*so far*) : trace) : option qevent :=
     match a, t with
@@ -118,6 +136,8 @@ Section WithIOEvent.
     | cons_write _ a', cons (write _) t' => predictor a' t'
     | cons_table _ a', cons (table _) t' => predictor a' t'
     | cons_salloc f, cons (salloc a) t' => predictor (f a) t'
+    | cons_div _ _ a', cons (div _ _) t' => predictor a' t'
+    | cons_shift _ a', cons (shift _) t' => predictor a' t'
     | _, _ => None (*failure*)
     end.
   Search (list ?A -> ?A).
@@ -234,7 +254,7 @@ End ext_spec.
 Arguments ext_spec.ok {_ _ _ _} _.
 
 Section binops.
-  Context {width : Z} {word : Word.Interface.word width}.
+  Context {width : Z} {BW: Bitwidth width} {word : Word.Interface.word width}.
   Definition interp_binop (bop : bopname) : word -> word -> word :=
     match bop with
     | bopname.add => word.add
@@ -255,6 +275,15 @@ Section binops.
       if word.ltu a b then word.of_Z 1 else word.of_Z 0
     | bopname.eq => fun a b =>
       if word.eqb a b then word.of_Z 1 else word.of_Z 0
+    end.
+  Definition leak_binop (bop : bopname) (x1 : word) (x2 : word) : trace :=
+    match bop with
+    | bopname.divu => cons (div x1 x2) nil
+    | bopname.remu => cons (div x1 x2) nil
+    | bopname.sru => cons (shift x2) nil
+    | bopname.slu => cons (shift x2) nil
+    | bopname.srs => cons (shift x2) nil
+    | _ => nil
     end.
 End binops.
 
@@ -305,7 +334,7 @@ Section semantics.
           Some (
               interp_binop op v1 v2,
               addMetricInstructions 2 (addMetricLoads 2 mc''),
-              tr'')
+              leak_binop op v1 v2 ++ tr'')
       | expr.ite c e1 e2 =>
           'Some (vc, mc', tr') <- eval_expr c mc tr | None;
           eval_expr
