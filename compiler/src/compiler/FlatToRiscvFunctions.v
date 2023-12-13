@@ -2023,13 +2023,62 @@ Section Proofs.
                | try fwd; try eauto 8 with map_hints ]
            end.
       Ltac doSomething fuel H10 :=
-        do 2 eexists; split; [instantiate (1 := []); reflexivity |
+        do 2 eexists; split; [instantiate (1 := []); reflexivity|
                                split; [instantiate (1 := [_]); reflexivity|
                                         exists (S O); intros; destruct fuel as [|fuel']; [blia|]];
                                simpl; econstructor; try reflexivity;
-                               rewrite app_nil_r in H10; assumption].
-      
+                               assumption].      
       all: try doSomething fuel H10.
+      5: {
+        do 2 eexists. split.
+        { instantiate (1 := [_]). reflexivity. } split.
+        { instantiate (1 := [_]). reflexivity. }
+        exists (S O). intros. destruct fuel as [|fuel']; [blia|].
+        simpl. simpl in H7. apply Semantics.predict_cons in H7. rewrite H7. simpl.
+        econstructor.
+        { reflexivity. }
+        { intros. reflexivity. }
+        { assumption. } }
+      6: {
+        do 2 eexists. split.
+        { instantiate (1 := [_]). reflexivity. } split.
+        { instantiate (1 := [_]). reflexivity. }
+        exists (S O). intros. destruct fuel as [|fuel']; [blia|].
+        simpl. simpl in H7. apply Semantics.predict_cons in H7. rewrite H7. simpl.
+        econstructor.
+        { reflexivity. }
+        { intros. reflexivity. }
+        { assumption. } }
+      10: {
+        do 2 eexists. split.
+        { instantiate (1 := [_]). reflexivity. } split.
+        { instantiate (1 := [_]). reflexivity. }
+        exists (S O). intros. destruct fuel as [|fuel']; [blia|].
+        simpl. simpl in H7. apply Semantics.predict_cons in H7. rewrite H7. simpl.
+        econstructor.
+        { reflexivity. }
+        { intros. reflexivity. }
+        { assumption. } }
+      11: {
+        do 2 eexists. split.
+        { instantiate (1 := [_]). reflexivity. } split.
+        { instantiate (1 := [_]). reflexivity. }
+        exists (S O). intros. destruct fuel as [|fuel']; [blia|].
+        simpl. simpl in H7. apply Semantics.predict_cons in H7. rewrite H7. simpl.
+        econstructor.
+        { reflexivity. }
+        { intros. reflexivity. }
+        { assumption. } }
+      12: {
+        do 2 eexists. split.
+        { instantiate (1 := [_]). reflexivity. } split.
+        { instantiate (1 := [_]). reflexivity. }
+        exists (S O). intros. destruct fuel as [|fuel']; [blia|].
+        simpl. simpl in H7. apply Semantics.predict_cons in H7. rewrite H7. simpl.
+        econstructor.
+        { reflexivity. }
+        { intros. reflexivity. }
+        { assumption. } }
       15: {
         do 2 eexists. split.
         { instantiate (1 := []). reflexivity. } split.
@@ -2037,7 +2086,7 @@ Section Proofs.
         exists (S O). intros. destruct fuel as [|fuel']; [blia|].
         eapply predictLE_with_prefix_works_eq.
         { simpl. reflexivity. }
-        { rewrite app_nil_r in H11. assumption. } }
+        { assumption. } }
       
       all: match goal with
            | y: operand, H: context[Syntax.bopname.eq] |- _ => idtac
@@ -2046,6 +2095,36 @@ Section Proofs.
            | |- _ => run1det; run1done
            end.
       all: try doSomething fuel H7.
+      6: {
+        do 2 eexists. split.
+        { instantiate (1 := [_]). reflexivity. } split.
+        { instantiate (1 := [_]). reflexivity. }
+        exists (S O). intros. destruct fuel as [|fuel']; [blia|].
+        simpl. simpl in H6. apply Semantics.predict_cons in H6. rewrite H6. simpl.
+        econstructor.
+        { reflexivity. }
+        { intros. reflexivity. }
+        { assumption. } }
+      6: {
+        do 2 eexists. split.
+        { instantiate (1 := [_]). reflexivity. } split.
+        { instantiate (1 := [_]). reflexivity. }
+        exists (S O). intros. destruct fuel as [|fuel']; [blia|].
+        simpl. simpl in H6. apply Semantics.predict_cons in H6. rewrite H6. simpl.
+        econstructor.
+        { reflexivity. }
+        { intros. reflexivity. }
+        { assumption. } }
+      6: {
+        do 2 eexists. split.
+        { instantiate (1 := [_]). reflexivity. } split.
+        { instantiate (1 := [_]). reflexivity. }
+        exists (S O). intros. destruct fuel as [|fuel']; [blia|].
+        simpl. simpl in H6. apply Semantics.predict_cons in H6. rewrite H6. simpl.
+        econstructor.
+        { reflexivity. }
+        { intros. reflexivity. }
+        { assumption. } }
       all:
         match goal with
         | y: operand, H: context[Syntax.bopname.eq] |- _ => idtac

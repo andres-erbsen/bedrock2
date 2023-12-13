@@ -22,6 +22,8 @@ Notation write := Semantics.write.
 Notation read := Semantics.read.
 Notation branch := Semantics.branch.
 Notation table := Semantics.table.
+Notation div := Semantics.div.
+Notation shift := Semantics.shift.
 
 Open Scope Z_scope.
 
@@ -196,6 +198,8 @@ Section Spilling.
   Notation qbranch := Semantics.qbranch.
   Notation qend := Semantics.qend.
   Notation qtable := Semantics.qtable.
+  Notation qdiv := Semantics.qdiv.
+  Notation qshift := Semantics.qshift.
 
   Notation predicts := Semantics.predicts.
   Notation predict_with_prefix := Semantics.predict_with_prefix.
@@ -253,15 +257,38 @@ Section Spilling.
               (f t_so_far)
               st_so_far
         | SOp x op y oz =>
-            predict_with_prefix
-              (leak_load_iarg_reg fpval y ++
-                 match oz with 
-                 | Var z => leak_load_iarg_reg fpval z
-                 | Const _ => []
-                 end
-                 ++ leak_save_ires_reg fpval x)
-              (f t_so_far)
-              st_so_far
+            let newt :=
+                match op with
+                | Syntax.bopname.divu
+                | Syntax.bopname.remu =>
+                    match next t_so_far with
+                    | Some (qdiv x1 x2) => Some [div x1 x2]
+                    | _ => None
+                    end
+                | Syntax.bopname.slu
+                | Syntax.bopname.sru
+                | Syntax.bopname.srs =>
+                    match next t_so_far with
+                    | Some (qshift x2) => Some [shift x2]
+                    | _ => None
+                    end
+                | _ => Some []
+                end
+            in
+            match newt with
+            | Some newt =>
+                predict_with_prefix
+                  (leak_load_iarg_reg fpval y ++
+                     match oz with 
+                     | Var z => leak_load_iarg_reg fpval z
+                     | Const _ => []
+                     end
+                     ++ newt
+                     ++ leak_save_ires_reg fpval x)
+                  (f (t_so_far ++ newt))
+                  st_so_far
+            | None => None
+            end
         | SSet x y =>
             predict_with_prefix
               (leak_load_iarg_reg fpval y ++ leak_save_ires_reg fpval x)
@@ -2096,12 +2123,15 @@ Section Spilling.
         eapply save_ires_reg_correct''; try (eassumption || blia).
         (*begin ct stuff for op*)
         intros. do 7 eexists. split; [eassumption|]. split; [eassumption|]. split.
-        { instantiate (1 := nil). reflexivity. } split.
+        { reflexivity. } split.
         { subst k2'1 k2'0 k2'. repeat rewrite app_assoc. reflexivity. }
         intros. exists (S O). intros.
         repeat (rewrite rev_app_distr || rewrite rev_involutive || cbn [rev List.app]).
-        destruct fuel' as [|fuel']; [blia|]. simpl. 
-        apply predict_with_prefix_works. rewrite app_nil_r in H5. assumption.
+        destruct fuel' as [|fuel']; [blia|]. simpl.
+        destruct op.
+        all: try (apply predict_with_prefix_works; assumption).
+        all: try (apply Semantics.predict_cons in H4; rewrite H4; simpl;
+          apply predict_with_prefix_works; assumption).
       (*end ct stuff for op*)
       }
       {
@@ -2111,12 +2141,15 @@ Section Spilling.
         eapply save_ires_reg_correct''; try (eassumption || blia).
         (*begin ct stuff for op*)
         intros. do 7 eexists. split; [eassumption|]. split; [eassumption|]. split.
-        { instantiate (1 := nil). reflexivity. } split.
+        { reflexivity. } split.
         { subst k2'0 k2'. repeat rewrite app_assoc. reflexivity. }
         intros. exists (S O). intros.
         repeat (rewrite rev_app_distr || rewrite rev_involutive || cbn [rev List.app]).
-        destruct fuel' as [|fuel']; [blia|]. simpl. 
-        apply predict_with_prefix_works. rewrite app_nil_r in H4. assumption.
+        destruct fuel' as [|fuel']; [blia|]. simpl.
+        destruct op.
+        all: try (apply predict_with_prefix_works; assumption).
+        all: try (apply Semantics.predict_cons in H3; rewrite H3; simpl;
+          apply predict_with_prefix_works; assumption).
       (*end ct stuff for op*)
       }
     - (* exec.set *)

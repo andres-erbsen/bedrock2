@@ -636,31 +636,31 @@ Section FlatToRiscv1.
                 (f t_so_far)
                 rt_so_far
           | SOp _ op _ operand2 =>
-              let operands :=
+              let newt_operands :=
                 match op with
                 | Syntax.bopname.divu
                 | Syntax.bopname.remu =>
                     match next t_so_far with
-                    | Some (qdiv x1 x2) => Some (x1, x2)
+                    | Some (qdiv x1 x2) => Some ([div x1 x2], x1, x2)
                     | _ => None
                     end
                 | Syntax.bopname.slu
                 | Syntax.bopname.sru
                 | Syntax.bopname.srs =>
                     match next t_so_far with
-                    | Some (qshift x2) => Some (word.of_Z 0, x2)
+                    | Some (qshift x2) => Some ([shift x2], word.of_Z 0, x2)
                     | _ => None
                     end
-                | _ => Some (word.of_Z 0, word.of_Z 0)
+                | _ => Some ([], word.of_Z 0, word.of_Z 0)
                 end
               in
-              match operands with
-              | Some (x1, x2) =>
+              match newt_operands with
+              | Some (newt, x1, x2) =>
                   match leak_op op operand2 x1 x2 with
                   | Some l =>
                       predictLE_with_prefix
                         l
-                        (f t_so_far)
+                        (f (t_so_far ++ newt))
                         rt_so_far
                   | None => None
                   end

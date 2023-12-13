@@ -373,7 +373,7 @@ Module exec.
     | op: forall k t m l mc x op y y' z z' post,
         map.get l y = Some y' ->
         lookup_op_locals l z = Some z' ->
-        post k t m (map.put l x (interp_binop op y' z'))
+        post (leak_binop op y' z' ++ k) t m (map.put l x (interp_binop op y' z'))
              (addMetricLoads 2
              (addMetricInstructions 2 mc)) ->
         exec (SOp x op y z) k t m l mc post
