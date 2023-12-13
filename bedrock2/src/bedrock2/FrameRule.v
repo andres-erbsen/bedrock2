@@ -138,12 +138,12 @@ Section semantics.
       1: reflexivity. all: assumption.
   Qed.
 
-  Lemma frame_exec: forall e c t mSmall l mc P,
-      exec e c t mSmall l mc P ->
+  Lemma frame_exec: forall e c k t mSmall l mc P,
+      exec e c k t mSmall l mc P ->
       forall mBig mAdd,
         mmap.split mBig mSmall mAdd ->
-        exec e c t mBig l mc (fun t' mBig' l' mc' =>
-          exists mSmall', mmap.split mBig' mSmall' mAdd /\ P t' mSmall' l' mc').
+        exec e c k t mBig l mc (fun k' t' mBig' l' mc' =>
+          exists mSmall', mmap.split mBig' mSmall' mAdd /\ P k' t' mSmall' l' mc').
   Proof.
     induction 1; intros;
       try match goal with
