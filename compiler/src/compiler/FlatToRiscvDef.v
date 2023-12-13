@@ -144,21 +144,21 @@ Section FlatToRiscv1.
   Definition leak_Andi := ILeakage Andi_leakage.
   Definition leak_Ori := ILeakage Ori_leakage.
   Definition leak_Xori := ILeakage Xori_leakage.
-  Definition leak_Srli := ILeakage Srli_leakage.
-  Definition leak_Slli := ILeakage Slli_leakage.
-  Definition leak_Srai := ILeakage Srai_leakage.
+  Definition leak_Srli (imm : Z) := ILeakage (Srli_leakage imm).
+  Definition leak_Slli (imm : Z) := ILeakage (Slli_leakage imm).
+  Definition leak_Srai (imm : Z) := ILeakage (Srai_leakage imm).
   Definition leak_Slti := ILeakage Slti_leakage.
   Definition leak_Sltiu := ILeakage Sltiu_leakage.
 
-  Definition leak_op_imm(op: Syntax.bopname) : option LeakageEvent :=
+  Definition leak_op_imm(op: Syntax.bopname) (c2 : Z) : option LeakageEvent :=
     match op with
     | Syntax.bopname.add => Some leak_Addi
     | Syntax.bopname.and => Some leak_Andi
     | Syntax.bopname.or  => Some leak_Ori
     | Syntax.bopname.xor => Some leak_Xori
-    | Syntax.bopname.sru => Some leak_Srli
-    | Syntax.bopname.slu => Some leak_Slli
-    | Syntax.bopname.srs => Some leak_Srai
+    | Syntax.bopname.sru => Some (leak_Srli c2)
+    | Syntax.bopname.slu => Some (leak_Slli c2)
+    | Syntax.bopname.srs => Some (leak_Srai c2)
     | Syntax.bopname.lts => Some leak_Slti
     | Syntax.bopname.ltu => Some leak_Sltiu
     | _ => None (* ?? why are there invalid instructions again - doesn't compilation just fail? *)
@@ -187,32 +187,32 @@ Section FlatToRiscv1.
   Definition leak_Sub := ILeakage Sub_leakage.
   Definition leak_Mul := MLeakage Mul_leakage.
   Definition leak_Mulhu := MLeakage Mulhu_leakage.
-  Definition leak_Divu := MLeakage Divu_leakage.
-  Definition leak_Remu := MLeakage Remu_leakage.
+  Definition leak_Divu (num den : word) := MLeakage (Divu_leakage num den).
+  Definition leak_Remu (num den : word) := MLeakage (Remu_leakage num den).
   Definition leak_And := ILeakage And_leakage.
   Definition leak_Or := ILeakage Or_leakage.
   Definition leak_Xor := ILeakage Xor_leakage.
-  Definition leak_Srl := ILeakage Srl_leakage.
-  Definition leak_Sll := ILeakage Sll_leakage.
-  Definition leak_Sra := ILeakage Sra_leakage.
+  Definition leak_Srl (shamt : word) := ILeakage (Srl_leakage shamt).
+  Definition leak_Sll (shamt : word) := ILeakage (Sll_leakage shamt).
+  Definition leak_Sra (shamt : word) := ILeakage (Sra_leakage shamt).
   Definition leak_Slt := ILeakage Slt_leakage.
   Definition leak_Sltu := ILeakage Sltu_leakage.
   Definition leak_Seqz := ILeakage Sltiu_leakage.
   
-  Definition leak_op_register (op: Syntax.bopname) : list LeakageEvent :=
+  Definition leak_op_register (op: Syntax.bopname) (x1 x2 : word) : list LeakageEvent :=
     match op with
     | Syntax.bopname.add => [ leak_Add ]
     | Syntax.bopname.sub => [ leak_Sub ]
     | Syntax.bopname.mul => [ leak_Mul ]
     | Syntax.bopname.mulhuu => [ leak_Mulhu ]
-    | Syntax.bopname.divu => [ leak_Divu ] 
-    | Syntax.bopname.remu => [ leak_Remu ]
+    | Syntax.bopname.divu => [ leak_Divu x1 x2 ] 
+    | Syntax.bopname.remu => [ leak_Remu x1 x2 ]
     | Syntax.bopname.and => [ leak_And ]
     | Syntax.bopname.or  => [ leak_Or ]
     | Syntax.bopname.xor => [ leak_Xor ]
-    | Syntax.bopname.sru => [ leak_Srl ]
-    | Syntax.bopname.slu => [ leak_Sll ]
-    | Syntax.bopname.srs => [ leak_Sra ]
+    | Syntax.bopname.sru => [ leak_Srl x2 ]
+    | Syntax.bopname.slu => [ leak_Sll x2 ]
+    | Syntax.bopname.srs => [ leak_Sra x2 ]
     | Syntax.bopname.lts => [ leak_Slt ]
     | Syntax.bopname.ltu => [ leak_Sltu ]
     | Syntax.bopname.eq  => [ leak_Sub ; leak_Seqz ]
@@ -222,12 +222,13 @@ Section FlatToRiscv1.
     match  op2 with
     | Var v2 => compile_op_register rd op op1 v2
     | Const c2 => compile_op_imm rd op op1 c2
-    end.
+    end. Check Const.
 
-  Definition leak_op (op : Syntax.bopname) (op2: @operand Z) : option (list LeakageEvent) :=
+  Definition leak_op (op : Syntax.bopname) (op2: @operand Z) (x1 x2 : word) :
+    option (list LeakageEvent) :=
     match op2 with
-    | Var _ => Some (leak_op_register op)
-    | Const _ => option_map (fun x => [x]) (leak_op_imm op)
+    | Var _ => Some (leak_op_register op x1 x2)
+    | Const c2 => option_map (fun x => [x]) (leak_op_imm op c2)
     end.
 
   Definition compile_lit_12bit(rd: Z)(v: Z): list Instruction :=
@@ -279,11 +280,11 @@ Section FlatToRiscv1.
 
   Definition leak_lit_64bit : list LeakageEvent :=
     leak_lit_32bit ++
-    [ leak_Slli ;
+    [ leak_Slli 10 ;
       leak_Xori ;
-      leak_Slli ;
+      leak_Slli 11 ;
       leak_Xori ;
-      leak_Slli ;
+      leak_Slli 11 ;
       leak_Xori ].
 
   Definition compile_lit(rd: Z)(v: Z): list Instruction :=
@@ -347,7 +348,7 @@ Section FlatToRiscv1.
     | nil => nil
     | r :: regs => compile_store access_size.word sp r offset
                    :: (save_regs regs (offset + bytes_per_word))
-    end. Print leak_store. Print compile_store.
+    end.
 
   Fixpoint leak_save_regs
     (sp_val: word)(regs: list Z)(offset: Z): list LeakageEvent :=
@@ -506,11 +507,10 @@ Section FlatToRiscv1.
 
     Section WithOtherEnv.
     Context (program_base : word).
-    Variable e_env: env. Print LeakageEvent.
+    Variable e_env: env.
 
     Definition leak_Jal := ILeakage Jal_leakage.
-    Definition leak_Jalr := ILeakage Jalr_leakage. Check @map.get.
-    Print LeakageEvent.
+    Definition leak_Jalr := ILeakage Jalr_leakage.
 
     Inductive qLeakageEvent :=
     | qLE (le : LeakageEvent)
@@ -524,12 +524,14 @@ Section FlatToRiscv1.
     Notation event := Semantics.event.
   
     Notation qevent := Semantics.qevent. Search qevent.
-    Notation q := Semantics.q. Print SInlinetable.
+    Notation q := Semantics.q.
     Notation qread := Semantics.qread.
     Notation qwrite := Semantics.qwrite.
     Notation qtable := Semantics.qtable.
     Notation qsalloc := Semantics.qsalloc.
     Notation qbranch := Semantics.qbranch.
+    Notation qdiv := Semantics.qdiv.
+    Notation qshift := Semantics.qshift.
     Notation qend := Semantics.qend.
 
     Notation salloc := Semantics.salloc.
@@ -537,13 +539,15 @@ Section FlatToRiscv1.
     Notation write := Semantics.write.
     Notation read := Semantics.read.
     Notation branch := Semantics.branch.
+    Notation div := Semantics.div.
+    Notation shift := Semantics.shift.
 
     Fixpoint predictLE_with_prefix (prefix : list LeakageEvent) (predict_rest : list LeakageEvent -> option qLeakageEvent) (t : list LeakageEvent) : option qLeakageEvent :=
     match prefix, t with
     | _ :: prefix', _ :: t' => predictLE_with_prefix prefix' predict_rest t'
     | e :: start', nil => Some (quotLE e)
     | nil, _ => predict_rest t
-    end. Print Semantics.qevent.
+    end.
 
     Definition rnext_fun' rnext_stmt (fuel : nat) (next : trace -> option qevent) (t_so_far : trace)
       (mypos : Z)
@@ -579,6 +583,8 @@ Section FlatToRiscv1.
                               (f t_so_far')
                               rt_so_far''))
                     rt_so_far.
+
+    Check (match 5%nat with | S _ | O => 5%nat end).
 
     Fixpoint rnext_stmt (fuel : nat) (next : trace -> option qevent) (t_so_far : trace)
       (myPos : Z)
@@ -630,12 +636,34 @@ Section FlatToRiscv1.
                 (f t_so_far)
                 rt_so_far
           | SOp _ op _ operand2 =>
-              match leak_op op operand2 with
-              | Some l =>
-                  predictLE_with_prefix
-                    l
-                    (f t_so_far)
-                    rt_so_far
+              let operands :=
+                match op with
+                | Syntax.bopname.divu
+                | Syntax.bopname.remu =>
+                    match next t_so_far with
+                    | Some (qdiv x1 x2) => Some (x1, x2)
+                    | _ => None
+                    end
+                | Syntax.bopname.slu
+                | Syntax.bopname.sru
+                | Syntax.bopname.srs =>
+                    match next t_so_far with
+                    | Some (qshift x2) => Some (word.of_Z 0, x2)
+                    | _ => None
+                    end
+                | _ => Some (word.of_Z 0, word.of_Z 0)
+                end
+              in
+              match operands with
+              | Some (x1, x2) =>
+                  match leak_op op operand2 x1 x2 with
+                  | Some l =>
+                      predictLE_with_prefix
+                        l
+                        (f t_so_far)
+                        rt_so_far
+                  | None => None
+                  end
               | None => None
               end
           | SSet _ _ =>
@@ -706,7 +734,6 @@ Section FlatToRiscv1.
           end
       end.
 
-    Print rnext_fun'.
     Definition rnext_fun := rnext_fun' rnext_stmt.
   End WithOtherEnv.
   End WithEnv.
