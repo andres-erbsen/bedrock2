@@ -72,9 +72,9 @@ Section WithParameters.
   Context {word: word.word 32} {mem: map.map word Byte.byte}.
   Context {word_ok: word.ok word} {mem_ok: map.ok mem}.
 
-  Instance spec_of_stacktrivial : spec_of "stacktrivial" := fun functions => forall m t,
+  Instance spec_of_stacktrivial : spec_of "stacktrivial" := fun functions => forall m t k,
       WeakestPrecondition.call functions
-        "stacktrivial" t m [] (fun t' m' rets => rets = [] /\ m'=m /\ (filterio t')=(filterio t)).
+        "stacktrivial" k t m [] (fun k' t' m' rets => rets = [] /\ m'=m /\ t'=t).
 
   Lemma stacktrivial_ok : program_logic_goal_for_function! stacktrivial.
   Proof.
@@ -135,9 +135,9 @@ Section WithParameters.
     - repeat straightline.
   Qed.
   
-  Instance spec_of_stacknondet : spec_of "stacknondet" := fun functions => forall m t,
+  Instance spec_of_stacknondet : spec_of "stacknondet" := fun functions => forall m t k,
       WeakestPrecondition.call functions
-        "stacknondet" t m [] (fun t' m' rets => exists a b, rets = [a;b] /\ a = b /\ m'=m/\(filterio t')=(filterio t)).
+        "stacknondet" k t m [] (fun k' t' m' rets => exists a b, rets = [a;b] /\ a = b /\ m'=m/\t'=t).
 
   Add Ring wring : (Properties.word.ring_theory (word := word))
       (preprocess [autorewrite with rew_word_morphism],
@@ -191,9 +191,9 @@ Section WithParameters.
   Definition stacknondet_c := String.list_byte_of_string (c_module (("main",stacknondet_main)::("stacknondet",stacknondet)::nil)).
   (* Goal True. print_list_byte stacknondet_c. Abort. *)
 
-  Instance spec_of_stackdisj : spec_of "stackdisj" := fun functions => forall m t,
+  Instance spec_of_stackdisj : spec_of "stackdisj" := fun functions => forall m t k,
       WeakestPrecondition.call functions
-        "stackdisj" t m [] (fun t' m' rets => exists a b, rets = [a;b] /\ a <> b /\ m'=m/\(filterio t')=(filterio t)).
+        "stackdisj" k t m [] (fun k' t' m' rets => exists a b, rets = [a;b] /\ a <> b /\ m'=m/\t'=t).
 
   Lemma stackdisj_ok : program_logic_goal_for_function! stackdisj.
   Proof.

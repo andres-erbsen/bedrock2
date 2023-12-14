@@ -266,7 +266,7 @@ Check WeakestPrecondition.call. Check WeakestPrecondition.cmd.
 
 Ltac straightline :=
   match goal with
-  | |- Basics.impl _ _ => cbv [Basics.impl]
+  | |- Basics.impl _ _ => cbv [Basics.impl] (*why do i need this now?  idk.  without it swap breaks.*)
   | _ => idtac "1"; straightline_cleanup
   (*| |- program_logic_goal_for ?f _ => idtac "2";
     enter f; intros;
