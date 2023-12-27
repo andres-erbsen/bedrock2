@@ -225,9 +225,13 @@ Print compiler_correct_wp.
 Print ExtSpec.
 Context {mem : map.map Words32Naive.word byte}.
 Context {mem_ok : map.ok mem}.
-Context {locals : map.map Z Words32Naive.word}.
-Context {locals_ok : map.ok locals}.
-Context {env : map.map string (list Z * list Z * FlatImp.stmt Z)}.
+Context {localsL : map.map Z Words32Naive.word}.
+Context {localsL_ok : map.ok localsL}.
+Context {localsH : map.map string Words32Naive.word}.
+Context {localsH_ok : map.ok localsH}.
+Context {envL : map.map string (list Z * list Z * FlatImp.stmt Z)}.
+Context {envH : map.map string (list string * list string * cmd)}.
+Context {envH_ok : map.ok envH}.
 Context {M : Type -> Type} {MM : Monad M}.
 Context {RVM: RiscvProgramWithLeakage}.
 Context {PRParams: PrimitivesParams M MetricRiscvMachine}.
@@ -255,11 +259,14 @@ Proof.
   apply NaiveRiscvWordProperties.naive_word_riscv_ok.
 Qed.
 
+Lemma word_ok' : word.ok Words32Naive.word.
+Proof.
+  Search (word.ok _). cbv [Words32Naive.word]. exact Naive.word32_ok. Qed.
 
 Lemma compile_ext_call_works :
   (forall (resvars : list Z) (extcall : string) (argvars : list Z),
         @FlatToRiscvCommon.compiles_FlatToRiscv_correctly RV32I 32 Bitwidth32.BW32
-          Words32Naive.word locals (SortedListString.map Z) compile_ext_call leak_ext_call mem
+          Words32Naive.word localsL (SortedListString.map Z) compile_ext_call leak_ext_call mem
           (SortedListString.map (list Z * list Z * FlatImp.stmt Z)) M MM RVM PRParams ext_spec
           RV32I_bitwidth compile_ext_call (@FlatImp.SInteract Z resvars extcall argvars)).
 Proof.
@@ -294,10 +301,15 @@ Definition fname := "swap".
 Definition f_rel_pos := 0.
 Definition post : list LogItem -> mem -> list Words32Naive.word -> Prop := fun _ _ _ => True.
 Print ct_spec_of_swap.
-Check (@compiler_correct_wp _ _ Words32Naive.word mem _ ext_spec _ _ _ ext_spec_ok _ _ _ _ _ word_ok _ _ RV32I _ compile_ext_call leak_ext_call compile_ext_call_works compile_ext_call_length fs instrs finfo req_stack_size fname _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _).
+Check (@compiler_correct_wp _ _ Words32Naive.word mem _ ext_spec _ _ _ ext_spec_ok _ _ _ _ _ word_ok _ _ RV32I _ compile_ext_call leak_ext_call compile_ext_call_works compile_ext_call_length fs instrs finfo req_stack_size fname _ _ _ _).
 Check compiler_correct_wp.
 
-Lemma swap_ct : forall R m a_addr b_addr a b stack_lo stack_hi ret_addr p_funcs
+Lemma swap_ct :
+  forall a_addr b_addr,
+  exists
+         next : Words32Naive.word * Z * Words32Naive.word ->
+                nat -> list LeakageEvent -> option FlatToRiscvDef.qLeakageEvent,
+  forall R m a b stack_lo ret_addr p_funcs stack_hi
                        Rdata Rexec (initial : RiscvMachine),
     Separation.sep (Separation.sep (Scalars.scalar a_addr a) (Scalars.scalar b_addr b)) R m ->
     req_stack_size <= word.unsigned (word.sub stack_hi stack_lo) / SeparationLogic.bytes_per_word ->
@@ -307,46 +319,58 @@ Lemma swap_ct : forall R m a_addr b_addr a b stack_lo stack_hi ret_addr p_funcs
     word.unsigned ret_addr mod 4 = 0 ->
     LowerPipeline.arg_regs_contain (getRegs initial) [a_addr; b_addr] ->
     LowerPipeline.machine_ok p_funcs stack_lo stack_hi instrs m Rdata Rexec initial ->
-    exists
-         next : Words32Naive.word * Z * Words32Naive.word ->
-                nat -> list LeakageEvent -> option FlatToRiscvDef.qLeakageEvent,
-         FlatToRiscvCommon.runsTo initial
-           (fun final : RiscvMachine =>
-            exists (mH' : mem) (retvals : list Words32Naive.word),
-              LowerPipeline.arg_regs_contain (getRegs final) retvals /\
-              post (getLog final) mH' retvals /\
-              map.only_differ (getRegs initial) reg_class.caller_saved (getRegs final) /\
-              getPc final = ret_addr /\
-              LowerPipeline.machine_ok p_funcs stack_lo stack_hi instrs mH' 
-                Rdata Rexec final /\
-              (exists (tL : list LeakageEvent) (F : nat),
+    FlatToRiscvCommon.runsTo initial
+      (fun final : RiscvMachine =>
+         exists (mH' : mem) (retvals : list Words32Naive.word),
+           LowerPipeline.arg_regs_contain (getRegs final) retvals /\
+             post (getLog final) mH' retvals /\
+             map.only_differ (getRegs initial) reg_class.caller_saved (getRegs final) /\
+             getPc final = ret_addr /\
+             LowerPipeline.machine_ok p_funcs stack_lo stack_hi instrs mH' 
+               Rdata Rexec final /\
+             (exists (tL : list LeakageEvent) (F : nat),
                  getTrace final = (tL ++ getTrace initial)%list /\
-                 (forall fuel : nat,
-                  (F <= fuel)%nat ->
-                  FlatToRiscvCommon.predictsLE (next (p_funcs, f_rel_pos, stack_hi) fuel)
-                    (rev tL)))).
-Proof.
-  intros.
-  assert (spec := swap_ok). cbv [ProgramLogic.program_logic_goal_for] in spec.
-  specialize (spec nil). cbv [ct_spec_of_swap] in spec. destruct spec as [f spec].
-  
-  eapply (@compiler_correct_wp _ _ Words32Naive.word mem _ ext_spec _ _ _ ext_spec_ok _ _ _ _ _ word_ok _ _ RV32I _ compile_ext_call leak_ext_call compile_ext_call_works compile_ext_call_length fs instrs finfo req_stack_size fname).
+                   (forall fuel : nat,
+                       (F <= fuel)%nat ->
+                       FlatToRiscvCommon.predictsLE (next (p_funcs, f_rel_pos, stack_hi) fuel)
+                         (rev tL)))).
+Proof. Check @swap_ok. Unshelve.
+       assert (spec := @swap_ok Words32Naive.word mem word_ok' mem_ok).
+       cbv [ProgramLogic.program_logic_goal_for] in spec.
+       specialize (spec nil). cbv [ct_spec_of_swap] in spec. destruct spec as [f spec].
+  intros. Check @compiler_correct_wp. Unshelve.
+  edestruct (@compiler_correct_wp _ _ Words32Naive.word mem _ ext_spec _ _ _ ext_spec_ok _ _ _ _ _ word_ok _ _ RV32I _ compile_ext_call leak_ext_call compile_ext_call_works compile_ext_call_length fs instrs finfo req_stack_size fname).
   { reflexivity. }
-  { simpl. repeat constructor. intros H'. destruct H'. }
   { reflexivity. }
-  2: { Search (map.get (map.of_list _)). eapply map.get_of_list_In_NoDup.
+  exists x. intros.
+  eapply H.
+  { simpl. repeat constructor. tauto. }
+  2: { eapply map.get_of_list_In_NoDup.
        { vm_compute. repeat constructor; eauto. }
        { vm_compute. left. reflexivity. } }
-  Search FlatToRiscvCommon.runsTo. 2,3,4,5,6,7,9: eassumption.
+  2,3,4,5,6,7,9: eassumption.
   2: reflexivity. Print ct_spec_of_swap. Print ct_spec_of_swap. Search ct_spec_of_swap.
   Check swap_ok. Print ProgramLogic.program_logic_goal_for.
-  specialize (spec nil (getLog initial) m a_addr b_addr a b R H). cbv [fs fname]. Search WeakestPrecondition.call. eapply WeakestPreconditionProperties.Proper_call. 2: eapply spec.
+  specialize (spec nil (getLog initial) m a_addr b_addr a b R H0). cbv [fs fname].
+  Check @WeakestPreconditionProperties.Proper_call. Check @WeakestPrecondition.call.
+  eapply WeakestPreconditionProperties.Proper_call.
+  2: eapply spec.
   cbv [Morphisms.pointwise_relation Basics.impl]. intros.
   split.
   { cbv [post]. apply I. }
-  { destruct H7 as [H7 [H8 H9] ]. subst. destruct H7 as [k'' [H7 H10] ]. exists k''.
-    apply predictor_works in H7. subst. instantiate (1 := fun _ _ => (predictor (WeakestPrecondition.appl a_addr (WeakestPrecondition.appl b_addr f)))). exists O. split; [reflexivity|].
-    intros. assumption.
-    Unshelve.
-    { apply ext_spec_ok. } }
+  destruct H8 as [H8 [H9 H10] ]. subst. destruct H8 as [k'' [H8 H11] ]. exists k''.
+  apply predictor_works in H8. subst.
+  exists O. split; [reflexivity|].
+  intros.
+  instantiate (1 := (fun _ _ => (predictor (WeakestPrecondition.appl a_addr (WeakestPrecondition.appl b_addr f))))).
+  simpl. assumption.
+  Unshelve.
+       - exact envH.
+       - exact word_ok'.
+       - exact mem_ok.
+       - apply SortedListString.ok.
+       - exact envH_ok.
+       - exact ext_spec_ok.
 Qed.
+
+Print Assumptions swap_ct.
