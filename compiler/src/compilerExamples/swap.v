@@ -374,3 +374,43 @@ Proof. Check @swap_ok. Unshelve.
 Qed.
 
 Print Assumptions swap_ct.
+
+(* Not sure I can actually prove this. *)
+Lemma a_trace_exists :
+  forall initial next P,
+  FlatToRiscvCommon.runsTo initial
+    (fun final : RiscvMachine =>
+       P final /\
+         (exists (tL : list LeakageEvent) (F : nat),
+             getTrace final = (tL ++ getTrace initial)%list /\
+               (forall fuel : nat,
+                   (F <= fuel)%nat ->
+                   FlatToRiscvCommon.predictsLE (next fuel)
+                     (rev tL)))) ->
+  exists k',
+    FlatToRiscvCommon.runsTo initial
+      (fun final : RiscvMachine =>
+         P final /\
+           getTrace final = k').
+Proof. Abort.
+
+(* This should be easy to prove, though. *)
+Lemma a_trace_sorta_exists :
+  forall initial next P,
+  FlatToRiscvCommon.runsTo initial
+    (fun final : RiscvMachine =>
+       P final /\
+         (exists (tL : list LeakageEvent) (F : nat),
+             getTrace final = (tL ++ getTrace initial)%list /\
+               (forall fuel : nat,
+                   (F <= fuel)%nat ->
+                   FlatToRiscvCommon.predictsLE (next fuel)
+                     (rev tL)))) ->
+  exists finalTrace,
+    FlatToRiscvCommon.runsTo initial
+      (fun final : RiscvMachine =>
+         P final /\ exists F,
+           forall fuel : nat,
+             (F <= fuel)%nat ->
+             getTrace final = finalTrace F).
+Proof. Abort.
