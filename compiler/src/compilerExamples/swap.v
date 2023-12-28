@@ -29,6 +29,8 @@ Require Import bedrock2Examples.stackalloc.
 Require Import compilerExamples.SpillingTests.
 Require compiler.NaiveRiscvWordProperties.
 
+Require Import compiler.util.Common.
+
 
 Open Scope Z_scope.
 Open Scope string_scope.
@@ -394,6 +396,102 @@ Lemma a_trace_exists :
            getTrace final = k').
 Proof. Abort.
 
+Print FlatToRiscvDef.qLeakageEvent.
+Fixpoint trace_of_predictor so_far next fuel :=
+  match fuel with
+  | O => nil
+  | S fuel' =>
+      match next fuel so_far with
+      | Some (FlatToRiscvDef.qLE e) => e :: trace_of_predictor (app so_far (cons e nil)) next fuel'
+      | Some (FlatToRiscvDef.qendLE) => []
+      | None => []
+      end
+  end.
+
+Notation predictsLE := FlatToRiscvCommon.predictsLE.
+Print FlatToRiscvDef.qLeakageEvent.
+Lemma predictsLE_end f l :
+      predictsLE f l ->
+      f l = Some FlatToRiscvDef.qendLE.
+Proof.
+  intros H. induction H.
+  - rewrite H0. assumption.
+  - assumption.
+Qed.
+
+Lemma trace_of_predictor_works' so_far next F k :
+  (forall fuel,
+    (F <= fuel)%nat ->
+    predictsLE (next fuel) (so_far ++ k)) ->
+  exists F',
+    (forall fuel,
+        (F' <= fuel)%nat ->
+        k%list = trace_of_predictor so_far next fuel).
+Proof.
+  intros H. generalize dependent so_far. subst. induction k.
+  - intros. exists (S F). intros. destruct fuel as [|fuel']; [blia|]. simpl.
+    specialize (H (S fuel') ltac:(blia)). rewrite List.app_nil_r in H.
+    apply predictsLE_end in H. rewrite H. reflexivity.
+  - intros.
+    specialize (IHk (so_far ++ [a])%list). rewrite <- app_assoc in IHk.
+    specialize (IHk H). destruct IHk as [F' IHk]. 
+    exists (S (F + F')). intros. destruct fuel as [|fuel']; [blia|].
+    specialize (H (S fuel') ltac:(blia)). Search predictsLE.
+    apply FlatToRiscvFunctions.predictLE_cons in H. simpl. rewrite H. simpl. f_equal.
+    apply IHk. blia.
+Qed.
+
+Lemma trace_of_predictor_works next F k :
+  (forall fuel,
+    (F <= fuel)%nat ->
+    predictsLE (next fuel) k) ->
+  exists F',
+    (forall fuel,
+        (F' <= fuel)%nat ->
+        k = trace_of_predictor [] next fuel).
+Proof.
+  intros. replace k with ([] ++ k)%list by reflexivity. eapply trace_of_predictor_works'.
+  apply H.
+Qed.
+
+Require Import riscv.Utility.MonadT.
+
+Lemma predictsLE_ext p1 p2 l :
+  (forall x, p1 x = p2 x) ->
+  predictsLE p1 l ->
+  predictsLE p2 l.
+Proof.
+  intros H H0. induction H0.
+  - econstructor.
+    + rewrite <- H. assumption.
+    + intros. rewrite <- H. auto.
+    + assumption.
+  - constructor. rewrite <- H. assumption.
+Qed.
+
+Lemma predictLE_unique p l1 l2 :
+  predictsLE p l1 ->
+  predictsLE p l2 ->
+  l1 = l2.
+Proof.
+  intros. generalize dependent l2. generalize dependent p. induction l1.
+  - intros. destruct l2; [reflexivity|]. remember [] as thing. destruct H; try congruence.
+    destruct H0; try congruence. rewrite H0 in H. injection H as H.
+    cbv [FlatToRiscvDef.quotLE] in H. congruence.
+  - intros. destruct l2 eqn:E.
+    + clear IHl1. remember [] as thing. destruct H; try congruence. destruct H0; try congruence.
+      rewrite H0 in H. injection H as H.
+      cbv [FlatToRiscvDef.quotLE] in H. congruence.
+    + remember (a :: l1) as l1'. destruct H.
+      -- destruct H0.
+         ++ rewrite H0 in H. injection H as H. subst. f_equal. injection Heql1'. intros. subst.
+            eapply IHl1.
+            --- exact H2.
+            --- eapply predictsLE_ext. 2: eassumption. intros. rewrite <- H3, H1. reflexivity.
+         ++ rewrite H0 in H. injection H as H. cbv [FlatToRiscvDef.quotLE] in H. congruence.
+      -- destruct H0; congruence.
+Qed.
+
 (* This should be easy to prove, though. *)
 Lemma a_trace_sorta_exists :
   forall initial next P,
@@ -412,5 +510,13 @@ Lemma a_trace_sorta_exists :
          P final /\ exists F,
            forall fuel : nat,
              (F <= fuel)%nat ->
-             getTrace final = finalTrace F).
-Proof. Abort.
+             getTrace final = finalTrace fuel).
+Proof.
+  intros. exists (fun fuel => (rev (trace_of_predictor nil next fuel) ++ getTrace initial)%list).
+  cbv [FlatToRiscvCommon.runsTo]. eapply runsToNonDet.runsTo_weaken.
+  1: eapply H. simpl. intros. destruct H0 as [H1 [tL [F [H2 H3] ] ] ].
+  split; [assumption|]. assert (H3' := H3).
+  apply trace_of_predictor_works in H3. destruct H3 as [F' H3].
+  intros. simpl in H. exists F'. intros. rewrite H2. f_equal.
+  rewrite <- (rev_involutive tL). f_equal. apply H3. apply H0.
+Qed.
