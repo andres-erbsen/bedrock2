@@ -520,3 +520,31 @@ Proof.
   intros. simpl in H. exists F'. intros. rewrite H2. f_equal.
   rewrite <- (rev_involutive tL). f_equal. apply H3. apply H0.
 Qed.
+
+Require Import riscv.Platform.MetricSane.
+
+Lemma last_step :
+  forall
+    (initial : RiscvMachine)
+    (P : RiscvMachine -> Prop)
+    (finalTrace : nat -> list LeakageEvent),
+
+    valid_machine initial ->
+    FlatToRiscvCommon.runsTo initial
+      (fun final : RiscvMachine =>
+         P final /\
+           exists F,
+           forall fuel : nat,
+             (F <= fuel)%nat ->
+             getTrace final = finalTrace fuel) ->
+    
+    exists (n : nat),
+      FlatToRiscvCommon.runsTo initial
+      (fun final : RiscvMachine =>
+         P final /\
+           getTrace final = finalTrace n).
+Proof.
+  intros. cbv [FlatToRiscvCommon.runsTo] in H0.
+  assert (H1 := run1_sane). cbv [mcomp_sane] in H1. (*need runsTo_sane ? *)
+  specialize (H1 _ _ _ H).
+Qed.
