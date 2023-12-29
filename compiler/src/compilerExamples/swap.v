@@ -289,6 +289,7 @@ Definition instrs :=
   | Success (instrs, _, _) => instrs
   | _ => nil
   end.
+Compute instrs.
 Definition finfo :=
   match (compile compile_ext_call fs) with
   | Success (_, finfo, _) => finfo
@@ -523,6 +524,44 @@ Qed.
 
 Require Import riscv.Platform.MetricSane.
 
+Print FlatToRiscvCommon.runsTo.
+Search runsToNonDet.runsTo.
+
+Print runsToNonDet.runsTo.
+
+Definition P : nat -> Prop := fun n => (n <= 5)%nat.
+
+Check run1_sane. Check (run1 _).
+Print mcomp_sane.
+Lemma runsTo_sane :
+  forall (st : RiscvMachine) (post : RiscvMachine -> Prop),
+    valid_machine st ->
+    FlatToRiscvCommon.runsTo st post ->
+    (exists (st' : RiscvMachine), post st' /\ valid_machine st') /\
+      FlatToRiscvCommon.runsTo st
+        (fun (st' : RiscvMachine) =>
+           (post st' /\ (exists diff : list LogItem, getLog st' = (diff ++ getLog st)%list)) /\
+             valid_machine st').
+Proof.
+  intros. induction H0.
+  - split.
+    + exists initial. split; assumption.
+    + constructor. split; [|assumption]. split; [assumption|]. exists nil. reflexivity.
+  - assert (H3 := run1_sane RV32I). cbv [mcomp_sane] in H3.
+    specialize (H3 initial (fun _ => midset) H H0).
+    destruct H3 as [ [_ [midst [H3 H4] ] ] H5].
+    split.
+    + specialize (H2 midst H3 H4). destruct H2 as [H2 H2'].  exact H2.
+    + Print runsToNonDet.runsTo. eapply runsToNonDet.runsToStep.
+      -- exact H5.
+      -- simpl. intros mid [ [H6 H7] H8]. specialize (H2 mid H6 H8).
+         destruct H2 as [_ H2]. eapply runsToNonDet.runsTo_weaken.
+         ++ exact H2.
+         ++ simpl. intros final [ [H9 [diff H10] ] H11].
+            split; [|assumption]. split; [assumption|]. rewrite H10.
+            destruct H7 as [diff' H7]. rewrite H7. eexists. rewrite <- app_assoc. reflexivity.
+Qed.
+
 Lemma last_step :
   forall
     (initial : RiscvMachine)
@@ -544,7 +583,17 @@ Lemma last_step :
          P final /\
            getTrace final = finalTrace n).
 Proof.
-  intros. cbv [FlatToRiscvCommon.runsTo] in H0.
-  assert (H1 := run1_sane). cbv [mcomp_sane] in H1. (*need runsTo_sane ? *)
-  specialize (H1 _ _ _ H).
+  intros. cbv [FlatToRiscvCommon.runsTo] in H0. 
+  assert (H1 := runsTo_sane).
+  specialize (H1 _ _ H H0). destruct H1 as [H1 _]. destruct H1 as [st' [ [H1 H2] H3] ].
+  destruct H2 as [F H2].
+  exists F. eapply runsToNonDet.runsTo_weaken.
+  - exact H0.
+  - clear H H0. simpl. intros final [H4 H5]. split; [assumption|].
+    destruct H5 as [F' H5]. specialize (H5 (F' + F)%nat ltac:(blia)).
+    assert (H2' := H2 F ltac:(blia)).
+    specialize (H2 (F' + F)%nat ltac:(blia)).
+    rewrite <- H2'. rewrite H2. apply H5.
 Qed.
+
+
