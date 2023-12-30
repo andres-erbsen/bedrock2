@@ -36,13 +36,13 @@ Section WeakestPrecondition.
         post (app (leak_binop op v1 v2) k'') (interp_binop op v1 v2)))
       | expr.load s e =>
         rec k e (fun k' a =>
-        load s m a (post (cons (read a) k')))
+        load s m a (post (cons (leak_word a) k')))
       | expr.inlinetable s tbl e =>
         rec k e (fun k' a =>
-        load s (map.of_list_word tbl) a (post (cons (table a ) k')))
+        load s (map.of_list_word tbl) a (post (cons (leak_word a) k')))
       | expr.ite c e1 e2 =>
         rec k c (fun k' b =>
-        rec (cons (if word.eqb b (word.of_Z 0) then branch false else branch true) k') (if word.eqb b (word.of_Z 0) then e2 else e1) (fun k'' v =>
+        rec (cons (if word.eqb b (word.of_Z 0) then leak_bool false else leak_bool true) k') (if word.eqb b (word.of_Z 0) then e2 else e1) (fun k'' v =>
         post k'' v))
     end.
     Fixpoint expr k e := expr_body expr k e.
@@ -108,20 +108,20 @@ Section WeakestPrecondition.
         exists a k', dexpr m l k ea a k' /\
         exists v k'', dexpr m l k' ev v k'' /\
         store sz m a v (fun m =>
-        post (cons (write a) k'') t m l)
+        post (cons (leak_word a) k'') t m l)
       | cmd.stackalloc x n c =>
         Z.modulo n (bytes_per_word width) = 0 /\
         forall a mStack mCombined,
           anybytes a n mStack -> map.split mCombined m mStack ->
           dlet! l := map.put l x a in
-          rec c (cons (salloc a) k) t mCombined l (fun k' t' mCombined' l' =>
+          rec c (cons (consume_word a) k) t mCombined l (fun k' t' mCombined' l' =>
           exists m' mStack',
           anybytes a n mStack' /\ map.split mCombined' m' mStack' /\
           post k' t' m' l')
       | cmd.cond br ct cf =>
         exists v k', dexpr m l k br v k' /\
-        (word.unsigned v <> 0%Z -> rec ct (cons (branch true) k') t m l post) /\
-        (word.unsigned v = 0%Z -> rec cf (cons (branch false) k') t m l post)
+        (word.unsigned v <> 0%Z -> rec ct (cons (leak_bool true) k') t m l post) /\
+        (word.unsigned v = 0%Z -> rec cf (cons (leak_bool false) k') t m l post)
       | cmd.seq c1 c2 =>
         rec c1 k t m l (fun k t m l => rec c2 k t m l post)
       | cmd.while e c =>
@@ -130,9 +130,9 @@ Section WeakestPrecondition.
         (exists v, inv v k t m l) /\
         (forall v k t m l, inv v k t m l ->
           exists b k', dexpr m l k e b k' /\
-          (word.unsigned b <> 0%Z -> rec c (cons (branch true) k') t m l (fun k t m l =>
+          (word.unsigned b <> 0%Z -> rec c (cons (leak_bool true) k') t m l (fun k t m l =>
             exists v', inv v' k t m l /\ lt v' v)) /\
-            (word.unsigned b = 0%Z -> post (cons (branch false) k') t m l))
+            (word.unsigned b = 0%Z -> post (cons (leak_bool false) k') t m l))
       | cmd.call binds fname arges =>
         exists args k', dexprs m l k arges args k' /\ (* (call : String.string -> trace -> mem -> list word -> (trace -> mem -> list word -> Prop) -> Prop) *)
         call fname k' t m args (fun k'' t m rets =>

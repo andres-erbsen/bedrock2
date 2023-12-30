@@ -19,53 +19,45 @@ Definition io_event {width: Z}{BW: Bitwidth width}{word: word.word width}{mem: m
 event := bool | word | unit. *)
 (*should I name this leakage_event, now that it doesn't contain the IO events?*)
 Inductive event {width: Z}{BW: Bitwidth width}{word: word.word width} : Type :=
-| branch : bool -> event
-| read : word -> event
-| write : word -> event
-| table: word(*the index*) -> event
-| salloc : word -> event
-| div : word (*num*) -> word (*den*) -> event
-| shift : word(*shamt*) -> event.
+| leak_bool : bool -> event
+| leak_word : word -> event
+| consume_bool : bool -> event
+| consume_word : word -> event.
+(*This looks pretty, but it seems hard to work with.  Can't even use the inversion tactic?
+Inductive event : Type :=
+| leak : forall {A : Type}, A -> event
+| consume : forall {A : Type}, A -> event.*)
 
 Inductive qevent {width: Z}{BW: Bitwidth width}{word: word.word width} : Type :=
-| qbranch : bool -> qevent
-| qread : word -> qevent
-| qwrite : word -> qevent
-| qtable : word -> qevent
-| qsalloc : qevent
-| qdiv : word (*num*) -> word (*den*) -> qevent
-| qshift : word(*shamt*) -> qevent
-| qend: qevent.
+| qleak_bool : bool -> qevent
+| qleak_word : word -> qevent
+| qconsume : qevent
+| qend : qevent.
+
+Inductive abstract_trace {width: Z}{BW: Bitwidth width}{word: word.word width} : Type :=
+| empty
+| aleak_word (w : word) (after : abstract_trace)
+| aleak_bool (b : bool) (after : abstract_trace)
+| aconsume_bool (after : bool -> abstract_trace)
+| aconsume_word (after : word -> abstract_trace).
 
 Section WithIOEvent.
   Context {width: Z}{BW: Bitwidth width}{word: word.word width}{mem: map.map word byte}.
   
   Definition io_trace : Type := list io_event.
 
-  Definition q e : qevent :=
+  Definition quot e : qevent :=
     match e with
-    | branch b => qbranch b
-    | read a => qread a
-    | write a => qwrite a
-    | table i => qtable i
-    | salloc a => qsalloc
-    | div num den => qdiv num den
-    | shift shamt => qshift shamt
+    | leak_bool b => qleak_bool b
+    | leak_word w => qleak_word w
+    | consume_bool b => qconsume
+    | consume_word w => qconsume
     end.
 
   (*should I call this leakage_trace, now that it doesn't contain io events?
-    shame to lengthen the name. *)
+    shame to lengthen the name. No, I shouldn't call it a leakage trace, since 
+    it contains the sources of nondeterminism as well as leakage events.*)
   Definition trace : Type := list event.
-
-  Inductive abstract_trace : Type :=
-  | empty
-  | cons_branch (b : bool) (after : abstract_trace)
-  | cons_read (a : word) (after : abstract_trace)
-  | cons_write (a : word) (after : abstract_trace)
-  | cons_table (i : word) (after : abstract_trace)
-  | cons_salloc (after : word -> abstract_trace)
-  | cons_div (num : word) (den : word) (after : abstract_trace)
-  | cons_shift (shamt : word) (after : abstract_trace).
 
 (* IO things to do:
    set channel: input can either be private or not; output and leak a secret; output and don't leak; output and leak one function of secret,
@@ -73,24 +65,22 @@ Section WithIOEvent.
   Import ListNotations.
   Inductive generates : abstract_trace -> trace -> Prop :=
   | nil_gen : generates empty nil
-  | branch_gen : forall x a t_rev, generates a t_rev -> generates (cons_branch x a) (branch x :: t_rev)
-  | read_gen : forall x a t_rev, generates a t_rev -> generates (cons_read x a) (read x :: t_rev)
-  | write_gen : forall x a t_rev, generates a t_rev -> generates (cons_write x a) (write x :: t_rev)
-  | table_gen : forall x a t_rev, generates a t_rev -> generates (cons_table x a) (table x :: t_rev)
-  | salloc_gen : forall f x t_rev, generates (f x) t_rev -> generates (cons_salloc f) (salloc x :: t_rev)
-  | div_gen : forall x1 x2 a t_rev, generates a t_rev -> generates (cons_div x1 x2 a) (div x1 x2 :: t_rev)
-  | div_shift : forall x a t_rev, generates a t_rev -> generates (cons_shift x a) (shift x :: t_rev).
+  | leak_bool_gen : forall b a t_rev,
+      generates a t_rev -> generates (aleak_bool b a) (leak_bool b :: t_rev)
+  | leak_word_gen : forall w a t_rev,
+      generates a t_rev -> generates (aleak_word w a) (leak_word w :: t_rev)
+  | consume_bool_gen : forall b f t_rev,
+      generates (f b) t_rev -> generates (aconsume_bool f) (consume_bool b :: t_rev)
+  | consume_word_gen : forall w f t_rev,
+      generates (f w) t_rev -> generates (aconsume_word f) (consume_word w :: t_rev).
 
   Fixpoint abstract_app (a1 a2 : abstract_trace) : abstract_trace :=
     match a1 with
     | empty => a2
-    | cons_branch b a1' => cons_branch b (abstract_app a1' a2)
-    | cons_read a a1' => cons_read a (abstract_app a1' a2)
-    | cons_write a a1' => cons_write a (abstract_app a1' a2)
-    | cons_table a a1' => cons_table a (abstract_app a1' a2)
-    | cons_salloc a1' => cons_salloc (fun w => abstract_app (a1' w) a2)
-    | cons_div a b a1' => cons_div a b (abstract_app a1' a2)
-    | cons_shift a a1' => cons_shift a (abstract_app a1' a2)
+    | aleak_bool b a1' => aleak_bool b (abstract_app a1' a2)
+    | aleak_word w a1' => aleak_word w (abstract_app a1' a2)
+    | aconsume_bool f => aconsume_bool (fun b => abstract_app (f b) a2)
+    | aconsume_word f => aconsume_word (fun w => abstract_app (f w) a2)
     end.
 
   Lemma generates_app :
@@ -103,13 +93,10 @@ Section WithIOEvent.
   Fixpoint generator (t_rev : trace) : abstract_trace :=
     match t_rev with
     | nil => empty
-    | branch x :: t_rev' => cons_branch x (generator t_rev')
-    | read x :: t_rev' => cons_read x (generator t_rev')
-    | write x :: t_rev' => cons_write x (generator t_rev')
-    | table x :: t_rev' => cons_table x (generator t_rev')
-    | salloc x :: t_rev' => cons_salloc (fun _ => generator t_rev')
-    | div x1 x2 :: t_rev' => cons_div x1 x2 (generator t_rev')
-    | shift x :: t_rev' => cons_shift x (generator t_rev')
+    | leak_bool b :: t_rev' => aleak_bool b (generator t_rev')
+    | leak_word w :: t_rev' => aleak_word w (generator t_rev')
+    | consume_bool b :: t_rev' => aconsume_bool (fun _ => generator t_rev')
+    | consume_word w :: t_rev' => aconsume_word (fun _ => generator t_rev')
     end.
 
   Lemma generator_generates (t: trace) :
@@ -120,32 +107,27 @@ Section WithIOEvent.
   Definition head (a : abstract_trace) : qevent :=
     match a with
     | empty => qend
-    | cons_branch b _ => qbranch b
-    | cons_read a _ => qread a
-    | cons_write a _ => qwrite a
-    | cons_table a _ => qtable a
-    | cons_salloc _ => qsalloc
-    | cons_div x1 x2 _ => qdiv x1 x2
-    | cons_shift x _ => qshift x
+    | aleak_bool b _ => qleak_bool b
+    | aleak_word w _ => qleak_word w
+    | aconsume_bool _ => qconsume
+    | aconsume_word _ => qconsume
     end.
+
   Fixpoint predictor (a(*the whole thing*) : abstract_trace) (t(*so far*) : trace) : option qevent :=
     match a, t with
     | _, nil => Some (head a)
-    | cons_branch _ a', cons (branch _) t' => predictor a' t'
-    | cons_read _ a', cons (read _) t' => predictor a' t'
-    | cons_write _ a', cons (write _) t' => predictor a' t'
-    | cons_table _ a', cons (table _) t' => predictor a' t'
-    | cons_salloc f, cons (salloc a) t' => predictor (f a) t'
-    | cons_div _ _ a', cons (div _ _) t' => predictor a' t'
-    | cons_shift _ a', cons (shift _) t' => predictor a' t'
+    | aleak_bool _ a', cons (leak_bool _) t' => predictor a' t'
+    | aleak_word _ a', cons (leak_word _) t' => predictor a' t'
+    | aconsume_bool f, cons (consume_bool b) t' => predictor (f b) t'
+    | aconsume_word f, cons (consume_word w) t' => predictor (f w) t'
     | _, _ => None (*failure*)
     end.
   Search (list ?A -> ?A).
-  Definition nextq (l : list event) : qevent :=
+  (*Definition nextq (l : list event) : qevent :=
     match l with
-    | a :: _ => q a
+    | a :: _ => quot a
     | nil => qend
-    end.
+    end.*)
   (*Definition predicts (f : trace -> option qevent) (t : trace) :=
     forall t1 t2,
       t = t1 ++ t2 ->
@@ -154,7 +136,7 @@ Section WithIOEvent.
   Inductive predicts : (trace -> option qevent) -> trace -> Prop :=
   | predicts_cons :
     forall f g e t,
-      f [] = Some (q e) ->
+      f [] = Some (quot e) ->
       (forall t', f (e :: t') = g t') ->
       predicts g t ->
       predicts f (e :: t)
@@ -184,7 +166,7 @@ Section WithIOEvent.
   Fixpoint predict_with_prefix (prefix : trace) (predict_rest : trace -> option qevent) (t : trace) : option qevent :=
     match prefix, t with
     | _ :: prefix', _ :: t' => predict_with_prefix prefix' predict_rest t'
-    | e :: start', nil => Some (q e)
+    | e :: start', nil => Some (quot e)
     | nil, _ => predict_rest t
     end.
 
@@ -206,7 +188,7 @@ Section WithIOEvent.
 
   Lemma predict_cons e f t1 t2 :
     predicts f (t1 ++ e :: t2) ->
-    f t1 = Some (q e).
+    f t1 = Some (quot e).
   Proof.
     clear. intros H. generalize dependent f. induction t1.
     - intros. simpl in H. inversion H. subst. assumption.
@@ -278,11 +260,8 @@ Section binops.
     end.
   Definition leak_binop (bop : bopname) (x1 : word) (x2 : word) : trace :=
     match bop with
-    | bopname.divu => cons (div x1 x2) nil
-    | bopname.remu => cons (div x1 x2) nil
-    | bopname.sru => cons (shift x2) nil
-    | bopname.slu => cons (shift x2) nil
-    | bopname.srs => cons (shift x2) nil
+    | bopname.divu | bopname.remu => cons (leak_word x1) (cons (leak_word x2) nil)
+    | bopname.sru | bopname.slu | bopname.srs => cons (leak_word x2) nil
     | _ => nil
     end.
 End binops.
@@ -320,14 +299,14 @@ Section semantics.
           Some (
               v,
               (addMetricInstructions 3 (addMetricLoads 4 (addMetricJumps 1 mc'))),
-              table index' :: tr')
+              leak_word index' :: tr')
       | expr.load aSize a =>
           'Some (a', mc', tr') <- eval_expr a mc tr | None;
           'Some v <- load aSize m a' | None;
           Some (
               v,
               addMetricInstructions 1 (addMetricLoads 2 mc'),
-              read a' :: tr')
+              leak_word a' :: tr')
       | expr.op op e1 e2 =>
           'Some (v1, mc', tr') <- eval_expr e1 mc tr | None;
           'Some (v2, mc'', tr'') <- eval_expr e2 mc' tr' | None;
@@ -340,7 +319,7 @@ Section semantics.
           eval_expr
             (if word.eqb vc (word.of_Z 0) then e2 else e1)
             (addMetricInstructions 2 (addMetricLoads 2 (addMetricJumps 1 mc')))
-            ((if word.eqb vc (word.of_Z 0) then branch false else branch true) :: tr')
+            ((if word.eqb vc (word.of_Z 0) then leak_bool false else leak_bool true) :: tr')
       end.
 
     Fixpoint eval_expr_old (e : expr) : option word :=
@@ -426,9 +405,9 @@ Module exec. Section WithEnv.
     a mc' k' (_ : eval_expr m l ea mc k = Some (a, mc', k'))
     v mc'' k'' (_ : eval_expr m l ev mc' k' = Some (v, mc'', k''))
     m' (_ : store sz m a v = Some m')
-    (_ : post (write a :: k'') t m' l (addMetricInstructions 1
-                                          (addMetricLoads 1
-                                             (addMetricStores 1 mc''))))
+    (_ : post (leak_word a :: k'') t m' l (addMetricInstructions 1
+                                             (addMetricLoads 1
+                                                (addMetricStores 1 mc''))))
     : exec (cmd.store sz ea ev) k t m l mc post
   | stackalloc x n body
     k t mSmall l mc post
@@ -436,7 +415,7 @@ Module exec. Section WithEnv.
     (_ : forall a mStack mCombined,
         anybytes a n mStack ->
         map.split mCombined mSmall mStack ->
-        exec body (salloc a :: k) t mCombined (map.put l x a) (addMetricInstructions 1 (addMetricLoads 1 mc))
+        exec body (consume_word a :: k) t mCombined (map.put l x a) (addMetricInstructions 1 (addMetricLoads 1 mc))
           (fun k' t' mCombined' l' mc' =>
              exists mSmall' mStack',
               anybytes a n mStack' /\
@@ -446,13 +425,13 @@ Module exec. Section WithEnv.
   | if_true k t m l mc e c1 c2 post
     v mc' k' (_ : eval_expr m l e mc k = Some (v, mc', k'))
     (_ : word.unsigned v <> 0)
-    (_ : exec c1 (branch true :: k') t m l (addMetricInstructions 2 (addMetricLoads 2 (addMetricJumps 1 mc'))) post)
+    (_ : exec c1 (leak_bool true :: k') t m l (addMetricInstructions 2 (addMetricLoads 2 (addMetricJumps 1 mc'))) post)
     : exec (cmd.cond e c1 c2) k t m l mc post
   | if_false e c1 c2
     k t m l mc post
     v mc' k' (_ : eval_expr m l e mc k = Some (v, mc', k'))
     (_ : word.unsigned v = 0)
-    (_ : exec c2 (branch false :: k') t m l (addMetricInstructions 2 (addMetricLoads 2 (addMetricJumps 1 mc'))) post)
+    (_ : exec c2 (leak_bool false :: k') t m l (addMetricInstructions 2 (addMetricLoads 2 (addMetricJumps 1 mc'))) post)
     : exec (cmd.cond e c1 c2) k t m l mc post
   | seq c1 c2
     k t m l mc post
@@ -463,7 +442,7 @@ Module exec. Section WithEnv.
     k t m l mc post
     v mc' k' (_ : eval_expr m l e mc k = Some (v, mc', k'))
     (_ : word.unsigned v = 0)
-    (_ : post (branch false :: k') t m l (addMetricInstructions 1
+    (_ : post (leak_bool false :: k') t m l (addMetricInstructions 1
                                                 (addMetricLoads 1
                                                    (addMetricJumps 1 mc'))))
     : exec (cmd.while e c) k t m l mc post
@@ -471,7 +450,7 @@ Module exec. Section WithEnv.
       k t m l mc post
       v mc' k' (_ : eval_expr m l e mc k = Some (v, mc', k'))
       (_ : word.unsigned v <> 0)
-      mid (_ : exec c (branch true :: k') t m l mc' mid)
+      mid (_ : exec c (leak_bool true :: k') t m l mc' mid)
       (_ : forall k'' t' m' l' mc'', mid k'' t' m' l' mc'' ->
                                       exec (cmd.while e c) k'' t' m' l' (addMetricInstructions 2
                                                                            (addMetricLoads 2
