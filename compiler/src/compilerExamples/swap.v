@@ -596,4 +596,28 @@ Proof.
     rewrite <- H2'. rewrite H2. apply H5.
 Qed.
 
+Check a_trace_sorta_exists.
+Check last_step.
 
+Lemma predictor_thing_correct :
+  forall (initial : RiscvMachine)
+         (next : nat -> list LeakageEvent -> option FlatToRiscvDef.qLeakageEvent)
+         (P : RiscvMachine -> Prop),
+    valid_machine initial ->
+    FlatToRiscvCommon.runsTo initial
+      (fun final : RiscvMachine =>
+         P final /\
+           (exists (tL : list LeakageEvent) (F : nat),
+               getTrace final = (tL ++ getTrace initial)%list /\
+                 (forall fuel : nat, (F <= fuel)%nat -> predictsLE (next fuel) (rev tL)))) ->
+    exists finalTrace,
+      FlatToRiscvCommon.runsTo initial
+        (fun final : RiscvMachine => P final /\ getTrace final = finalTrace).
+Proof.
+  intros initial next P H1 H2.
+  apply a_trace_sorta_exists in H2.
+  destruct H2 as [finalTrace H2].
+  apply last_step in H2; try assumption.
+  destruct H2 as [n H2].
+  exists (finalTrace n). assumption.
+Qed.

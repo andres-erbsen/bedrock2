@@ -393,12 +393,12 @@ Section LowerPipeline.
         word.unsigned (word.sub stack_pastend stack_start) mod bytes_per_word = 0 ->
         initial.(getPc) = word.add p_funcs (word.of_Z f_rel_pos) ->
         machine_ok p_funcs stack_start stack_pastend instrs mH Rdata Rexec initial ->
-        runsTo initial (fun final => exists mH' retvals,
+        runsTo initial (fun final => (exists mH' retvals,
           arg_regs_contain final.(getRegs) retvals /\
           post final.(getLog) mH' retvals /\
           map.only_differ initial.(getRegs) reg_class.caller_saved final.(getRegs) /\
           final.(getPc) = ret_addr /\
-            machine_ok p_funcs stack_start stack_pastend instrs mH' Rdata Rexec final /\
+            machine_ok p_funcs stack_start stack_pastend instrs mH' Rdata Rexec final) /\
             exists kL F,
               final.(getTrace) = kL ++ initial.(getTrace) /\
                 forall fuel,
@@ -691,7 +691,7 @@ Section LowerPipeline.
       assert (0 < bytes_per_word). { (* TODO: deduplicate *)
         unfold bytes_per_word; simpl; destruct width_cases as [EE | EE]; rewrite EE; cbv; trivial.
       }
-      eexists _, _. ssplit.
+      split. 1: eexists _, _; ssplit.
       + eapply map.getmany_of_list_extends. 1: eassumption.
         match goal with
         | H: map.getmany_of_list finalRegsH _ = Some _ |-
