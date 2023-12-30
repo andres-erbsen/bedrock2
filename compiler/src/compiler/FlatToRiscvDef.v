@@ -524,23 +524,16 @@ Section FlatToRiscv1.
     Notation event := Semantics.event.
   
     Notation qevent := Semantics.qevent. Search qevent.
-    Notation q := Semantics.q.
-    Notation qread := Semantics.qread.
-    Notation qwrite := Semantics.qwrite.
-    Notation qtable := Semantics.qtable.
-    Notation qsalloc := Semantics.qsalloc.
-    Notation qbranch := Semantics.qbranch.
-    Notation qdiv := Semantics.qdiv.
-    Notation qshift := Semantics.qshift.
+    Notation quot := Semantics.quot. Print Semantics.qevent.
+    Notation qleak_bool := Semantics.qleak_bool.
+    Notation qleak_word := Semantics.qleak_word.
+    Notation qconsume := Semantics.qconsume.
     Notation qend := Semantics.qend.
 
-    Notation salloc := Semantics.salloc.
-    Notation table := Semantics.table.
-    Notation write := Semantics.write.
-    Notation read := Semantics.read.
-    Notation branch := Semantics.branch.
-    Notation div := Semantics.div.
-    Notation shift := Semantics.shift.
+    Notation leak_bool := Semantics.leak_bool.
+    Notation leak_word := Semantics.leak_word.
+    Notation consume_bool := Semantics.consume_bool.
+    Notation consume_word := Semantics.consume_word.
 
     Fixpoint predictLE_with_prefix (prefix : list LeakageEvent) (predict_rest : list LeakageEvent -> option qLeakageEvent) (t : list LeakageEvent) : option qLeakageEvent :=
     match prefix, t with
@@ -599,28 +592,28 @@ Section FlatToRiscv1.
           match s with
           | SLoad sz x y o =>
               match next t_so_far with
-              | Some (qread a) =>
+              | Some (qleak_word a) =>
                   predictLE_with_prefix
                     [leak_load sz a]
-                    (f (t_so_far ++ [read a]))
+                    (f (t_so_far ++ [leak_word a]))
                     rt_so_far
               | _ => None
               end
           | SStore sz x y o =>
               match next t_so_far with
-              | Some (qwrite a) =>
+              | Some (qleak_word a) =>
                   predictLE_with_prefix
                     [leak_store sz a]
-                    (f (t_so_far ++ [write a]))
+                    (f (t_so_far ++ [leak_word a]))
                     rt_so_far
               | _ => None
               end
           | SInlinetable sz x t i =>
               match next t_so_far with
-              | Some (qtable i') =>
+              | Some (qleak_word i') =>
                   predictLE_with_prefix
                     [leak_Jal; leak_Add; leak_load sz (word.add (word.add (word.add program_base (word.of_Z myPos)) (word.of_Z 4)) i')]
-                    (f (t_so_far ++ [table i']))
+                    (f (t_so_far ++ [leak_word i']))
                     rt_so_far
               | _ => None
               end
@@ -628,7 +621,7 @@ Section FlatToRiscv1.
               let a := (word.add sp_val (word.of_Z (stackoffset - n))) in
               predictLE_with_prefix
                 [ leak_Addi ]
-                (fun rt_so_far' => rnext_stmt (t_so_far ++ [salloc a]) (myPos + 4) sp_val (stackoffset - n) body rt_so_far' f)
+                (fun rt_so_far' => rnext_stmt (t_so_far ++ [consume_word a]) (myPos + 4) sp_val (stackoffset - n) body rt_so_far' f)
                 rt_so_far
           | SLit _ v =>
               predictLE_with_prefix
@@ -641,14 +634,18 @@ Section FlatToRiscv1.
                 | Syntax.bopname.divu
                 | Syntax.bopname.remu =>
                     match next t_so_far with
-                    | Some (qdiv x1 x2) => Some ([div x1 x2], x1, x2)
+                    | Some (qleak_word x1) =>
+                        match next (t_so_far ++ [leak_word x1]) with
+                        | Some (qleak_word x2) => Some ([leak_word x1; leak_word x2], x1, x2)
+                        | _ => None
+                        end
                     | _ => None
                     end
                 | Syntax.bopname.slu
                 | Syntax.bopname.sru
                 | Syntax.bopname.srs =>
                     match next t_so_far with
-                    | Some (qshift x2) => Some ([shift x2], word.of_Z 0, x2)
+                    | Some (qleak_word x2) => Some ([leak_word x2], word.of_Z 0, x2)
                     | _ => None
                     end
                 | _ => Some ([], word.of_Z 0, word.of_Z 0)
@@ -674,10 +671,10 @@ Section FlatToRiscv1.
           | SIf cond bThen bElse =>
               let thenLength := Z.of_nat (length (compile_stmt (myPos + 4) stackoffset bThen)) in
               match next t_so_far with
-              | Some (qbranch b) =>
+              | Some (qleak_bool b) =>
                   predictLE_with_prefix
                     [ leak_bcond_by_inverting cond (negb b) ]
-                    (fun rt_so_far' => rnext_stmt (t_so_far ++ [branch b])
+                    (fun rt_so_far' => rnext_stmt (t_so_far ++ [leak_bool b])
                                          (if b then (myPos + 4) else (myPos + 4 + 4 * thenLength + 4))
                                          sp_val stackoffset (if b then bThen else bElse) rt_so_far'
                                          (fun t_so_far' rt_so_far'' =>
@@ -693,11 +690,11 @@ Section FlatToRiscv1.
               rnext_stmt t_so_far myPos sp_val stackoffset body1 rt_so_far
                 (fun t_so_far' rt_so_far' =>
                    match next t_so_far' with
-                   | Some (qbranch true) =>
+                   | Some (qleak_bool true) =>
                        predictLE_with_prefix
                          [ leak_bcond_by_inverting cond (negb true) ]
                          (fun rt_so_far'' =>
-                            rnext_stmt (t_so_far' ++ [branch true])
+                            rnext_stmt (t_so_far' ++ [leak_bool true])
                               (myPos + (body1Length + 1) * 4) sp_val stackoffset body2 rt_so_far''
                               (fun t_so_far'' rt_so_far''' =>
                                  predictLE_with_prefix
@@ -705,10 +702,10 @@ Section FlatToRiscv1.
                                    (fun rt_so_far'''' => rnext_stmt t_so_far'' myPos sp_val stackoffset s rt_so_far'''' f)
                                    rt_so_far'''))
                          rt_so_far'
-                   | Some (qbranch false) =>
+                   | Some (qleak_bool false) =>
                        predictLE_with_prefix
                          [ leak_bcond_by_inverting cond (negb false) ]
-                         (f (t_so_far' ++ [branch false]))
+                         (f (t_so_far' ++ [leak_bool false]))
                          rt_so_far'
                    | _ => None
                    end)

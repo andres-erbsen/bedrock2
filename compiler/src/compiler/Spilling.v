@@ -17,13 +17,10 @@ Require Import coqutil.Tactics.fwd.
 Require bedrock2.ProgramLogic.
 
 Notation trace := Semantics.trace.
-Notation salloc := Semantics.salloc.
-Notation write := Semantics.write.
-Notation read := Semantics.read.
-Notation branch := Semantics.branch.
-Notation table := Semantics.table.
-Notation div := Semantics.div.
-Notation shift := Semantics.shift.
+Notation leak_bool := Semantics.leak_bool.
+Notation leak_word := Semantics.leak_word.
+Notation consume_bool := Semantics.consume_bool.
+Notation consume_word := Semantics.consume_word.
 
 Open Scope Z_scope.
 
@@ -68,7 +65,7 @@ Section Spilling.
 
   Definition leak_load_iarg_reg(fpval: word) (r: Z): trace :=
     match stack_loc r with
-    | Some o => [read (word.add fpval (word.of_Z o))]
+    | Some o => [leak_word (word.add fpval (word.of_Z o))]
     | None => nil
     end.
 
@@ -80,7 +77,7 @@ Section Spilling.
 
   Definition leak_save_ires_reg(fpval: word) (r: Z) : trace :=
     match stack_loc r with
-    | Some o => [write (word.add fpval (word.of_Z o))]
+    | Some o => [leak_word (word.add fpval (word.of_Z o))]
     | None => nil
     end.
 
@@ -95,7 +92,7 @@ Section Spilling.
 
   Definition leak_set_reg_to_var(fpval: word) (var: Z) : trace :=
     match stack_loc var with
-    | Some o => [read (word.add fpval (word.of_Z o))]
+    | Some o => [leak_word (word.add fpval (word.of_Z o))]
     | None => nil
     end.
 
@@ -120,7 +117,7 @@ Section Spilling.
 
   Definition leak_set_var_to_reg(fpval: word) (var: Z) : trace :=
     match stack_loc var with
-    | Some o => [write (word.add fpval (word.of_Z o))]
+    | Some o => [leak_word (word.add fpval (word.of_Z o))]
     | None => nil
     end.
 
@@ -191,15 +188,11 @@ Section Spilling.
     end.*)
   
   Notation qevent := Semantics.qevent. Search qevent.
-  Notation q := Semantics.q. Print SInlinetable.
-  Notation qread := Semantics.qread.
-  Notation qwrite := Semantics.qwrite.
-  Notation qsalloc := Semantics.qsalloc.
-  Notation qbranch := Semantics.qbranch.
+  Notation quot := Semantics.quot.
+  Notation qleak_bool := Semantics.qleak_bool.
+  Notation qleak_word := Semantics.qleak_word.
+  Notation qconsume := Semantics.qconsume.
   Notation qend := Semantics.qend.
-  Notation qtable := Semantics.qtable.
-  Notation qdiv := Semantics.qdiv.
-  Notation qshift := Semantics.qshift.
 
   Notation predicts := Semantics.predicts.
   Notation predict_with_prefix := Semantics.predict_with_prefix.
@@ -216,39 +209,39 @@ Section Spilling.
         match s with
         | SLoad sz x y o =>
             match next t_so_far with
-            | Some (qread a) =>
+            | Some (qleak_word a) =>
                 predict_with_prefix
-                  (leak_load_iarg_reg fpval y ++ [read a] ++ leak_save_ires_reg fpval x)
-                  (f (t_so_far ++ [read a]))
+                  (leak_load_iarg_reg fpval y ++ [leak_word a] ++ leak_save_ires_reg fpval x)
+                  (f (t_so_far ++ [leak_word a]))
                   st_so_far
             | _ => None
             end
         | SStore sz x y o =>
             match next t_so_far with
-            | Some (qwrite a) =>
+            | Some (qleak_word a) =>
                 predict_with_prefix
-                  (leak_load_iarg_reg fpval x ++ leak_load_iarg_reg fpval y ++ [write a])
-                  (f (t_so_far ++ [write a]))
+                  (leak_load_iarg_reg fpval x ++ leak_load_iarg_reg fpval y ++ [leak_word a])
+                  (f (t_so_far ++ [leak_word a]))
                   st_so_far
             | _ => None
             end
         | SInlinetable _ x _ i =>
             match next t_so_far with
-            | Some (qtable i') =>
+            | Some (qleak_word i') =>
                 predict_with_prefix
-                  (leak_load_iarg_reg fpval i ++ [table i'] ++ leak_save_ires_reg fpval x)
-                  (f (t_so_far ++ [table i']))
+                  (leak_load_iarg_reg fpval i ++ [leak_word i'] ++ leak_save_ires_reg fpval x)
+                  (f (t_so_far ++ [leak_word i']))
                   st_so_far
             | _ => None
             end
         | SStackalloc x _ body =>
             match st_so_far with (*could generalize predict_with_prefix so it does this for me?*)
-            | salloc a :: st_so_far' =>
+            | consume_word a :: st_so_far' =>
                 predict_with_prefix
                   (leak_save_ires_reg fpval x)
-                  (fun st_so_far'' => snext_stmt' (t_so_far ++ [salloc a]) fpval body st_so_far'' f)
+                  (fun st_so_far'' => snext_stmt' (t_so_far ++ [consume_word a]) fpval body st_so_far'' f)
                   st_so_far'
-            | nil => Some qsalloc
+            | nil => Some qconsume
             | _ => None
             end
         | SLit x _ =>
@@ -262,14 +255,18 @@ Section Spilling.
                 | Syntax.bopname.divu
                 | Syntax.bopname.remu =>
                     match next t_so_far with
-                    | Some (qdiv x1 x2) => Some [div x1 x2]
+                    | Some (qleak_word x1) =>
+                        match next (t_so_far ++ [leak_word x1]) with
+                        | Some (qleak_word x2) => Some [leak_word x1; leak_word x2]
+                        | _ => None
+                        end
                     | _ => None
                     end
                 | Syntax.bopname.slu
                 | Syntax.bopname.sru
                 | Syntax.bopname.srs =>
                     match next t_so_far with
-                    | Some (qshift x2) => Some [shift x2]
+                    | Some (qleak_word x2) => Some [leak_word x2]
                     | _ => None
                     end
                 | _ => Some []
@@ -296,10 +293,10 @@ Section Spilling.
               st_so_far
         | SIf c thn els =>
             match next t_so_far with
-            | Some (qbranch b) =>
+            | Some (qleak_bool b) =>
                 predict_with_prefix
-                  (leak_prepare_bcond fpval c ++ leak_spill_bcond ++ [branch b])
-                  (fun st_so_far' => snext_stmt' (t_so_far ++ [branch b]) fpval (if b then thn else els) st_so_far' f)
+                  (leak_prepare_bcond fpval c ++ leak_spill_bcond ++ [leak_bool b])
+                  (fun st_so_far' => snext_stmt' (t_so_far ++ [leak_bool b]) fpval (if b then thn else els) st_so_far' f)
                   st_so_far
             | _ => None
             end
@@ -307,18 +304,18 @@ Section Spilling.
             snext_stmt' t_so_far fpval s1 st_so_far
               (fun t_so_far' st_so_far' =>
                  match next t_so_far' with
-                 | Some (qbranch true) =>
+                 | Some (qleak_bool true) =>
                      predict_with_prefix
-                       (leak_prepare_bcond fpval c ++ leak_spill_bcond ++ [branch true])
+                       (leak_prepare_bcond fpval c ++ leak_spill_bcond ++ [leak_bool true])
                        (fun st_so_far'' =>
-                          snext_stmt' (t_so_far' ++ [branch true]) fpval s2 st_so_far''
+                          snext_stmt' (t_so_far' ++ [leak_bool true]) fpval s2 st_so_far''
                             (fun t_so_far'' st_so_far''' =>
                                snext_stmt' t_so_far'' fpval s st_so_far''' f))
                        st_so_far'
-                 | Some (qbranch false) =>
+                 | Some (qleak_bool false) =>
                      predict_with_prefix
-                       (leak_prepare_bcond fpval c ++ leak_spill_bcond ++ [branch false])
-                       (f (t_so_far' ++ [branch false]))
+                       (leak_prepare_bcond fpval c ++ leak_spill_bcond ++ [leak_bool false])
+                       (f (t_so_far' ++ [leak_bool false]))
                        st_so_far'
                  | _ => None
                  end) 
@@ -333,7 +330,7 @@ Section Spilling.
                   (leak_set_reg_range_to_vars fpval argvars)
                   (fun st_so_far' =>
                      match st_so_far' with (* would be nice if predict_with_prefix would do this *)
-                     | salloc fpval' :: st_so_far'' =>
+                     | consume_word fpval' :: st_so_far'' =>
                          predict_with_prefix
                            (leak_set_vars_to_reg_range fpval' params)
                            (fun st_so_far''' =>
@@ -344,7 +341,7 @@ Section Spilling.
                                     (f t_so_far')
                                     st_so_far'''')) 
                            st_so_far''
-                     | nil => Some qsalloc
+                     | nil => Some qconsume
                      | _ => None
                      end)
                   st_so_far
@@ -530,8 +527,8 @@ Section Spilling.
   Definition snext_fun {env : map.map string (list Z * list Z * stmt)} (e : env) (fuel: nat) (next : trace -> option qevent) (t_so_far : trace) (f : list Z * list Z * stmt) (st_so_far : Semantics.trace) : option Semantics.qevent :=
     let '(argnames, resnames, body) := f in
     match st_so_far with
-    | [] => Some qsalloc
-    | salloc fpval :: st_so_far' =>
+    | [] => Some qconsume
+    | consume_word fpval :: st_so_far' =>
         predict_with_prefix
           (leak_set_vars_to_reg_range fpval argnames)
           (fun st_so_far'' => snext_stmt' e fuel next t_so_far fpval body st_so_far''
@@ -2131,7 +2128,15 @@ Section Spilling.
         destruct op.
         all: try (apply predict_with_prefix_works; assumption).
         all: try (apply Semantics.predict_cons in H4; rewrite H4; simpl;
-          apply predict_with_prefix_works; assumption).
+                  apply predict_with_prefix_works; assumption).
+        { assert (H4' := H4). apply Semantics.predict_cons in H4. rewrite H4. simpl.
+          simpl in H4'. rewrite app_one_cons, app_assoc in H4'.
+          apply Semantics.predict_cons in H4'. rewrite H4'. simpl.
+          apply predict_with_prefix_works; assumption. }
+        { assert (H4' := H4). apply Semantics.predict_cons in H4. rewrite H4. simpl.
+          simpl in H4'. rewrite app_one_cons, app_assoc in H4'.
+          apply Semantics.predict_cons in H4'. rewrite H4'. simpl.
+          apply predict_with_prefix_works; assumption. }
       (*end ct stuff for op*)
       }
       {
@@ -2149,7 +2154,15 @@ Section Spilling.
         destruct op.
         all: try (apply predict_with_prefix_works; assumption).
         all: try (apply Semantics.predict_cons in H3; rewrite H3; simpl;
-          apply predict_with_prefix_works; assumption).
+                  apply predict_with_prefix_works; assumption).
+        { assert (H3' := H3). apply Semantics.predict_cons in H3. rewrite H3. simpl.
+          simpl in H3'. rewrite app_one_cons, app_assoc in H3'.
+          apply Semantics.predict_cons in H3'. rewrite H3'. simpl.
+          apply predict_with_prefix_works; assumption. }
+        { assert (H3' := H3). apply Semantics.predict_cons in H3. rewrite H3. simpl.
+          simpl in H3'. rewrite app_one_cons, app_assoc in H3'.
+          apply Semantics.predict_cons in H3'. rewrite H3'. simpl.
+          apply predict_with_prefix_works; assumption. }
       (*end ct stuff for op*)
       }
     - (* exec.set *)

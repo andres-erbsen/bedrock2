@@ -260,7 +260,7 @@ Section binops.
     end.
   Definition leak_binop (bop : bopname) (x1 : word) (x2 : word) : trace :=
     match bop with
-    | bopname.divu | bopname.remu => cons (leak_word x1) (cons (leak_word x2) nil)
+    | bopname.divu | bopname.remu => cons (leak_word x2) (cons (leak_word x1) nil)
     | bopname.sru | bopname.slu | bopname.srs => cons (leak_word x2) nil
     | _ => nil
     end.

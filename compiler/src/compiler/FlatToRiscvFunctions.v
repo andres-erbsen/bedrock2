@@ -1777,7 +1777,7 @@ Section Proofs.
       { instantiate (1 := [_; _; _]). reflexivity. }
       exists (S O). intros. destruct fuel as [|fuel']; [blia|].
       cbn [rev rnext_stmt]. apply Semantics.predict_cons in H14. rewrite H14.
-      cbn [Semantics.q]. cbn [List.app].
+      cbn [Semantics.quot]. cbn [List.app].
       eapply predictLE_with_prefix_works_eq.
       { reflexivity. }
       assumption.
@@ -2031,20 +2031,28 @@ Section Proofs.
       all: try doSomething fuel H10.
       5: {
         do 2 eexists. split.
-        { instantiate (1 := [_]). reflexivity. } split.
+        { instantiate (1 := [_; _]). reflexivity. } split.
         { instantiate (1 := [_]). reflexivity. }
         exists (S O). intros. destruct fuel as [|fuel']; [blia|].
-        simpl. simpl in H7. apply Semantics.predict_cons in H7. rewrite H7. simpl.
+        simpl. simpl in H7. assert (H7' := H7). Check Semantics.predict_cons.
+        apply (Semantics.predict_cons _ _ t0) in H7.
+        rewrite app_one_cons in H7'. rewrite app_assoc in H7'.
+        apply (Semantics.predict_cons _ _ (t0 ++ _)) in H7'.
+        rewrite H7. simpl. rewrite H7'. simpl.
         econstructor.
         { reflexivity. }
         { intros. reflexivity. }
         { assumption. } }
       6: {
         do 2 eexists. split.
-        { instantiate (1 := [_]). reflexivity. } split.
+        { instantiate (1 := [_; _]). reflexivity. } split.
         { instantiate (1 := [_]). reflexivity. }
         exists (S O). intros. destruct fuel as [|fuel']; [blia|].
-        simpl. simpl in H7. apply Semantics.predict_cons in H7. rewrite H7. simpl.
+        simpl. simpl in H7. assert (H7' := H7). Check Semantics.predict_cons.
+        apply (Semantics.predict_cons _ _ t0) in H7.
+        rewrite app_one_cons in H7'. rewrite app_assoc in H7'.
+        apply (Semantics.predict_cons _ _ (t0 ++ _)) in H7'.
+        rewrite H7. simpl. rewrite H7'. simpl.
         econstructor.
         { reflexivity. }
         { intros. reflexivity. }
@@ -2190,7 +2198,7 @@ Section Proofs.
           exists (S F). intros. destruct fuel as [|fuel']; [blia|].
           cbn [rnext_stmt]. rewrite rev_app_distr in H4. simpl in H4.
           assert (H4' := H4).
-          apply Semantics.predict_cons in H4. rewrite H4. cbn [Semantics.q].
+          apply Semantics.predict_cons in H4. rewrite H4. cbn [Semantics.quot].
           eapply predictLE_with_prefix_works_eq.
           { rewrite rev_app_distr. reflexivity. }
           { rewrite rev_app_distr. rewrite <- (app_assoc _ _ rt''). eapply H4p10p2.
@@ -2231,7 +2239,7 @@ Section Proofs.
           exists (S F). intros. destruct fuel as [|fuel']; [blia|].
           cbn [rnext_stmt]. rewrite rev_app_distr in H4. simpl in H4.
           assert (H4' := H4).
-          apply Semantics.predict_cons in H4. rewrite H4. cbn [Semantics.q].
+          apply Semantics.predict_cons in H4. rewrite H4. cbn [Semantics.quot].
           eapply predictLE_with_prefix_works_eq.
           { rewrite rev_app_distr. reflexivity. }
           { eapply H4p10p2.
@@ -2325,7 +2333,7 @@ Section Proofs.
           2: blia.
           simpl in H3. assert (H3' := H3). rewrite app_assoc in H3.
           apply Semantics.predict_cons in H3. rewrite H3. clear H3.
-          cbn [Semantics.q].
+          cbn [Semantics.quot].
           eapply predictLE_with_prefix_works_eq.
           { reflexivity. }
           eapply H3p8p2.
@@ -2360,7 +2368,7 @@ Section Proofs.
           2: blia.
           simpl in H3. rewrite <- app_assoc in H3. rewrite app_assoc in H3.
           simpl in H3. assert (H3' := H3). apply Semantics.predict_cons in H3.
-          rewrite H3. cbn [Semantics.q].
+          rewrite H3. cbn [Semantics.quot].
           eapply predictLE_with_prefix_works_eq.
           { reflexivity. }
           rewrite <- app_assoc. simpl in H5. assumption.

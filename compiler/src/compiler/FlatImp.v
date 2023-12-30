@@ -330,7 +330,7 @@ Module exec.
     | load: forall k t m l mc sz x a o v addr post,
         map.get l a = Some addr ->
         load sz m (word.add addr (word.of_Z o)) = Some v ->
-        post (read (word.add addr (word.of_Z o)) :: k) t m (map.put l x v)
+        post (leak_word (word.add addr (word.of_Z o)) :: k) t m (map.put l x v)
              (addMetricLoads 2
              (addMetricInstructions 1 mc)) ->
         exec (SLoad sz x a o) k t m l mc post
@@ -338,7 +338,7 @@ Module exec.
         map.get l a = Some addr ->
         map.get l v = Some val ->
         store sz m (word.add addr (word.of_Z o)) val = Some m' ->
-        post (write (word.add addr (word.of_Z o)) :: k) t m' l
+        post (leak_word (word.add addr (word.of_Z o)) :: k) t m' l
              (addMetricLoads 1
              (addMetricInstructions 1
              (addMetricStores 1 mc))) ->
@@ -348,7 +348,7 @@ Module exec.
         x <> i ->
         map.get l i = Some index ->
         load sz (map.of_list_word table) index = Some v ->
-        post (Semantics.table index :: k) t m (map.put l x v)
+        post (leak_word index :: k) t m (map.put l x v)
              (addMetricLoads 4
              (addMetricInstructions 3
              (addMetricJumps 1 mc))) ->
@@ -358,7 +358,7 @@ Module exec.
         (forall a mStack mCombined,
             anybytes a n mStack ->
             map.split mCombined mSmall mStack ->
-            exec body (salloc a :: k) t mCombined (map.put l x a) (addMetricLoads 1 (addMetricInstructions 1 mc))
+            exec body (consume_word a :: k) t mCombined (map.put l x a) (addMetricLoads 1 (addMetricInstructions 1 mc))
              (fun k' t' mCombined' l' mc' =>
               exists mSmall' mStack',
                 anybytes a n mStack' /\
@@ -385,14 +385,14 @@ Module exec.
         exec (SSet x y) k t m l mc post
     | if_true: forall k t m l mc cond bThen bElse post,
         eval_bcond l cond = Some true ->
-        exec bThen (branch true :: k) t m l
+        exec bThen (leak_bool true :: k) t m l
              (addMetricLoads 2
              (addMetricInstructions 2
              (addMetricJumps 1 mc))) post ->
         exec (SIf cond bThen bElse) k t m l mc post
     | if_false: forall k t m l mc cond bThen bElse post,
         eval_bcond l cond = Some false ->
-        exec bElse (branch false :: k) t m l
+        exec bElse (leak_bool false :: k) t m l
              (addMetricLoads 2
              (addMetricInstructions 2
              (addMetricJumps 1 mc))) post ->
@@ -408,14 +408,14 @@ Module exec.
         (forall k' t' m' l' mc',
             mid1 k' t' m' l' mc' ->
             eval_bcond l' cond = Some false ->
-            post (branch false :: k') t' m' l'
+            post (leak_bool false :: k') t' m' l'
                  (addMetricLoads 1
                  (addMetricInstructions 1
                  (addMetricJumps 1 mc')))) ->
         (forall k' t' m' l' mc',
             mid1 k' t' m' l' mc' ->
             eval_bcond l' cond = Some true ->
-            exec body2 (branch true :: k') t' m' l' mc' mid2) ->
+            exec body2 (leak_bool true :: k') t' m' l' mc' mid2) ->
         (forall k'' t'' m'' l'' mc'',
             mid2 k'' t'' m'' l'' mc'' ->
             exec (SLoop body1 cond body2) k'' t'' m'' l''
@@ -468,8 +468,8 @@ Module exec.
     Lemma loop_cps: forall body1 cond body2 k t m l mc post,
       exec body1 k t m l mc (fun k t m l mc => exists b,
         eval_bcond l cond = Some b /\
-        (b = false -> post (branch false :: k) t m l (addMetricLoads 1 (addMetricInstructions 1 (addMetricJumps 1 mc)))) /\
-        (b = true -> exec body2 (branch true :: k) t m l mc (fun k t m l mc =>
+        (b = false -> post (leak_bool false :: k) t m l (addMetricLoads 1 (addMetricInstructions 1 (addMetricJumps 1 mc)))) /\
+        (b = true -> exec body2 (leak_bool true :: k) t m l mc (fun k t m l mc =>
            exec (SLoop body1 cond body2) k t m l
                 (addMetricLoads 2 (addMetricInstructions 2 (addMetricJumps 1 mc))) post))) ->
       exec (SLoop body1 cond body2) k t m l mc post.
