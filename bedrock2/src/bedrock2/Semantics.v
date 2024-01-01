@@ -19,6 +19,7 @@ Definition io_event {width: Z}{BW: Bitwidth width}{word: word.word width}{mem: m
 event := bool | word | unit. *)
 (*should I name this leakage_event, now that it doesn't contain the IO events?*)
 Inductive event {width: Z}{BW: Bitwidth width}{word: word.word width} : Type :=
+| leak_unit : event
 | leak_bool : bool -> event
 | leak_word : word -> event
 | leak_list : list word -> event
@@ -31,6 +32,7 @@ Inductive event : Type :=
 | consume : forall {A : Type}, A -> event.*)
 
 Inductive qevent {width: Z}{BW: Bitwidth width}{word: word.word width} : Type :=
+| qleak_unit : qevent
 | qleak_bool : bool -> qevent
 | qleak_word : word -> qevent
 | qleak_list : list word -> qevent
@@ -39,8 +41,9 @@ Inductive qevent {width: Z}{BW: Bitwidth width}{word: word.word width} : Type :=
 
 Inductive abstract_trace {width: Z}{BW: Bitwidth width}{word: word.word width} : Type :=
 | empty
-| aleak_word (w : word) (after : abstract_trace)
+| aleak_unit (after : abstract_trace)
 | aleak_bool (b : bool) (after : abstract_trace)
+| aleak_word (w : word) (after : abstract_trace)
 | aleak_list (l : list word) (after : abstract_trace)
 | aconsume_word (after : word -> abstract_trace).
 
@@ -51,6 +54,7 @@ Section WithIOEvent.
 
   Definition quot e : qevent :=
     match e with
+    | leak_unit => qleak_unit
     | leak_bool b => qleak_bool b
     | leak_word w => qleak_word w
     | leak_list l => qleak_list l
@@ -68,6 +72,8 @@ Section WithIOEvent.
   Import ListNotations.
   Inductive generates : abstract_trace -> trace -> Prop :=
   | nil_gen : generates empty nil
+  | leak_unit_gen : forall a t_rev,
+      generates a t_rev -> generates (aleak_unit a) (leak_unit :: t_rev)
   | leak_bool_gen : forall b a t_rev,
       generates a t_rev -> generates (aleak_bool b a) (leak_bool b :: t_rev)
   | leak_word_gen : forall w a t_rev,
@@ -80,6 +86,7 @@ Section WithIOEvent.
   Fixpoint abstract_app (a1 a2 : abstract_trace) : abstract_trace :=
     match a1 with
     | empty => a2
+    | aleak_unit a1' => aleak_unit (abstract_app a1' a2)
     | aleak_bool b a1' => aleak_bool b (abstract_app a1' a2)
     | aleak_word w a1' => aleak_word w (abstract_app a1' a2)
     | aleak_list l a1' => aleak_list l (abstract_app a1' a2)
@@ -96,6 +103,7 @@ Section WithIOEvent.
   Fixpoint generator (t_rev : trace) : abstract_trace :=
     match t_rev with
     | nil => empty
+    | leak_unit :: t_rev' => aleak_unit (generator t_rev')
     | leak_bool b :: t_rev' => aleak_bool b (generator t_rev')
     | leak_word w :: t_rev' => aleak_word w (generator t_rev')
     | leak_list l :: t_rev' => aleak_list l (generator t_rev')
@@ -110,6 +118,7 @@ Section WithIOEvent.
   Definition head (a : abstract_trace) : qevent :=
     match a with
     | empty => qend
+    | aleak_unit _ => qleak_unit
     | aleak_bool b _ => qleak_bool b
     | aleak_word w _ => qleak_word w
     | aleak_list l _ => qleak_list l
@@ -119,6 +128,7 @@ Section WithIOEvent.
   Fixpoint predictor (a(*the whole thing*) : abstract_trace) (t(*so far*) : trace) : option qevent :=
     match a, t with
     | _, nil => Some (head a)
+    | aleak_unit a', cons leak_unit t' => predictor a' t'
     | aleak_bool _ a', cons (leak_bool _) t' => predictor a' t'
     | aleak_word _ a', cons (leak_word _) t' => predictor a' t'
     | aleak_list _ a', cons (leak_list _) t' => predictor a' t'
@@ -534,7 +544,7 @@ Module exec. Section WithEnv.
       params rets fbody (_ : map.get e fname = Some (params, rets, fbody))
       args mc' k' (_ : evaluate_call_args_log m l arges mc k = Some (args, mc', k'))
       lf (_ : map.of_list_zip params args = Some lf)
-      mid (_ : exec fbody k' t m lf (addMetricInstructions 100 (addMetricJumps 100 (addMetricLoads 100 (addMetricStores 100 mc')))) mid)
+      mid (_ : exec fbody (leak_unit :: k') t m lf (addMetricInstructions 100 (addMetricJumps 100 (addMetricLoads 100 (addMetricStores 100 mc')))) mid)
       (_ : forall k'' t' m' st1 mc'', mid k'' t' m' st1 mc'' ->
           exists retvs, map.getmany_of_list st1 rets = Some retvs /\
           exists l', map.putmany_of_list_zip binds retvs l = Some l' /\
@@ -688,7 +698,7 @@ Module exec. Section WithEnv.
       intuition.
     - Search evaluate_call_args_log. apply call_args_to_other_trace in H0.
       fwd. econstructor; intuition eauto. fwd. apply H3 in H0p2.
-      fwd. exists retvs. intuition. exists l'. intuition. eexists (_ ++ _).
+      fwd. exists retvs. intuition. exists l'. intuition. eexists (_ ++ _ :: _).
       repeat rewrite <- (app_assoc _ _ k2). repeat rewrite <- (app_assoc _ _ k).
       intuition.
     - apply call_args_to_other_trace in H0. fwd. econstructor; intuition eauto.

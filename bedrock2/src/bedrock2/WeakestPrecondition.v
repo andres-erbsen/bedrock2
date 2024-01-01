@@ -136,7 +136,7 @@ Section WeakestPrecondition.
             (word.unsigned b = 0%Z -> post (cons (leak_bool false) k') t m l))
       | cmd.call binds fname arges =>
         exists args k', dexprs m l k arges args k' /\ (* (call : String.string -> trace -> mem -> list word -> (trace -> mem -> list word -> Prop) -> Prop) *)
-        call fname k' t m args (fun k'' t m rets =>
+        call fname (cons leak_unit k') t m args (fun k'' t m rets =>
           exists l', map.putmany_of_list_zip binds rets l = Some l' /\
           post k'' t m l')
       | cmd.interact binds action arges =>
