@@ -319,7 +319,7 @@ Module exec.
         map.get e fname = Some (params, rets, fbody) ->
         map.getmany_of_list l args = Some argvs ->
         map.putmany_of_list_zip params argvs map.empty = Some st0 ->
-        exec fbody k t m st0 (addMetricInstructions 100 (addMetricJumps 100 (addMetricLoads 100 (addMetricStores 100 mc)))) outcome ->
+        exec fbody (leak_unit :: k) t m st0 (addMetricInstructions 100 (addMetricJumps 100 (addMetricLoads 100 (addMetricStores 100 mc)))) outcome ->
         (forall k' t' m' mc' st1,
             outcome k' t' m' st1 mc' ->
             exists retvs l',
@@ -454,7 +454,7 @@ Module exec.
         map.get e fname = Some (params, rets, fbody) ->
         map.getmany_of_list l args = Some argvs ->
         map.putmany_of_list_zip params argvs map.empty = Some st ->
-        exec fbody k t m st (addMetricInstructions 100 (addMetricJumps 100 (addMetricLoads 100 (addMetricStores 100 mc))))
+        exec fbody (leak_unit :: k) t m st (addMetricInstructions 100 (addMetricJumps 100 (addMetricLoads 100 (addMetricStores 100 mc))))
              (fun k' t' m' st' mc' =>
                 exists retvs l',
                   map.getmany_of_list st' rets = Some retvs /\
@@ -619,7 +619,9 @@ Module exec.
         destruct H2 as [l' H2]. exists l'. intuition eauto. eexists [_]. intuition eauto.
       - econstructor; intuition eauto. destruct H4 as [k'' [H4 H5] ].
         specialize (H3 _ _ _ _ _ H5). subst. destruct H3 as [retvs [l' H6] ].
-        exists retvs, l'. intuition eauto.
+        exists retvs, l'. intuition. eexists (_ ++ [_]).
+        repeat rewrite <- (app_assoc _ _ k2). repeat rewrite <- (app_assoc _ _ k).
+        intuition.
       - econstructor; intuition eauto. eexists [_]. intuition eauto.
       - econstructor; intuition eauto. eexists [_]. intuition eauto.
       - econstructor; intuition eauto. eexists [_]. intuition eauto.

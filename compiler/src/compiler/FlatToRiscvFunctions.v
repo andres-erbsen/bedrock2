@@ -1695,7 +1695,8 @@ Section Proofs.
       split; [MetricsToRiscv.solve_MetricLog|].
       split; eauto 8 with map_hints.
       
-      do 2 eexists. split; [reflexivity|]. split.
+      do 2 eexists. split.
+      { rewrite app_one_cons. rewrite app_assoc. reflexivity. } split.
       { rewrite H0p5p1. simpl. rewrite app_one_cons. rewrite app_assoc. reflexivity. }
       exists (S F). intros. destruct fuel as [|fuel']; [blia|]. cbn [rnext_stmt].
       Search (map.get e_impl_full fname). rewrite H. Search (map.get e_pos fname).
@@ -1703,7 +1704,10 @@ Section Proofs.
       Search predictsLE. eapply predictLE_with_prefix_works_eq.
       { rewrite rev_app_distr. simpl. reflexivity. }
       cbv [rnext_fun] in H0p5p2. Search p_sp. subst. simpl in H0p5p2.
-      eapply H0p5p2; try eassumption. blia.      
+      eapply H0p5p2.
+      { rewrite rev_app_distr in H0. rewrite <- app_assoc. apply H0. }
+      { rewrite <- app_assoc. rewrite rev_app_distr in H2. eassumption. }
+      { blia. } 
 
     - idtac "Case compile_stmt_correct/SLoad".
       progress unfold Memory.load, Memory.load_Z in *. fwd.

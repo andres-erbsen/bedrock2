@@ -17,6 +17,7 @@ Require Import coqutil.Tactics.fwd.
 Require bedrock2.ProgramLogic.
 
 Notation trace := Semantics.trace.
+Notation leak_unit := Semantics.leak_unit.
 Notation leak_bool := Semantics.leak_bool.
 Notation leak_word := Semantics.leak_word.
 Notation leak_list := Semantics.leak_list.
@@ -190,6 +191,7 @@ Section Spilling.
   
   Notation qevent := Semantics.qevent. Search qevent.
   Notation quot := Semantics.quot.
+  Notation qleak_unit := Semantics.qleak_unit.
   Notation qleak_bool := Semantics.qleak_bool.
   Notation qleak_word := Semantics.qleak_word.
   Notation qleak_list := Semantics.qleak_list.
@@ -329,14 +331,14 @@ Section Spilling.
             match @map.get _ _ env e fname with
             | Some (params, rets, fbody) =>
                 predict_with_prefix
-                  (leak_set_reg_range_to_vars fpval argvars)
+                  (leak_set_reg_range_to_vars fpval argvars ++ [leak_unit])
                   (fun sk_so_far' =>
                      match sk_so_far' with (* would be nice if predict_with_prefix would do this *)
                      | consume_word fpval' :: sk_so_far'' =>
                          predict_with_prefix
                            (leak_set_vars_to_reg_range fpval' params)
                            (fun sk_so_far''' =>
-                             snext_stmt' k_so_far fpval' fbody sk_so_far'''
+                             snext_stmt' (k_so_far ++ [leak_unit]) fpval' fbody sk_so_far'''
                                (fun k_so_far' sk_so_far'''' =>
                                   predict_with_prefix
                                     (leak_set_reg_range_to_vars fpval' rets ++ leak_set_vars_to_reg_range fpval resvars)
@@ -1977,20 +1979,31 @@ Section Spilling.
         split; [eassumption|].
         (* begin ct stuff for call*)
         split.
-        { subst kH5. reflexivity. }
+        { subst kH5. rewrite app_one_cons. rewrite app_assoc. reflexivity. }
         split.
         { subst k22. subst kL6. subst kL5. subst kL4. subst k2'.
-          rewrite app_one_cons. repeat rewrite app_assoc. reflexivity. }
+          rewrite app_one_cons. rewrite (app_one_cons leak_unit). repeat rewrite app_assoc.
+          reflexivity. }
         intros. exists (S F). intros. destruct fuel' as [|fuel']; [blia|].
         repeat (rewrite rev_app_distr || rewrite rev_involutive || cbn [rev List.app]).
-        simpl. rewrite H. repeat rewrite <- app_assoc. apply predict_with_prefix_works.
-        simpl. econstructor; auto. repeat rewrite <- app_assoc. apply predict_with_prefix_works.
-        Check CT. eapply CT.
+        simpl. rewrite H. 
+        rewrite rev_app_distr in H3. repeat rewrite <- app_assoc in H3. assert (H3' := H3).
+        rewrite (app_one_cons leak_unit (consume_word _ :: _)).
+        repeat rewrite <- app_assoc. rewrite app_assoc.
+        apply predict_with_prefix_works.
+        simpl. econstructor.
+        { reflexivity. }
         { eauto. }
-        { rewrite app_assoc. apply predict_with_prefix_works. assumption. }
-        blia.
+        { (*should copy what I did in flattoriscv so i don't have to deal with this associativity 
+            nonsense.*)
+          repeat rewrite <- app_assoc. apply predict_with_prefix_works.
+          eapply CT.
+          { repeat rewrite <- app_assoc. eassumption. }
+          { rewrite app_assoc. apply predict_with_prefix_works.
+            rewrite <- app_assoc. rewrite rev_app_distr in H8. apply H8. }
+          { blia. }
         (* end ct stuff for call*)
-      }
+      } }
 
     - (* exec.load *)
       eapply exec.seq_cps.
