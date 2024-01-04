@@ -330,10 +330,10 @@ Lemma swap_ct :
              LowerPipeline.machine_ok p_funcs stack_lo stack_hi instrs mH' 
                Rdata Rexec final) /\
              final.(getTrace) = (finalTrace ++ initial.(getTrace))%list).
-Proof. Check @swap_ok. Unshelve.
-       assert (spec := @swap_ok Words32Naive.word mem word_ok' mem_ok).
-       cbv [ProgramLogic.program_logic_goal_for] in spec.
-       specialize (spec nil). cbv [ct_spec_of_swap] in spec. destruct spec as [f spec].
+Proof.
+  assert (spec := @swap_ok Words32Naive.word mem word_ok' mem_ok).
+  cbv [ProgramLogic.program_logic_goal_for] in spec.
+  specialize (spec nil). cbv [ct_spec_of_swap] in spec. destruct spec as [f spec].
   intros. Print compiler_correct_wp''. Unshelve.
   edestruct (@compiler_correct_wp'' _ _ Words32Naive.word mem _ ext_spec _ _ _ ext_spec_ok _ _ _ _ _ word_ok _ _ RV32I _ compile_ext_call leak_ext_call compile_ext_call_works compile_ext_call_length fs instrs finfo req_stack_size stack_hi p_funcs fname).
   { simpl. reflexivity. }
