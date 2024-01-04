@@ -308,11 +308,9 @@ Check (@compiler_correct_wp _ _ Words32Naive.word mem _ ext_spec _ _ _ ext_spec_
 Check compiler_correct_wp.
 
 Lemma swap_ct :
-  forall a_addr b_addr,
-  exists
-         next : Words32Naive.word * Z * Words32Naive.word ->
-                nat -> list LeakageEvent -> option FlatToRiscvDef.qLeakageEvent,
-  forall R m a b stack_lo ret_addr p_funcs stack_hi
+  forall a_addr b_addr stack_lo ret_addr p_funcs stack_hi,
+  exists finalTrace : list LeakageEvent,
+  forall R m a b
                        Rdata Rexec (initial : RiscvMachine),
     Separation.sep (Separation.sep (Scalars.scalar a_addr a) (Scalars.scalar b_addr b)) R m ->
     req_stack_size <= word.unsigned (word.sub stack_hi stack_lo) / SeparationLogic.bytes_per_word ->
@@ -324,27 +322,22 @@ Lemma swap_ct :
     LowerPipeline.machine_ok p_funcs stack_lo stack_hi instrs m Rdata Rexec initial ->
     FlatToRiscvCommon.runsTo initial
       (fun final : RiscvMachine =>
-         exists (mH' : mem) (retvals : list Words32Naive.word),
+         (exists (mH' : mem) (retvals : list Words32Naive.word),
            LowerPipeline.arg_regs_contain (getRegs final) retvals /\
              post (getLog final) mH' retvals /\
              map.only_differ (getRegs initial) reg_class.caller_saved (getRegs final) /\
              getPc final = ret_addr /\
              LowerPipeline.machine_ok p_funcs stack_lo stack_hi instrs mH' 
-               Rdata Rexec final /\
-             (exists (tL : list LeakageEvent) (F : nat),
-                 getTrace final = (tL ++ getTrace initial)%list /\
-                   (forall fuel : nat,
-                       (F <= fuel)%nat ->
-                       FlatToRiscvCommon.predictsLE (next (p_funcs, f_rel_pos, stack_hi) fuel)
-                         (rev tL)))).
+               Rdata Rexec final) /\
+             final.(getTrace) = (finalTrace ++ initial.(getTrace))%list).
 Proof. Check @swap_ok. Unshelve.
        assert (spec := @swap_ok Words32Naive.word mem word_ok' mem_ok).
        cbv [ProgramLogic.program_logic_goal_for] in spec.
        specialize (spec nil). cbv [ct_spec_of_swap] in spec. destruct spec as [f spec].
-  intros. Check @compiler_correct_wp. Unshelve.
-  edestruct (@compiler_correct_wp _ _ Words32Naive.word mem _ ext_spec _ _ _ ext_spec_ok _ _ _ _ _ word_ok _ _ RV32I _ compile_ext_call leak_ext_call compile_ext_call_works compile_ext_call_length fs instrs finfo req_stack_size fname).
-  { reflexivity. }
-  { reflexivity. }
+  intros. Print compiler_correct_wp''. Unshelve.
+  edestruct (@compiler_correct_wp'' _ _ Words32Naive.word mem _ ext_spec _ _ _ ext_spec_ok _ _ _ _ _ word_ok _ _ RV32I _ compile_ext_call leak_ext_call compile_ext_call_works compile_ext_call_length fs instrs finfo req_stack_size stack_lo stack_hi ret_addr p_funcs fname).
+  { simpl. reflexivity. }
+  { vm_compute. reflexivity. }
   exists x. intros.
   eapply H.
   { simpl. repeat constructor. tauto. }
@@ -355,18 +348,13 @@ Proof. Check @swap_ok. Unshelve.
   2: reflexivity. Print ct_spec_of_swap. Print ct_spec_of_swap. Search ct_spec_of_swap.
   Check swap_ok. Print ProgramLogic.program_logic_goal_for.
   specialize (spec nil (getLog initial) m a_addr b_addr a b R H0). cbv [fs fname].
-  Check @WeakestPreconditionProperties.Proper_call. Check @WeakestPrecondition.call.
   eapply WeakestPreconditionProperties.Proper_call.
   2: eapply spec.
   cbv [Morphisms.pointwise_relation Basics.impl]. intros.
   split.
-  { cbv [post]. apply I. }
-  destruct H8 as [H8 [H9 H10] ]. subst. destruct H8 as [k'' [H8 H11] ]. exists k''.
-  apply predictor_works in H8. subst.
-  exists O. split; [reflexivity|].
-  intros.
-  instantiate (1 := (fun _ _ => (predictor (WeakestPrecondition.appl a_addr (WeakestPrecondition.appl b_addr f))))).
-  simpl. assumption.
+  2: cbv [post]; reflexivity.
+  destruct H8 as [H8 [H9 H10] ]. subst. destruct H8 as [k'' [H8 H11] ]. subst. exists k''.
+  split; eauto.
   Unshelve.
        - exact envH.
        - exact word_ok'.
@@ -377,7 +365,29 @@ Proof. Check @swap_ok. Unshelve.
 Qed.
 
 Print Assumptions swap_ct.
+(* Prints:
 
+    Axioms:
+        PropExtensionality.propositional_extensionality : forall P Q : Prop, P <-> Q -> P = Q
+        mem_ok : map.ok mem
+        mem : map.map Words32Naive.word byte
+        localsL_ok : map.ok localsL
+        localsL : map.map Z Words32Naive.word
+        FunctionalExtensionality.functional_extensionality_dep
+          : forall (A : Type) (B : A -> Type) (f g : forall x : A, B x),
+            (forall x : A, f x = g x) -> f = g
+        envH_ok : map.ok envH
+        envH : map.map string (list string * list string * cmd)
+        em : forall P : Prop, P \/ ~ P
+        RVM : RiscvProgramWithLeakage
+        PRParams : PrimitivesParams M RiscvMachine
+        PR : MetricPrimitives PRParams
+        MM : Monad M
+        M : Type -> Type
+
+*)
+
+(*
 (* Not sure I can actually prove this. *)
 Lemma a_trace_exists :
   forall initial next P,
@@ -620,4 +630,4 @@ Proof.
   apply last_step in H2; try assumption.
   destruct H2 as [n H2].
   exists (finalTrace n). assumption.
-Qed.
+Qed.*)
