@@ -308,9 +308,9 @@ Check (@compiler_correct_wp _ _ Words32Naive.word mem _ ext_spec _ _ _ ext_spec_
 Check compiler_correct_wp.
 
 Lemma swap_ct :
-  forall a_addr b_addr stack_lo ret_addr p_funcs stack_hi,
+  forall a_addr b_addr p_funcs stack_hi,
   exists finalTrace : list LeakageEvent,
-  forall R m a b
+  forall R m a b stack_lo ret_addr
                        Rdata Rexec (initial : RiscvMachine),
     Separation.sep (Separation.sep (Scalars.scalar a_addr a) (Scalars.scalar b_addr b)) R m ->
     req_stack_size <= word.unsigned (word.sub stack_hi stack_lo) / SeparationLogic.bytes_per_word ->
@@ -335,7 +335,7 @@ Proof. Check @swap_ok. Unshelve.
        cbv [ProgramLogic.program_logic_goal_for] in spec.
        specialize (spec nil). cbv [ct_spec_of_swap] in spec. destruct spec as [f spec].
   intros. Print compiler_correct_wp''. Unshelve.
-  edestruct (@compiler_correct_wp'' _ _ Words32Naive.word mem _ ext_spec _ _ _ ext_spec_ok _ _ _ _ _ word_ok _ _ RV32I _ compile_ext_call leak_ext_call compile_ext_call_works compile_ext_call_length fs instrs finfo req_stack_size stack_lo stack_hi ret_addr p_funcs fname).
+  edestruct (@compiler_correct_wp'' _ _ Words32Naive.word mem _ ext_spec _ _ _ ext_spec_ok _ _ _ _ _ word_ok _ _ RV32I _ compile_ext_call leak_ext_call compile_ext_call_works compile_ext_call_length fs instrs finfo req_stack_size stack_hi p_funcs fname).
   { simpl. reflexivity. }
   { vm_compute. reflexivity. }
   exists x. intros.
