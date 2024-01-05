@@ -58,6 +58,8 @@ Instance ct_bad_swap : ct_spec_of "bad_swap" :=
     So, if we want to say that this is constant-time, then we have to do some silly things with
     the function specification.*)
   (* can reference (call set_channel1) and inputs to set_channel1 in IO spec to constrain this.*)
+                      
+    
   Definition set_channel1 :=
     func! (input) {
         io! input_is_public = IS_PUBLIC();
@@ -217,5 +219,80 @@ in the assembly-level trace.
   (*
   From bedrock2 Require Import ToCString PrintString.
   Goal True. print_string (c_module &[,swap_swap; swap]). Abort.
-  *)
+   *)
+
+  Definition io_function :=
+    func! () {
+        io! x = INPUT();
+        io! y = INPUT();
+        if (x) { /*skip*/ }
+      }.
+
+  Instance ext_spec : ExtSpec :=
+    fun t mGive action (argvals: list word) (post: (mem -> list word -> Prop)) =>
+      match argvals with
+      | nil => if String.eqb action "INPUT" then
+                 forall input, post map.empty [input]
+               else False
+      | _ => False
+      end.
+
+  Print io_event.
+
+  Instance ct_spec_of_io_function : spec_of "io_function" :=
+    fun functions =>
+      exists f,
+      forall k t m,
+      forall x y (R : mem -> Prop),
+        m =* R ->
+        WeakestPrecondition.call
+          functions "io_function" k t m nil
+          (fun k' t' m' rets =>
+             exists t'',
+               t' = t'' ++ t /\
+                 (t'' = [((map.empty, "INPUT", []), (map.empty, [y]));
+                         ((map.empty, "INPUT", []), (map.empty, [x]))] ->
+                  m =* R /\
+                    exists k'',
+                      k' = k'' ++ k /\
+                        generates (f x) (List.rev k''))).
+  
+  Lemma io_function_ok : program_logic_goal_for_function! io_function.
+  Proof.
+    repeat straightline.
+    econstructor.
+    repeat straightline.
+    exists m, map.empty.
+    split.
+    { apply Properties.map.split_empty_r. reflexivity. }
+    cbv [ext_spec]. rewrite String.eqb_refl.
+    repeat straightline.
+    econstructor.
+    repeat straightline.
+    exists m, map.empty.
+    split.
+    { assumption. }
+    rewrite String.eqb_refl.
+    repeat straightline.
+    econstructor.
+    eexists. split; repeat straightline.
+    split; repeat straightline.
+    { eexists. split.
+      { instantiate (1 := [_; _]). reflexivity. }
+      repeat straightline. split; [assumption|].
+      eexists. split.
+      { instantiate (1 := [_]). reflexivity. }
+      Check word.eqb. Check (fun x => aleak_bool ((word.unsigned x) =? 0) _).
+      instantiate (1 := (fun x => aleak_bool (negb (word.unsigned x =? 0)) _)).
+      simpl. injection H3. intros. subst. Search Z.eqb.
+      rewrite <- Z.eqb_neq in H2. rewrite H2. constructor. constructor. }
+    { eexists. split.
+      { instantiate (1 := [_; _]). reflexivity. }
+      repeat straightline. split; [assumption|].
+      eexists. split.
+      { instantiate (1 := [_]). reflexivity. }
+      Check word.eqb. Check (fun x => aleak_bool ((word.unsigned x) =? 0) _).
+      simpl. injection H3. intros. subst. Search Z.eqb.
+      rewrite <- Z.eqb_eq in H2. rewrite H2. constructor. constructor. } 
+  Qed.
 End WithParameters.
