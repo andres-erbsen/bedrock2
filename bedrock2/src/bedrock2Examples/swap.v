@@ -242,21 +242,23 @@ in the assembly-level trace.
 
   Instance ct_spec_of_io_function : spec_of "io_function" :=
     fun functions =>
-      exists f,
       forall k t m,
-      forall x y (R : mem -> Prop),
+      forall x,
+      exists a,
+        forall y (R : _ -> Prop),
         m =* R ->
         WeakestPrecondition.call
           functions "io_function" k t m nil
           (fun k' t' m' rets =>
-             exists t'',
-               t' = t'' ++ t /\
-                 (t'' = [((map.empty, "INPUT", []), (map.empty, [y]));
-                         ((map.empty, "INPUT", []), (map.empty, [x]))] ->
+             exists x' y',
+               t' = [((map.empty, "INPUT", []), (map.empty, [y']));
+                     ((map.empty, "INPUT", []), (map.empty, [x']))] ++ t /\
+                 (x' = x ->
+                  y' = y ->
                   m =* R /\
                     exists k'',
                       k' = k'' ++ k /\
-                        generates (f x) (List.rev k''))).
+                        generates a (List.rev k''))).
   
   Lemma io_function_ok : program_logic_goal_for_function! io_function.
   Proof.
@@ -278,22 +280,22 @@ in the assembly-level trace.
     econstructor.
     eexists. split; repeat straightline.
     split; repeat straightline.
-    { eexists. split.
-      { instantiate (1 := [_; _]). reflexivity. }
+    { eexists. eexists. split.
+      { reflexivity. }
       repeat straightline. split; [assumption|].
       eexists. split.
       { instantiate (1 := [_]). reflexivity. }
       Check word.eqb. Check (fun x => aleak_bool ((word.unsigned x) =? 0) _).
-      instantiate (1 := (fun x => aleak_bool (negb (word.unsigned x =? 0)) _)).
-      simpl. injection H3. intros. subst. Search Z.eqb.
+      instantiate (1 := (aleak_bool (negb (word.unsigned x =? 0)) _)).
+      simpl.
       rewrite <- Z.eqb_neq in H2. rewrite H2. constructor. constructor. }
-    { eexists. split.
-      { instantiate (1 := [_; _]). reflexivity. }
+    { eexists. eexists. split.
+      { reflexivity. }
       repeat straightline. split; [assumption|].
       eexists. split.
       { instantiate (1 := [_]). reflexivity. }
       Check word.eqb. Check (fun x => aleak_bool ((word.unsigned x) =? 0) _).
-      simpl. injection H3. intros. subst. Search Z.eqb.
+      simpl.
       rewrite <- Z.eqb_eq in H2. rewrite H2. constructor. constructor. } 
   Qed.
 End WithParameters.
