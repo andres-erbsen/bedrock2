@@ -232,6 +232,7 @@ in the assembly-level trace.
     fun t mGive action (argvals: list word) (post: (mem -> list word -> Prop)) =>
       match argvals with
       | nil => if String.eqb action "INPUT" then
+                 mGive = map.empty /\
                  forall input, post map.empty [input]
                else False
       | _ => False

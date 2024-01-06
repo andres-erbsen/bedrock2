@@ -238,19 +238,36 @@ Context {M : Type -> Type} {MM : Monad M}.
 Context {RVM: RiscvProgramWithLeakage}.
 Context {PRParams: PrimitivesParams M MetricRiscvMachine}.
 Context {PR: MetricPrimitives PRParams}.
-
-Definition leak_ext_call : list LeakageEvent := nil.
-#[local] Instance ext_spec: ExtSpec :=
-  fun t mGive action argvals post =>
-    False. Print FlatToRiscvCommon.compiles_FlatToRiscv_correctly.
+Search ExtSpec.
+#[local] Instance ext_spec: ExtSpec := bedrock2Examples.swap.ext_spec.
 Lemma ext_spec_ok : ext_spec.ok ext_spec.
 Proof.
-  constructor; intros; cbv [ext_spec] in *; try destruct H.
-  cbv [Morphisms.Proper Morphisms.respectful Morphisms.pointwise_relation Basics.impl].
-  auto.
+  constructor; intros; cbv [bedrock2Examples.swap.ext_spec ext_spec] in *.
+  - destruct args; [|destruct H]. destruct (_ =? _); [|destruct H].
+    destruct H as [H _]. destruct H0 as [H0 _]. subst. apply map.same_domain_refl.
+  - cbv [Morphisms.Proper Morphisms.respectful Morphisms.pointwise_relation Basics.impl].
+    intros. destruct args; [|destruct H0]. destruct (_ =? _); [|destruct H0].
+    destruct H0 as [H1 H2]. split; auto.
+  - destruct args; [|destruct H]. destruct (_ =? _); [|destruct H]. destruct H as [H1 H2].
+    destruct H0 as [H3 H4]. auto.
 Qed.
-Check (@FlatToRiscvCommon.compiles_FlatToRiscv_correctly RV32I _ _ _ _ _ compile_ext_call
-         leak_ext_call _ _ _ _ _ _ _ _ compile_ext_call).
+
+Print bedrock2Examples.swap.ext_spec. Print Byte.xa0.
+
+Definition other_compile_ext_call(posenv: funpos_env)(mypos stackoffset: Z)(s: FlatImp.stmt Z) :=
+  match s with
+  | FlatImp.SInteract _ fname _ =>
+    if string_dec fname "INPUT" then
+      [[Addi 1 Register0 7]]
+    else
+      nil
+  | _ => []
+  end.
+Definition other_leak_ext_call : funpos_env -> Z -> Z -> FlatImp.stmt Z -> list LeakageEvent :=
+  fun _ _ _ _ => nil.
+
+Check (@FlatToRiscvCommon.compiles_FlatToRiscv_correctly RV32I _ _ _ _ _ other_compile_ext_call
+         other_leak_ext_call _ _ _ _ _ _ _ _ compile_ext_call).
 Check @compiler_correct_wp.
 Check (@PrimitivesParams _ _ _ _ _ M MetricRiscvMachine).
 Check (@compiler_correct_wp _ _ Words32Naive.word mem _ ext_spec _ _ _ ext_spec_ok _ _ _ _ _).
@@ -268,7 +285,7 @@ Proof.
 Lemma compile_ext_call_works :
   (forall (resvars : list Z) (extcall : string) (argvars : list Z),
         @FlatToRiscvCommon.compiles_FlatToRiscv_correctly RV32I 32 Bitwidth32.BW32
-          Words32Naive.word localsL (SortedListString.map Z) compile_ext_call leak_ext_call mem
+          Words32Naive.word localsL (SortedListString.map Z) other_compile_ext_call other_leak_ext_call mem
           (SortedListString.map (list Z * list Z * FlatImp.stmt Z)) M MM RVM PRParams ext_spec
           RV32I_bitwidth compile_ext_call (@FlatImp.SInteract Z resvars extcall argvars)).
 Proof.

@@ -47,7 +47,7 @@ Definition compile_interact(results: list Z) a (args: list Z):
     match results, args with
     | [res], [addr] => [[ Lw res addr 0 ]]
     | _, _ => [[]] (* invalid, excluded by ext_spec *)
-    end.
+    end. Print Sw. Print LeakageEvent.
 
 Lemma compile_interact_length: forall binds f args,
     Z.of_nat (List.length (compile_interact binds f args)) <= 1.
@@ -115,14 +115,34 @@ Section MMIO1.
   Add Ring wring : (word.ring_theory (word := word))
       (preprocess [autorewrite with rew_word_morphism],
        morphism (word.ring_morph (word := word)),
-       constants [word_cst]).
+        constants [word_cst]).
+
+  Definition leak_interact(results: list Z) a (args: list Z):
+  list LeakageEvent :=
+  if String.eqb "MMIOWRITE" a then
+    match results, args with
+    | [], [addr; val] =>
+        [ ILeakage (Sw_leakage (word.of_Z addr)) ]
+    | _, _ => [] (* invalid, excluded by ext_spec *)
+    end
+  else
+    match results, args with
+    | [res], [addr] => [ ILeakage (Lw_leakage (word.of_Z addr)) ]
+    | _, _ => [] (* invalid, excluded by ext_spec *)
+    end.
 
   Definition compile_ext_call(_: funname_env Z)(_ _: Z)(s: stmt Z) :=
-      match s with
-      | SInteract resvars action argvars => compile_interact resvars action argvars
-      | _ => []
-      end.
+    match s with
+    | SInteract resvars action argvars => compile_interact resvars action argvars
+    | _ => []
+    end.
 
+  Definition leak_ext_call(_: funname_env Z)(_ _: Z)(s: stmt Z) :=
+    match s with
+    | SInteract resvars action argvars => leak_interact resvars action argvars
+    | _ => []
+    end.
+  
   Section CompilationTest.
     Definition magicMMIOAddrLit: Z := 0x10024000.
     Variable addr: Z.
@@ -246,7 +266,7 @@ Section MMIO1.
   Time Qed.
 
   Lemma compile_ext_call_correct: forall resvars extcall argvars,
-      FlatToRiscvCommon.compiles_FlatToRiscv_correctly compile_ext_call compile_ext_call
+      FlatToRiscvCommon.compiles_FlatToRiscv_correctly compile_ext_call leak_ext_call compile_ext_call
         (FlatImp.SInteract resvars extcall argvars).
   Proof.
     unfold FlatToRiscvCommon.compiles_FlatToRiscv_correctly. simpl. intros.
@@ -337,6 +357,7 @@ Section MMIO1.
       }
       repeat fwd.
 
+      unfold RiscvMachine.withLeakageEvent, getRegs.
       unfold getReg.
       destr ((0 <? z1) && (z1 <? 32))%bool; cbv [valid_FlatImp_var] in *; [|exfalso; blia].
       destr ((0 <? z2) && (z2 <? 32))%bool; cbv [valid_FlatImp_var] in *; [|exfalso; blia].
@@ -364,7 +385,7 @@ Section MMIO1.
       apply eqb_eq in E. subst action.
       cbn -[invalidateWrittenXAddrs] in *.
       specialize (HPp1 mKeep). rewrite map.split_empty_r in HPp1. specialize (HPp1 eq_refl).
-      do 4 eexists.
+      do 5 eexists.
       split; eauto.
       split; eauto.
       split; [unfold map.only_differ; eauto|].
@@ -372,6 +393,11 @@ Section MMIO1.
         unfold id. MetricsToRiscv.solve_MetricLog.
       }
       split; eauto.
+      2: { exists nil. eexists [_]. split; [reflexivity|]. split; [reflexivity|].
+           exists (S O). intros. destruct fuel as [|fuel']; [blia|].
+           cbn [rnext_stmt leak_ext_call]. cbv [leak_interact]. rewrite String.eqb_refl.
+           Search predictLE_with_prefix. eapply FlatToRiscvCommon.predictLE_with_prefix_works_eq.
+           { simpl. reflexivity. do 2 eexists. 
       split; eauto.
       split; eauto.
       split; eauto.
