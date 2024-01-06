@@ -69,7 +69,7 @@ Section Proofs.
   Context {PR: MetricPrimitives.MetricPrimitives PRParams}.
   Context {BWM: bitwidth_iset width iset}.
   Context (compile_ext_call: pos_map -> Z -> Z -> stmt Z -> list Instruction).
-  Context (leak_ext_call: list LeakageEvent).
+  Context (leak_ext_call: pos_map -> Z -> Z -> stmt Z -> list LeakageEvent).
 
   Add Ring wring : (word.ring_theory (word := word))
       (preprocess [autorewrite with rew_word_morphism],

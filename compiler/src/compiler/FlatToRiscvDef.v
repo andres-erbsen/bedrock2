@@ -406,7 +406,7 @@ Section FlatToRiscv1.
   Context {env: map.map String.string (list Z * list Z * stmt Z)}.
   Context {pos_map: map.map String.string Z}.
   Context (compile_ext_call: pos_map -> Z -> Z -> stmt Z -> list Instruction).
-  Context (leak_ext_call: (*env -> Z (*sp_val*) -> Z (*stackoffset*) -> stmt Z ->*) list LeakageEvent).
+  Context (leak_ext_call: pos_map -> Z (*sp_val*) -> Z (*stackoffset*) -> stmt Z -> list LeakageEvent).
 
   Section WithEnv.
     Variable e: pos_map.
@@ -725,7 +725,7 @@ Section FlatToRiscv1.
               end
           | SInteract _ _ _ =>
               predictLE_with_prefix
-                leak_ext_call
+                (leak_ext_call e myPos stackoffset s)
                 (f t_so_far)
                 rt_so_far
           end

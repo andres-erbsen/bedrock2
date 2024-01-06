@@ -120,7 +120,7 @@ Section LowerPipeline.
   Context {word: word.word width} {word_ok: word.ok word}.
   Context {locals: map.map Z word} {locals_ok: map.ok locals}.
   Context {mem: map.map word byte} {mem_ok: map.ok mem}.
-  Context (leak_ext_call: list LeakageEvent).
+  Context (leak_ext_call: pos_map -> Z -> Z -> stmt Z -> list LeakageEvent).
 
 
   Add Ring wring : (word.ring_theory (word := word))
@@ -272,7 +272,7 @@ Section LowerPipeline.
       iff1 (program iset functions_start instrs)
            (FlatToRiscvCommon.functions compile_ext_call functions_start
                                         (FlatToRiscvDef.build_fun_pos_env iset compile_ext_call e) e).
-  Proof using word_ok mem_ok pos_map_ok env_ok compile_ext_call_length_ignores_positions.
+  Proof using BW leak_ext_call word_ok mem_ok pos_map_ok env_ok compile_ext_call_length_ignores_positions.
     unfold riscvPhase.
     intros.
     fwd.
