@@ -2442,17 +2442,29 @@ Section Spilling.
     This seems not good.  Options to fix it:
     - add a flag 'is_ct' to call_spec, only require to be predicted by next if flag is true
     - ??? *)
+  Print call_spec.
   Lemma spill_fun_correct: forall e1 e2 argnames1 retnames1 body1 argnames2 retnames2 body2,
       spill_functions e1 = Success e2 ->
       spill_fun (argnames1, retnames1, body1) = Success (argnames2, retnames2, body2) ->
-      forall argvals k t m next (post: Semantics.io_trace -> mem -> list word -> Prop),
-        call_spec e1 (argnames1, retnames1, body1) next k t m argvals post ->
-        call_spec e2 (argnames2, retnames2, body2) (fun fuel => snext_fun e1 fuel (next fuel) [] (argnames1, retnames1, body1)) k t m argvals post.
-  Proof.
-    intros. eapply spill_fun_correct_aux; try eassumption.
-    unfold spilling_correct_for.
-    eapply spilling_correct.
-    assumption.
-  Qed.
+      forall argvals k t m (post: Semantics.trace -> Semantics.io_trace -> mem -> list word -> Prop),
+        (forall l mc,
+            map.of_list_zip argnames1 argvals = Some l ->
+            exec e1 body1 k t m l mc (fun k' t' m' l' mc' =>
+                                       exists retvals,
+                                         map.getmany_of_list l' retnames1 = Some retvals /\
+                                           post k' t' m' retvals)) ->
+        (forall l mc,
+            map.of_list_zip argnames2 argvals = Some l ->
+            exec e2 body2 k t m l mc (fun k' t' m' l' mc' =>
+                                       exists k''L k''H retvals,
+                                         map.getmany_of_list l' retnames2 = Some retvals /\
+                                           post (k''H ++ k) t' m' retvals /\
+                                           k' = k''L ++ k /\
+                                           forall next,
+                                             predicts next (rev k''H) ->
+                                             exists F,(*need to stop writing exists here.*)
+                                             forall fuel,
+                                               (F <= fuel)%nat ->
+                                               predicts (snext_fun e1 fuel next [] (argnames1, retnames1, body1)) k''L)).
 
 End Spilling.
