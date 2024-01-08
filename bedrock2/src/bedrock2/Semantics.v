@@ -21,7 +21,9 @@ event := bool | word | unit. *)
 Inductive event {width: Z}{BW: Bitwidth width}{word: word.word width} : Type :=
 | leak_bool : bool -> event
 | leak_word : word -> event
-| consume_bool : bool -> event
+| leak_list : list word -> event
+(* ^we need this, because sometimes it's convenient that one io call leaks only one event
+   See Interact case of spilling transform_trace function for an example. *)
 | consume_word : word -> event.
 (*This looks pretty, but it seems hard to work with.  Can't even use the inversion tactic?
 Inductive event : Type :=
@@ -31,6 +33,7 @@ Inductive event : Type :=
 Inductive qevent {width: Z}{BW: Bitwidth width}{word: word.word width} : Type :=
 | qleak_bool : bool -> qevent
 | qleak_word : word -> qevent
+| qleak_list : list word -> qevent
 | qconsume : qevent
 | qend : qevent.
 
@@ -38,7 +41,7 @@ Inductive abstract_trace {width: Z}{BW: Bitwidth width}{word: word.word width} :
 | empty
 | aleak_word (w : word) (after : abstract_trace)
 | aleak_bool (b : bool) (after : abstract_trace)
-| aconsume_bool (after : bool -> abstract_trace)
+| aleak_list (l : list word) (after : abstract_trace)
 | aconsume_word (after : word -> abstract_trace).
 
 Section WithIOEvent.
@@ -50,7 +53,7 @@ Section WithIOEvent.
     match e with
     | leak_bool b => qleak_bool b
     | leak_word w => qleak_word w
-    | consume_bool b => qconsume
+    | leak_list l => qleak_list l
     | consume_word w => qconsume
     end.
 
@@ -69,8 +72,8 @@ Section WithIOEvent.
       generates a t_rev -> generates (aleak_bool b a) (leak_bool b :: t_rev)
   | leak_word_gen : forall w a t_rev,
       generates a t_rev -> generates (aleak_word w a) (leak_word w :: t_rev)
-  | consume_bool_gen : forall b f t_rev,
-      generates (f b) t_rev -> generates (aconsume_bool f) (consume_bool b :: t_rev)
+  | leak_list_gen : forall l a t_rev,
+      generates a t_rev -> generates (aleak_list l a) (leak_list l :: t_rev)
   | consume_word_gen : forall w f t_rev,
       generates (f w) t_rev -> generates (aconsume_word f) (consume_word w :: t_rev).
 
@@ -79,7 +82,7 @@ Section WithIOEvent.
     | empty => a2
     | aleak_bool b a1' => aleak_bool b (abstract_app a1' a2)
     | aleak_word w a1' => aleak_word w (abstract_app a1' a2)
-    | aconsume_bool f => aconsume_bool (fun b => abstract_app (f b) a2)
+    | aleak_list l a1' => aleak_list l (abstract_app a1' a2)
     | aconsume_word f => aconsume_word (fun w => abstract_app (f w) a2)
     end.
 
@@ -95,7 +98,7 @@ Section WithIOEvent.
     | nil => empty
     | leak_bool b :: t_rev' => aleak_bool b (generator t_rev')
     | leak_word w :: t_rev' => aleak_word w (generator t_rev')
-    | consume_bool b :: t_rev' => aconsume_bool (fun _ => generator t_rev')
+    | leak_list l :: t_rev' => aleak_list l (generator t_rev')
     | consume_word w :: t_rev' => aconsume_word (fun _ => generator t_rev')
     end.
 
@@ -109,7 +112,7 @@ Section WithIOEvent.
     | empty => qend
     | aleak_bool b _ => qleak_bool b
     | aleak_word w _ => qleak_word w
-    | aconsume_bool _ => qconsume
+    | aleak_list l _ => qleak_list l
     | aconsume_word _ => qconsume
     end.
 
@@ -118,7 +121,7 @@ Section WithIOEvent.
     | _, nil => Some (head a)
     | aleak_bool _ a', cons (leak_bool _) t' => predictor a' t'
     | aleak_word _ a', cons (leak_word _) t' => predictor a' t'
-    | aconsume_bool f, cons (consume_bool b) t' => predictor (f b) t'
+    | aleak_list _ a', cons (leak_list _) t' => predictor a' t'
     | aconsume_word f, cons (consume_word w) t' => predictor (f w) t'
     | _, _ => None (*failure*)
     end.
@@ -236,11 +239,11 @@ End ext_spec.
 Arguments ext_spec.ok {_ _ _ _} _.
 
 Definition LeakExt {width: Z}{BW: Bitwidth width}{word: word.word width}{mem: map.map word byte} :=
-  (* Given a trace of what happened so far,
+  (* Given a trace of what happened so far (idk when we'd need this, but why not allow it),
      the given-away memory, an action label and a list of function call arguments, *)
   io_trace -> mem -> String.string -> list word ->
   (* Gives the leakage of this external call. *)
-  trace.
+  list word.
 
 (*IDK if this should be here.*)
 Existing Class LeakExt.
@@ -485,7 +488,7 @@ Module exec. Section WithEnv.
       (_ : forall mReceive resvals, mid mReceive resvals ->
           exists l', map.putmany_of_list_zip binds resvals l = Some l' /\
           forall m', map.split m' mKeep mReceive ->
-          post (leak_ext t mGive action args ++ k') (((mGive, action, args), (mReceive, resvals)) :: t) m' l'
+          post (leak_list (leak_ext t mGive action args) :: k')%list (((mGive, action, args), (mReceive, resvals)) :: t) m' l'
             (addMetricInstructions 1
                (addMetricStores 1
                   (addMetricLoads 2 mc'))))

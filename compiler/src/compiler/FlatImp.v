@@ -275,6 +275,7 @@ Module exec.
     Context {mem: map.map word byte} {locals: map.map varname word}
             {env: map.map String.string (list varname * list varname * stmt varname)}.
     Context {ext_spec: ExtSpec}.
+    Context {leak_ext: LeakExt}.
     Context {varname_eq_spec: EqDecider varname_eqb}
             {word_ok: word.ok word}
             {mem_ok: map.ok mem}
@@ -309,7 +310,7 @@ Module exec.
             outcome mReceive resvals ->
             exists l', map.putmany_of_list_zip resvars resvals l = Some l' /\
             forall m', map.split m' mKeep mReceive ->
-            post k (((mGive, action, argvals), (mReceive, resvals)) :: t) m' l'
+            post (leak_list (leak_ext t mGive action argvals) :: k) (((mGive, action, argvals), (mReceive, resvals)) :: t) m' l'
                  (addMetricInstructions 1
                  (addMetricStores 1
                  (addMetricLoads 2 mc)))) ->
@@ -618,6 +619,7 @@ Section FlatImp2.
   Context {mem: map.map word byte} {locals: map.map varname word}
           {env: map.map String.string (list varname * list varname * stmt varname)}.
   Context {ext_spec: ExtSpec}.
+  Context {leak_ext: LeakExt}.
   Context {varname_eq_spec: EqDecider varname_eqb}
           {word_ok: word.ok word}
           {mem_ok: map.ok mem}

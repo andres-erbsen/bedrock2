@@ -406,7 +406,7 @@ Section FlatToRiscv1.
   Context {env: map.map String.string (list Z * list Z * stmt Z)}.
   Context {pos_map: map.map String.string Z}.
   Context (compile_ext_call: pos_map -> Z -> Z -> stmt Z -> list Instruction).
-  Context (leak_ext_call: pos_map -> Z (*sp_val*) -> Z (*stackoffset*) -> stmt Z -> list LeakageEvent).
+  Context (leak_ext_call: pos_map -> Z (*sp_val*) -> Z (*stackoffset*) -> stmt Z -> list word (*source-level leakage*) -> list LeakageEvent).
 
   Section WithEnv.
     Variable e: pos_map.
@@ -527,12 +527,13 @@ Section FlatToRiscv1.
     Notation quot := Semantics.quot. Print Semantics.qevent.
     Notation qleak_bool := Semantics.qleak_bool.
     Notation qleak_word := Semantics.qleak_word.
+    Notation qleak_list := Semantics.qleak_list.
     Notation qconsume := Semantics.qconsume.
     Notation qend := Semantics.qend.
 
     Notation leak_bool := Semantics.leak_bool.
     Notation leak_word := Semantics.leak_word.
-    Notation consume_bool := Semantics.consume_bool.
+    Notation leak_list := Semantics.leak_list.
     Notation consume_word := Semantics.consume_word.
 
     Fixpoint predictLE_with_prefix (prefix : list LeakageEvent) (predict_rest : list LeakageEvent -> option qLeakageEvent) (t : list LeakageEvent) : option qLeakageEvent :=
@@ -724,10 +725,14 @@ Section FlatToRiscv1.
               | _, _ => None
               end
           | SInteract _ _ _ =>
-              predictLE_with_prefix
-                (leak_ext_call e myPos stackoffset s)
-                (f t_so_far)
-                rt_so_far
+              match next t_so_far with
+              | Some (qleak_list l) =>
+                  predictLE_with_prefix
+                    (leak_ext_call e myPos stackoffset s l)
+                    (f t_so_far)
+                    rt_so_far
+              | _ => None
+              end
           end
       end.
 

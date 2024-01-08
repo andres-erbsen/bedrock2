@@ -145,7 +145,7 @@ Section WeakestPrecondition.
         ext_spec t mGive action args (fun mReceive rets =>
           exists l', map.putmany_of_list_zip binds rets l = Some l' /\
           forall m', map.split m' mKeep mReceive ->
-          post (app (leak_ext t mGive action args) k') (cons ((mGive, action, args), (mReceive, rets)) t) m' l')
+          post (cons (leak_list (leak_ext t mGive action args)) k') (cons ((mGive, action, args), (mReceive, rets)) t) m' l')
       end.
     Fixpoint cmd c := cmd_body cmd c.
   End WithFunctions.

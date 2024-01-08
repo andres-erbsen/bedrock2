@@ -61,6 +61,7 @@ Section Proofs.
   Context {RVM: Machine.RiscvProgramWithLeakage}.
   Context {PRParams: PrimitivesParams M MetricRiscvMachine}.
   Context {ext_spec: Semantics.ExtSpec}.
+  Context {leak_ext: Semantics.LeakExt}.
   Context {word_riscv_ok: RiscvWordProperties.word.riscv_ok word}.
   Context {locals_ok: map.ok locals}.
   Context {mem_ok: map.ok mem}.
@@ -69,7 +70,7 @@ Section Proofs.
   Context {PR: MetricPrimitives.MetricPrimitives PRParams}.
   Context {BWM: bitwidth_iset width iset}.
   Context (compile_ext_call: pos_map -> Z -> Z -> stmt Z -> list Instruction).
-  Context (leak_ext_call: pos_map -> Z -> Z -> stmt Z -> list LeakageEvent).
+  Context (leak_ext_call: pos_map -> Z -> Z -> stmt Z -> list word -> list LeakageEvent).
 
   Add Ring wring : (word.ring_theory (word := word))
       (preprocess [autorewrite with rew_word_morphism],

@@ -79,7 +79,7 @@ Section WithParameters.
 
   Context {pos_map: map.map String.string Z}.
   Context (compile_ext_call: pos_map -> Z -> Z -> stmt Z -> list Instruction).
-  Context (leak_ext_call: pos_map -> Z -> Z -> stmt Z -> list LeakageEvent).
+  Context (leak_ext_call: pos_map -> Z -> Z -> stmt Z -> list word -> list LeakageEvent).
   Context {word_ok: word.ok word}.
   Context {mem: map.map word byte}.
   Context {env: map.map String.string (list Z * list Z * stmt Z)}.
@@ -88,6 +88,7 @@ Section WithParameters.
   Context {RVM: RiscvProgramWithLeakage}.
   Context {PRParams: PrimitivesParams M MetricRiscvMachine}.
   Context {ext_spec: Semantics.ExtSpec}.
+  Context {leak_ext: Semantics.LeakExt}.
 
   Inductive predictsLE : (list LeakageEvent -> option qLeakageEvent) -> list LeakageEvent -> Prop :=
   | predictsLE_cons :
@@ -401,7 +402,7 @@ Section FlatToRiscv1.
   Context {fun_info: map.map String.string Z}.
   Context {width: Z} {BW: Bitwidth width} {word: word.word width}.
   Context (compile_ext_call: fun_info -> Z -> Z -> stmt Z -> list Instruction).
-  Context (leak_ext_call: fun_info -> Z -> Z -> stmt Z -> list LeakageEvent).
+  Context (leak_ext_call: fun_info -> Z -> Z -> stmt Z -> list word -> list LeakageEvent).
   Context {word_ok: word.ok word}.
   Context {locals: map.map Z word}.
   Context {mem: map.map word byte}.
@@ -411,6 +412,7 @@ Section FlatToRiscv1.
   Context {RVM: RiscvProgramWithLeakage}.
   Context {PRParams: PrimitivesParams M MetricRiscvMachine}.
   Context {ext_spec: Semantics.ExtSpec}.
+  Context {leak_ext: Semantics.LeakExt}.
   Context {word_riscv_ok: word.riscv_ok word}.
   Context {locals_ok: map.ok locals}.
   Context {mem_ok: map.ok mem}.

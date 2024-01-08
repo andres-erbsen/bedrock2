@@ -116,6 +116,7 @@ Section WithWordAndMem.
     Context {Zlocals: map.map Z word}
             {string_keyed_map: forall T: Type, map.map string T} (* abstract T for better reusability *)
             {ext_spec: ExtSpec}
+            {leak_ext: LeakExt}
             {word_ok : word.ok word}
             {mem_ok: map.ok mem}
             {string_keyed_map_ok: forall T, map.ok (string_keyed_map T)}
@@ -137,7 +138,7 @@ Section WithWordAndMem.
     Context (compile_ext_call : string_keyed_map Z -> Z -> Z -> FlatImp.stmt Z ->
                                 list Instruction).
     Context (leak_ext_call : string_keyed_map Z -> Z -> Z -> FlatImp.stmt Z ->
-                             list LeakageEvent).
+                             list word -> list LeakageEvent).
     Context (compile_ext_call_correct: forall resvars extcall argvars,
                 compiles_FlatToRiscv_correctly compile_ext_call leak_ext_call compile_ext_call
                                                (FlatImp.SInteract resvars extcall argvars)).

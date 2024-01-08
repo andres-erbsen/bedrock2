@@ -22,6 +22,7 @@ Section ExprImp1.
   Context {locals: map.map String.string word}.
   Context {env: map.map String.string (list String.string * list String.string * cmd)}.
   Context {ext_spec: ExtSpec}.
+  Context {leak_ext: LeakExt}.
 
   Notation var := String.string (only parsing).
   Notation func := String.string (only parsing).
@@ -379,6 +380,7 @@ Section ExprImp2.
   Context {locals: map.map String.string word}.
   Context {env: map.map String.string (list String.string * list String.string * cmd)}.
   Context {ext_spec: ExtSpec}.
+  Context {leak_ext: LeakExt}.
 
   Notation var := String.string (only parsing).
   Notation func := String.string (only parsing).

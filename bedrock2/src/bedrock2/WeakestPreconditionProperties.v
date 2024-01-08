@@ -385,7 +385,7 @@ Section WeakestPrecondition.
         (Hext : ext_spec t map.empty binds args (fun mReceive (rets : list word) =>
            mReceive = map.empty /\
            exists l0 : locals, map.putmany_of_list_zip action rets l = Some l0 /\
-           post (leak_ext t map.empty binds args ++ k')%list (cons (map.empty, binds, args, (map.empty, rets)) t) m l0))
+           post (leak_list (leak_ext t map.empty binds args) :: k')%list (cons (map.empty, binds, args, (map.empty, rets)) t) m l0))
     : WeakestPrecondition.cmd call (cmd.interact action binds arges) k t m l post.
   Proof using word_ok mem_ok ext_spec_ok.
     exists args. exists k'. split; [exact Hargs|].
