@@ -8,6 +8,7 @@ Section WeakestPrecondition.
   Context {locals: map.map String.string word}.
   Context {env: map.map String.string (list String.string * list String.string * cmd)}.
   Context {ext_spec: ExtSpec}.
+  Context {leak_ext: LeakExt}.
   Implicit Types (k : trace) (t : io_trace) (m : mem) (l : locals).
 
   Definition literal v (post : word -> Prop) : Prop :=
@@ -144,7 +145,7 @@ Section WeakestPrecondition.
         ext_spec t mGive action args (fun mReceive rets =>
           exists l', map.putmany_of_list_zip binds rets l = Some l' /\
           forall m', map.split m' mKeep mReceive ->
-          post k' (cons ((mGive, action, args), (mReceive, rets)) t) m' l')
+          post (app (leak_ext t mGive action args) k') (cons ((mGive, action, args), (mReceive, rets)) t) m' l')
       end.
     Fixpoint cmd c := cmd_body cmd c.
   End WithFunctions.

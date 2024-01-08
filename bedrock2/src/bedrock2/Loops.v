@@ -13,6 +13,7 @@ Section Loops.
   Context {locals: map.map String.string word}.
   Context {env: map.map String.string (list String.string * list String.string * Syntax.cmd)}.
   Context {ext_spec: ExtSpec}.
+  Context {leak_ext: LeakExt}.
   Context {word_ok : word.ok word} {mem_ok : map.ok mem}.
   Context {locals_ok : map.ok locals}.
   Context {env_ok : map.ok env}.

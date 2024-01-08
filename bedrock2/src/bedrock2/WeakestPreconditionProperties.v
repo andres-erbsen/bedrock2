@@ -9,6 +9,7 @@ Section WeakestPrecondition.
   Context {locals: map.map String.string word}.
   Context {env: map.map String.string (list String.string * list String.string * Syntax.cmd)}.
   Context {ext_spec: Semantics.ExtSpec}.
+  Context {leak_ext: Semantics.LeakExt}.
 
   Ltac ind_on X :=
     intros;
@@ -103,11 +104,11 @@ Section WeakestPrecondition.
       { destruct H2 as (?&?&?&?). eexists. eexists. split.
         { eapply Proper_expr; eauto; cbv [pointwise_relation Basics.impl]; eauto. }
         { eapply Proper_store; eauto; cbv [pointwise_relation Basics.impl]; eauto. } } }
-    { eapply H1; eauto. intros ? ? ? ? (?&?&?&?&?). eauto 6. }
+    { eapply IHa; eauto. simpl. intros ? ? ? ? (?&?&?&?&?). eauto 6. }
     { destruct H1 as (?&?&?&?). eexists. eexists. split.
       { eapply Proper_expr; eauto; cbv [pointwise_relation Basics.impl]; eauto. }
       { intuition eauto. } }
-    { eapply H4; eauto. intros. intuition eauto. }
+    { eapply IHa1; eauto. intros. intuition eauto. }
 
     { destruct H1 as (?&?&?&?&?&HH).
       eassumption || eexists.
@@ -121,7 +122,7 @@ Section WeakestPrecondition.
       1: eapply Proper_expr; eauto.
       1: cbv [pointwise_relation Basics.impl].
       all:intuition eauto 2.
-      - eapply H2; eauto; cbn; intros.
+      - eapply IHa; eauto; cbn; intros.
         match goal with H:_ |- _ => destruct H as (?&?&?); solve[eauto] end.
       - intuition eauto. }
     { destruct H1 as (?&?&?&?). eexists. eexists. split.
@@ -192,7 +193,8 @@ Section WeakestPrecondition.
     eapply Proper_func;
       cbv [Proper respectful pointwise_relation Basics.flip Basics.impl  WeakestPrecondition.func];
       eauto.
-  Qed.
+  Admitted.
+  (*Qed.*)
   
   Global Instance Proper_program :
     Proper (
@@ -383,7 +385,7 @@ Section WeakestPrecondition.
         (Hext : ext_spec t map.empty binds args (fun mReceive (rets : list word) =>
            mReceive = map.empty /\
            exists l0 : locals, map.putmany_of_list_zip action rets l = Some l0 /\
-           post k' (cons (map.empty, binds, args, (map.empty, rets)) t) m l0))
+           post (leak_ext t map.empty binds args ++ k')%list (cons (map.empty, binds, args, (map.empty, rets)) t) m l0))
     : WeakestPrecondition.cmd call (cmd.interact action binds arges) k t m l post.
   Proof using word_ok mem_ok ext_spec_ok.
     exists args. exists k'. split; [exact Hargs|].

@@ -235,6 +235,16 @@ Module ext_spec.
 End ext_spec.
 Arguments ext_spec.ok {_ _ _ _} _.
 
+Definition LeakExt {width: Z}{BW: Bitwidth width}{word: word.word width}{mem: map.map word byte} :=
+  (* Given a trace of what happened so far,
+     the given-away memory, an action label and a list of function call arguments, *)
+  io_trace -> mem -> String.string -> list word ->
+  (* Gives the leakage of this external call. *)
+  trace.
+
+(*IDK if this should be here.*)
+Existing Class LeakExt.
+
 Section binops.
   Context {width : Z} {BW: Bitwidth width} {word : Word.Interface.word width}.
   Definition interp_binop (bop : bopname) : word -> word -> word :=
@@ -270,7 +280,6 @@ Section semantics.
   Context {width: Z} {BW: Bitwidth width} {word: word.word width} {mem: map.map word byte}.
   Context {locals: map.map String.string word}.
   Context {env: map.map String.string (list String.string * list String.string * cmd)}.
-  Context {ext_spec: ExtSpec}.
 
   Local Notation metrics := MetricLog.
 
@@ -358,6 +367,7 @@ Module exec. Section WithEnv.
   Context {locals: map.map String.string word}.
   Context {env: map.map String.string (list String.string * list String.string * cmd)}.
   Context {ext_spec: ExtSpec}.
+  Context {leak_ext: LeakExt}.
   Context (e: env).
 
   Local Notation metrics := MetricLog.
@@ -475,7 +485,7 @@ Module exec. Section WithEnv.
       (_ : forall mReceive resvals, mid mReceive resvals ->
           exists l', map.putmany_of_list_zip binds resvals l = Some l' /\
           forall m', map.split m' mKeep mReceive ->
-          post k' (((mGive, action, args), (mReceive, resvals)) :: t) m' l'
+          post (leak_ext t mGive action args ++ k') (((mGive, action, args), (mReceive, resvals)) :: t) m' l'
             (addMetricInstructions 1
                (addMetricStores 1
                   (addMetricLoads 2 mc'))))
