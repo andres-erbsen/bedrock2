@@ -358,26 +358,36 @@ Proof.
   assert (spec := @swap_ok Words32Naive.word mem word_ok' mem_ok).
   cbv [ProgramLogic.program_logic_goal_for] in spec.
   specialize (spec nil). cbv [ct_spec_of_swap] in spec. destruct spec as [f spec].
-  intros. Print compiler_correct_wp''. Unshelve.
-  edestruct (@compiler_correct_wp'' _ _ Words32Naive.word mem _ ext_spec _ _ _ _ ext_spec_ok _ _ _ _ _ word_ok _ _ RV32I _ compile_ext_call leak_ext_call compile_ext_call_correct compile_ext_call_length fs_swap instrs_swap finfo_swap req_stack_size_swap stack_hi p_funcs fname_swap).
+  intros. Print compiler_correct_wp''.
+  edestruct (@compiler_correct_wp'' _ _ Words32Naive.word mem _ _ ext_spec _ _ _ _ _ ext_spec_ok _ _ _ _ _ word_ok _ _ RV32I _ compile_ext_call leak_ext_call compile_ext_call_correct compile_ext_call_length fs_swap instrs_swap finfo_swap req_stack_size_swap stack_hi p_funcs fname_swap).
   { simpl. reflexivity. }
   { vm_compute. reflexivity. }
-  exists x. intros.
-  eapply H.
+  exists (x (f b_addr a_addr)). intros.
+  cbv [FlatToRiscvCommon.runsTo].
+  eapply runsToNonDet.runsTo_weaken.
+  1: eapply H with (post := (fun k_ t_ m_ r_ =>
+                                 exists k'', (k_ = k'' ++ [])%list /\
+                                               generates (f b_addr a_addr) (rev k'')
+                                             /\ post t_ m_ r_)) (k := nil).
   { simpl. repeat constructor. tauto. }
   2: { eapply map.get_of_list_In_NoDup.
        { vm_compute. repeat constructor; eauto. }
        { vm_compute. left. reflexivity. } }
   2,3,4,5,6,7,9: eassumption.
   2: reflexivity.
-  specialize (spec nil (getLog initial) m a_addr b_addr a b R H0). cbv [fs_swap fname_swap].
-  eapply WeakestPreconditionProperties.Proper_call.
-  2: eapply spec.
-  cbv [Morphisms.pointwise_relation Basics.impl]. intros.
-  split.
-  2: cbv [post]; reflexivity.
-  destruct H8 as [H8 [H9 H10] ]. subst. destruct H8 as [k'' [H8 H11] ]. subst. exists k''.
-  split; eauto.
+  2: { simpl. intros. destruct H8 as [k'' [mH' [retvals [H8 [H9 [H10 [H11 [H12 H13] ] ] ] ] ] ] ].
+       destruct H9 as [k''0 [H14 [H15 H16] ] ]. Search (app _ _ = app _ _ -> _).
+       apply app_inv_tail in H14. subst. split; [eexists; eexists; eauto|].
+       apply H13. rewrite rev_involutive in H15. apply H15. }
+  { specialize (spec nil (getLog initial) m a_addr b_addr a b R H0). cbv [fs_swap fname_swap].
+    eapply WeakestPreconditionProperties.Proper_call.
+    2: eapply spec.
+    cbv [Morphisms.pointwise_relation Basics.impl]. intros.
+    destruct H8 as [ [k'' [H8 H9] ] [H10 [H11 H12] ] ]. subst.
+    rewrite app_nil_r. cbv [WeakestPrecondition.appl] in H8.
+    eexists. split.
+    { rewrite app_nil_r. reflexivity. }
+    split; [assumption|]. reflexivity. }
 Qed.
 
 Check (@compiler_correct_wp _ _ Words32Naive.word mem _ ext_spec _ _ _ _ ext_spec_ok _ _ _ _ _ word_ok _ _ RV32I _ compile_ext_call leak_ext_call compile_ext_call_correct compile_ext_call_length fs_swap instrs_swap finfo_swap req_stack_size_swap fname_swap _ _ _ _).
@@ -423,24 +433,25 @@ Definition req_stack_size_io_function :=
   | _ => 0
   end.
 Definition fname_io_function := "io_function".
-Definition f_rel_pos_io_function := 0.
+Definition f_rel_pos_io_function := 88.
 
 Check (@compiler_correct_wp _ _ Words32Naive.word mem _ ext_spec _ _ _ _ ext_spec_ok _ _ _ _ _ word_ok _ _ RV32I _ compile_ext_call leak_ext_call compile_ext_call_correct compile_ext_call_length fs_io_function instrs_io_function finfo_io_function req_stack_size_io_function fname_io_function _ _ _ _).
 
 Print ct_spec_of_io_function.
 
 Lemma io_function_ct :
-  forall x p_funcs stack_hi,
-  exists finalTrace : list LeakageEvent,
-  forall R m y stack_lo ret_addr
+  forall p_funcs stack_hi,
+  exists f : Words32Naive.word -> list LeakageEvent,
+  forall (R : _ -> Prop) m stack_lo ret_addr
                        Rdata Rexec (initial : RiscvMachine),
-    (*Separation.sep (Separation.sep (Scalars.scalar a_addr a) (Scalars.scalar b_addr b)) R m ->*)
+    R m ->
+    isMMIOAddr (word.of_Z 0) ->
     req_stack_size_io_function <= word.unsigned (word.sub stack_hi stack_lo) / SeparationLogic.bytes_per_word ->
     word.unsigned (word.sub stack_hi stack_lo) mod SeparationLogic.bytes_per_word = 0 ->
     getPc initial = word.add p_funcs (word.of_Z f_rel_pos_io_function) ->
     map.get (getRegs initial) RegisterNames.ra = Some ret_addr ->
     word.unsigned ret_addr mod 4 = 0 ->
-    (*LowerPipeline.arg_regs_contain (getRegs initial) [a_addr; b_addr] ->*)
+    LowerPipeline.arg_regs_contain (getRegs initial) [] ->
     LowerPipeline.machine_ok p_funcs stack_lo stack_hi instrs_io_function m Rdata Rexec initial ->
     FlatToRiscvCommon.runsTo initial
       (fun final : RiscvMachine =>
@@ -451,37 +462,50 @@ Lemma io_function_ct :
              getPc final = ret_addr /\
              LowerPipeline.machine_ok p_funcs stack_lo stack_hi instrs_io_function mH' 
                Rdata Rexec final) /\
-           (exists x' y',
-               (final.(getLog) = [(map.empty, "MMIOREAD", [word.of_Z 0], (map.empty, [x']));
-                                 (map.empty, "MMIOREAD", [word.of_Z 0], (map.empty, [y']))] ++
+           (exists x y,
+               (final.(getLog) = [(map.empty, "MMIOREAD", [word.of_Z 0], (map.empty, [x]));
+                                 (map.empty, "MMIOREAD", [word.of_Z 0], (map.empty, [y]))] ++
                                   initial.(getLog))%list /\
-                 (x' = x ->
-                  y' = y ->
-                  R m /\ (final.(getTrace) = finalTrace ++ initial.(getTrace))%list))).
+                 (R m /\ (final.(getTrace) = f x ++ initial.(getTrace))%list))).
 Proof.
   assert (spec := @io_function_ok Words32Naive.word mem word_ok' mem_ok).
   cbv [ProgramLogic.program_logic_goal_for] in spec.
   specialize (spec nil). cbv [ct_spec_of_io_function] in spec.
+  destruct spec as [a spec].
   intros.
-  edestruct (@compiler_correct_wp'' _ _ Words32Naive.word mem _ ext_spec _ _ _ _ ext_spec_ok _ _ _ _ _ word_ok _ _ RV32I _ compile_ext_call leak_ext_call compile_ext_call_correct compile_ext_call_length fs_io_function instrs_io_function finfo_io_function req_stack_size_io_function stack_hi p_funcs fname_io_function).
+  edestruct (@compiler_correct_wp'' _ _ Words32Naive.word mem _ _ ext_spec _ _ _ _ _ ext_spec_ok _ _ _ _ _ word_ok _ _ RV32I _ compile_ext_call leak_ext_call compile_ext_call_correct compile_ext_call_length fs_io_function instrs_io_function finfo_io_function req_stack_size_io_function stack_hi p_funcs fname_io_function) as [f H].
   { simpl. reflexivity. }
   { vm_compute. reflexivity. }
-  exists x0. intros. Print compiler_correct_wp''.
-  eapply H.
-  { simpl. repeat constructor. tauto. }
-  2: { eapply map.get_of_list_In_NoDup.
-       { vm_compute. repeat constructor; eauto. }
-       { vm_compute. left. reflexivity. } }
-  2,3,4,5,6,7,9: eassumption.
-  2: reflexivity.
-  specialize (spec nil (getLog initial) m a_addr b_addr a b R H0). cbv [fs_io_function fname_io_function].
-  eapply WeakestPreconditionProperties.Proper_call.
-  2: eapply spec.
-  cbv [Morphisms.pointwise_relation Basics.impl]. intros.
-  split.
-  2: cbv [post]; reflexivity.
-  destruct H8 as [H8 [H9 H10] ]. subst. destruct H8 as [k'' [H8 H11] ]. subst. exists k''.
-  split; eauto.
+  exists (fun x => (f (a x))). intros.
+  cbv [FlatToRiscvCommon.runsTo].
+  specialize (spec nil (getLog initial) m R H0 H1).
+  eapply runsToNonDet.runsTo_weaken.
+  1: eapply H with (k := nil) (*this is just the post of spec*)(post := (fun (k' : trace) (t' : io_trace) (_ : mem) (_ : list Words32Naive.word) =>
+            exists x y : Words32Naive.word,
+              t' =
+              ([(map.empty, "MMIOREAD", [word.of_Z 0], (map.empty, [x]));
+                (map.empty, "MMIOREAD", [word.of_Z 0], (map.empty, [y]))] ++ (getLog initial))%list /\
+              R m /\ (exists k'' : list event, k' = (k'' ++ [])%list /\ generates (a x) (rev k'')))).
+  12: { simpl. intros.
+        destruct H9 as [k'' [mH' [retvals [H9 [H10 [H11 [H12 [H13 H14] ] ] ] ] ] ] ].
+        split.
+        { exists mH', retvals; intuition eauto. cbv [post]. reflexivity. }
+        { destruct H10 as [x [y [H15 [H16 [k''0 [H17 H18] ] ] ] ] ].
+          repeat rewrite app_nil_r in H17. subst. exists x, y. rewrite H15.
+          split; eauto. split; eauto. apply H14. rewrite rev_involutive in H18. apply H18. } }
+  4,5,6,7,8,9,11: eassumption.
+  4: reflexivity.
+  { simpl. repeat constructor.
+    { intros H'. destruct H'; auto; congruence. }
+    intros H'. destruct H'. }
+  { eapply WeakestPreconditionProperties.Proper_call.
+    2: eapply spec.
+    cbv [Morphisms.pointwise_relation Basics.impl]. intros.
+    clear H. destruct H9 as [x [y [H9 [H10 [k'' [H11 H12] ] ] ] ] ].
+    subst. exists x, y. split; [reflexivity|]. split; [assumption|]. exists k''.
+    split; [reflexivity|assumption]. }
+  reflexivity.
+Qed.
 
 (*
 (* Not sure I can actually prove this. *)

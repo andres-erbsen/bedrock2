@@ -242,24 +242,20 @@ in the assembly-level trace.
 
   Instance ct_spec_of_io_function : spec_of "io_function" :=
     fun functions =>
-      forall k t m,
-      forall x,
-      exists a,
-        forall y (R : _ -> Prop),
+      exists f,
+        forall k t m (R : _ -> Prop),
           m =* R ->
           isMMIOAddr (word.of_Z 0) ->
           WeakestPrecondition.call
             functions "io_function" k t m nil
             (fun k' t' m' rets =>
-               exists x' y',
-                 t' = [((map.empty, "MMIOREAD", [word.of_Z 0]), (map.empty, [x']));
-                       ((map.empty, "MMIOREAD", [word.of_Z 0]), (map.empty, [y']))] ++ t /\
-                   (x' = x ->
-                    y' = y ->
-                    m =* R /\
-                      exists k'',
-                        k' = k'' ++ k /\
-                          generates a (List.rev k''))).
+               exists x y,
+                 t' = [((map.empty, "MMIOREAD", [word.of_Z 0]), (map.empty, [x]));
+                       ((map.empty, "MMIOREAD", [word.of_Z 0]), (map.empty, [y]))] ++ t /\
+                   m =* R /\
+                   exists k'',
+                     k' = k'' ++ k /\
+                       generates (f x) (List.rev k'')).
   
   Lemma io_function_ok : program_logic_goal_for_function! io_function.
   Proof.
@@ -305,6 +301,7 @@ in the assembly-level trace.
       (*instantiate (1 := (aleak_bool (negb (word.unsigned x =? 0)) _)).*)
       simpl. cbv [leak_ext]. replace (String.eqb _ _) with false by reflexivity.
       replace (String.eqb _ _) with true by reflexivity.
+      instantiate (1 := fun x => _). simpl.
       constructor. constructor.
       instantiate (1 := (aleak_bool (negb (word.unsigned x =? 0)) _)).
       rewrite <- Z.eqb_neq in H3. rewrite H3. constructor. constructor. }

@@ -990,22 +990,19 @@ Qed.
         (instrs: list Instruction) (finfo: list (string * Z)) (req_stack_size: Z)
         (* part of function we choose to call: *)
         (stack_hi p_funcs: word)
-        (fname: string) (a : abstract_trace) (f_rel_pos: Z),
+        (fname: string) (f_rel_pos: Z),
         (*can i move these three hyps down below the exists?*)
         valid_src_funs fs = true ->
         compile fs = Success (instrs, finfo, req_stack_size) ->
-        exists finalTrace, forall
+        exists f, forall
           (* rest of function we choose to call: *)
           (stack_lo ret_addr : word)
           (* high-level initial state & post on final state: *)
-          (k: trace) (t: io_trace) (mH: mem) (argvals: list word) (post: io_trace -> mem -> list word -> Prop) (initial: MetricRiscvMachine)
+          (k: trace) (t: io_trace) (mH: mem) (argvals: list word) (post: trace -> io_trace -> mem -> list word -> Prop) (initial: MetricRiscvMachine)
           (* ghost vars that help describe the low-level machine: *)
           (Rdata Rexec: mem -> Prop),
           NoDup (map fst fs) ->
-          WeakestPrecondition.call fs fname k t mH argvals
-            (fun k' t' m' rets =>
-               (exists k'', generates a (rev k'') /\ k' = k'' ++ k) /\
-                 post t' m' rets) ->
+          WeakestPrecondition.call fs fname k t mH argvals post ->
           map.get (map.of_list finfo) fname = Some f_rel_pos ->
           req_stack_size <= word.unsigned (word.sub stack_hi stack_lo) / bytes_per_word ->
           word.unsigned (word.sub stack_hi stack_lo) mod bytes_per_word = 0 ->
@@ -1017,15 +1014,18 @@ Qed.
           machine_ok p_funcs stack_lo stack_hi instrs mH Rdata Rexec initial ->
           FlatToRiscvCommon.runsTo initial
             (fun final : MetricRiscvMachine =>
-               (exists mH' retvals,
+               (exists k'' mH' retvals,
                    arg_regs_contain (getRegs final) retvals /\
-                     post final.(getLog) mH' retvals /\
+                     post (rev k'' ++ k) final.(getLog) mH' retvals /\
                      map.only_differ initial.(getRegs) reg_class.caller_saved final.(getRegs) /\
                      final.(getPc) = ret_addr /\
-                     machine_ok p_funcs stack_lo stack_hi instrs mH' Rdata Rexec final) /\
-                 final.(getTrace) = finalTrace ++ initial.(getTrace)).
-    Proof.
-      intros. Check predictor_works.
+                     machine_ok p_funcs stack_lo stack_hi instrs mH' Rdata Rexec final /\
+                     (forall a,
+                       generates a k'' ->
+                       final.(getTrace) = f a ++ initial.(getTrace))
+               )).
+    Proof. Admitted.
+    (* intros. Check predictor_works.
       assert (H' := compiler_correct_wp fs instrs finfo req_stack_size fname (fun _ _ => predictor a) f_rel_pos ltac:(assumption) ltac:(assumption)).
       destruct H' as [next' H']. Check predictor_thing_correct.
       assert (H'' := predictor_thing_correct (next' (p_funcs, f_rel_pos, stack_hi))).
@@ -1037,6 +1037,6 @@ Qed.
         intros k_ t_ m_ argvals_ [H1' H2']. split; [assumption|]. destruct H1' as [k'' [H1' H3'] ].
         subst. exists k'', O. split; [reflexivity|]. intros. apply predictor_works.
         assumption.
-    Qed.
+    Qed.*)
   End WithMoreParams.
 End WithWordAndMem.
