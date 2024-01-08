@@ -729,7 +729,7 @@ Section FlatToRiscv1.
               | Some (qleak_list l) =>
                   predictLE_with_prefix
                     (leak_ext_call e myPos stackoffset s l)
-                    (f t_so_far)
+                    (f (t_so_far ++ [leak_list l]))
                     rt_so_far
               | _ => None
               end

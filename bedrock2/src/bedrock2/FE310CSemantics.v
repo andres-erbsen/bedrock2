@@ -40,7 +40,21 @@ Section WithParameters.
         (mGive = Interface.map.empty /\ isMMIOAddr addr /\ word.unsigned addr mod 4 = 0) /\
         forall val, post Interface.map.empty [val]
     else False.
-
+  
+  Global Instance leak_ext: LeakExt :=
+    fun (t : io_trace) (mGive : mem) a (args: list word) =>
+      if String.eqb "MMIOWRITE" a then
+        match args with
+        | [addr;val] => [addr]
+        | _ => [] (*can't happen*)
+        end
+    else if String.eqb "MMIOREAD" a then
+           match args with
+           | [addr] => [addr]
+           | _ => []
+           end
+    else [].
+  
   Global Instance ext_spec_ok : ext_spec.ok ext_spec.
   Proof.
     split;
