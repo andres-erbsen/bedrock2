@@ -173,10 +173,10 @@ End WeakestPrecondition.
 Check @cmd_body.
 Ltac unfold1_cmd e :=
   lazymatch e with
-    @cmd ?width ?BW ?word ?mem ?locals ?ext_spec ?CA ?c ?k ?t ?m ?l ?post =>
+    @cmd ?width ?BW ?word ?mem ?locals ?ext_spec ?leak_ext ?CA ?c ?k ?t ?m ?l ?post =>
     let c := eval hnf in c in
-    constr:(@cmd_body width BW word mem locals ext_spec CA
-                      (@cmd width BW word mem locals ext_spec CA) c k t m l post)
+    constr:(@cmd_body width BW word mem locals ext_spec leak_ext CA
+                      (@cmd width BW word mem locals ext_spec leak_ext CA) c k t m l post)
   end.
 Ltac unfold1_cmd_goal :=
   let G := lazymatch goal with |- ?G => G end in
@@ -219,10 +219,10 @@ Ltac unfold1_list_map'_goal :=
 Check @call. Check @call_body.
 Ltac unfold1_call e :=
   lazymatch e with
-    @call ?width ?BW ?word ?mem ?locals ?ext_spec ?fs ?fname ?k ?t ?m ?l ?post =>
+    @call ?width ?BW ?word ?mem ?locals ?ext_spec ?leak_ext ?fs ?fname ?k ?t ?m ?l ?post =>
     let fs := eval hnf in fs in
-    constr:(@call_body width BW word mem locals ext_spec
-                       (@call width BW word mem locals ext_spec) fs fname k t m l post)
+    constr:(@call_body width BW word mem locals ext_spec leak_ext
+                       (@call width BW word mem locals ext_spec leak_ext) fs fname k t m l post)
   end.
 Ltac unfold1_call_goal :=
   let G := lazymatch goal with |- ?G => G end in

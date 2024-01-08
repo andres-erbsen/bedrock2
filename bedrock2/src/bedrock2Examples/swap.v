@@ -223,12 +223,12 @@ in the assembly-level trace.
 
   Definition io_function :=
     func! () {
-        io! x = INPUT();
-        io! y = INPUT();
+        io! y = MMIOREAD($0);
+        io! x = MMIOREAD($0);
         if (x) { /*skip*/ }
       }.
 
-  Instance ext_spec : ExtSpec :=
+  (*Instance ext_spec : ExtSpec :=
     fun t mGive action (argvals: list word) (post: (mem -> list word -> Prop)) =>
       match argvals with
       | nil => if String.eqb action "INPUT" then
@@ -236,7 +236,7 @@ in the assembly-level trace.
                  forall input, post map.empty [input]
                else False
       | _ => False
-      end.
+      end.*)
 
   Print io_event.
 
@@ -246,19 +246,20 @@ in the assembly-level trace.
       forall x,
       exists a,
         forall y (R : _ -> Prop),
-        m =* R ->
-        WeakestPrecondition.call
-          functions "io_function" k t m nil
-          (fun k' t' m' rets =>
-             exists x' y',
-               t' = [((map.empty, "INPUT", []), (map.empty, [y']));
-                     ((map.empty, "INPUT", []), (map.empty, [x']))] ++ t /\
-                 (x' = x ->
-                  y' = y ->
-                  m =* R /\
-                    exists k'',
-                      k' = k'' ++ k /\
-                        generates a (List.rev k''))).
+          m =* R ->
+          isMMIOAddr (word.of_Z 0) ->
+          WeakestPrecondition.call
+            functions "io_function" k t m nil
+            (fun k' t' m' rets =>
+               exists x' y',
+                 t' = [((map.empty, "MMIOREAD", [word.of_Z 0]), (map.empty, [x']));
+                       ((map.empty, "MMIOREAD", [word.of_Z 0]), (map.empty, [y']))] ++ t /\
+                   (x' = x ->
+                    y' = y ->
+                    m =* R /\
+                      exists k'',
+                        k' = k'' ++ k /\
+                          generates a (List.rev k''))).
   
   Lemma io_function_ok : program_logic_goal_for_function! io_function.
   Proof.
@@ -268,34 +269,54 @@ in the assembly-level trace.
     exists m, map.empty.
     split.
     { apply Properties.map.split_empty_r. reflexivity. }
-    cbv [ext_spec]. rewrite String.eqb_refl.
+    cbv [ext_spec]. replace (String.eqb _ _) with false by reflexivity.
+    replace (String.eqb _ _) with true by reflexivity.
+    repeat straightline.
+    split; [repeat straightline|].
+    { split; [assumption|]. Search (word.unsigned (word.of_Z 0)).
+      rewrite Properties.word.unsigned_of_Z_0. reflexivity. }
+    intros.
+    econstructor.
+    repeat straightline.
+    split. { subst l. reflexivity. }
     repeat straightline.
     econstructor.
     repeat straightline.
     exists m, map.empty.
     split.
     { assumption. }
-    rewrite String.eqb_refl.
+    cbv [ext_spec]. replace (String.eqb _ _) with false by reflexivity.
+    replace (String.eqb _ _) with true by reflexivity.
+    eexists.
+    split; [reflexivity|].
+    split.
+    { split; [reflexivity|]. split; [assumption|]. Search (word.unsigned (word.of_Z 0)).
+      rewrite Properties.word.unsigned_of_Z_0. reflexivity. }
     repeat straightline.
     econstructor.
-    eexists. split; repeat straightline.
+    repeat straightline.
     split; repeat straightline.
     { eexists. eexists. split.
       { reflexivity. }
       repeat straightline. split; [assumption|].
       eexists. split.
-      { instantiate (1 := [_]). reflexivity. }
-      Check word.eqb. Check (fun x => aleak_bool ((word.unsigned x) =? 0) _).
+      { subst k'. instantiate (1 := [_; _; _]). reflexivity. }
+      Check word.eqb. Check (fun x => _ _ aleak_bool ((word.unsigned x) =? 0)).
+      (*instantiate (1 := (aleak_bool (negb (word.unsigned x =? 0)) _)).*)
+      simpl. cbv [leak_ext]. replace (String.eqb _ _) with false by reflexivity.
+      replace (String.eqb _ _) with true by reflexivity.
+      constructor. constructor.
       instantiate (1 := (aleak_bool (negb (word.unsigned x =? 0)) _)).
-      simpl.
-      rewrite <- Z.eqb_neq in H2. rewrite H2. constructor. constructor. }
+      rewrite <- Z.eqb_neq in H3. rewrite H3. constructor. constructor. }
     { eexists. eexists. split.
       { reflexivity. }
       repeat straightline. split; [assumption|].
       eexists. split.
-      { instantiate (1 := [_]). reflexivity. }
+      { subst k'0 k'. instantiate (1 := [_; _; _]). reflexivity. }
       Check word.eqb. Check (fun x => aleak_bool ((word.unsigned x) =? 0) _).
-      simpl.
-      rewrite <- Z.eqb_eq in H2. rewrite H2. constructor. constructor. } 
+      simpl. cbv [leak_ext].
+      replace (String.eqb _ _) with false by reflexivity.
+      replace (String.eqb _ _) with true by reflexivity.
+      rewrite <- Z.eqb_eq in H3. rewrite H3. constructor. constructor. constructor. constructor. } 
   Qed.
 End WithParameters.
