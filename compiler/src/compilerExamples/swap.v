@@ -221,7 +221,6 @@ End PrintBytes.
 
 
 Check (&[,swap_swap; swap]).
-Definition fs := &[,swap].
 Check compiler_correct_wp.
 Print compiler_correct_wp.
 Print ExtSpec.
@@ -234,13 +233,15 @@ Context {localsH_ok : map.ok localsH}.
 Context {envL : map.map string (list Z * list Z * FlatImp.stmt Z)}.
 Context {envH : map.map string (list string * list string * cmd)}.
 Context {envH_ok : map.ok envH}.
-Context {M : Type -> Type} {MM : Monad M}.
-Context {RVM: RiscvProgramWithLeakage}.
+(*Context {M : Type -> Type} {MM : Monad M}.*)
+(*Context {RVM: RiscvProgramWithLeakage}.
 Context {PRParams: PrimitivesParams M MetricRiscvMachine}.
-Context {PR: MetricPrimitives PRParams}.
+Context {PR: MetricPrimitives PRParams}.*)
 Search ExtSpec.
-#[local] Instance ext_spec: ExtSpec := bedrock2Examples.swap.ext_spec.
-Lemma ext_spec_ok : ext_spec.ok ext_spec.
+
+Require Import compiler.MMIO.
+Import bedrock2.FE310CSemantics.
+(*Lemma ext_spec_ok : ext_spec.ok ext_spec.
 Proof.
   constructor; intros; cbv [bedrock2Examples.swap.ext_spec ext_spec] in *.
   - destruct args; [|destruct H]. destruct (_ =? _); [|destruct H].
@@ -264,13 +265,16 @@ Definition other_compile_ext_call(posenv: funpos_env)(mypos stackoffset: Z)(s: F
   | _ => []
   end.
 Definition other_leak_ext_call : funpos_env -> Z -> Z -> FlatImp.stmt Z -> list LeakageEvent :=
-  fun _ _ _ _ => nil.
+  fun _ _ _ _ => nil.*)
+Search LeakExt.
+Check leak_ext_call.
+Print compile_ext_call.
 
-Check (@FlatToRiscvCommon.compiles_FlatToRiscv_correctly RV32I _ _ _ _ _ other_compile_ext_call
-         other_leak_ext_call _ _ _ _ _ _ _ _ compile_ext_call).
+Check (@FlatToRiscvCommon.compiles_FlatToRiscv_correctly RV32I _ _ _ _ _ compile_ext_call
+         leak_ext_call _ _ _ _ _ _ _ _ _ compile_ext_call).
 Check @compiler_correct_wp.
-Check (@PrimitivesParams _ _ _ _ _ M MetricRiscvMachine).
-Check (@compiler_correct_wp _ _ Words32Naive.word mem _ ext_spec _ _ _ ext_spec_ok _ _ _ _ _).
+(*Check (@PrimitivesParams _ _ _ _ _ M MetricRiscvMachine).
+Check (@compiler_correct_wp _ _ Words32Naive.word mem _ ext_spec _ _ _ _ ext_spec_ok _ _ _ _ _).*)
 Check NaiveRiscvWordProperties.naive_word_riscv_ok.
 Lemma word_ok : RiscvWordProperties.word.riscv_ok Words32Naive.word.
 Proof.
@@ -282,16 +286,19 @@ Lemma word_ok' : word.ok Words32Naive.word.
 Proof.
   Search (word.ok _). cbv [Words32Naive.word]. exact Naive.word32_ok. Qed.
 
-Lemma compile_ext_call_works :
+Check compile_ext_call_correct.
+
+(*Lemma compile_ext_call_works :
   (forall (resvars : list Z) (extcall : string) (argvars : list Z),
         @FlatToRiscvCommon.compiles_FlatToRiscv_correctly RV32I 32 Bitwidth32.BW32
-          Words32Naive.word localsL (SortedListString.map Z) other_compile_ext_call other_leak_ext_call mem
+          Words32Naive.word localsL (SortedListString.map Z) (@compile_ext_call SortedListString.map) (@leak_ext_call Words32Naive.word SortedListString.map) mem
           (SortedListString.map (list Z * list Z * FlatImp.stmt Z)) M MM RVM PRParams ext_spec
-          RV32I_bitwidth compile_ext_call (@FlatImp.SInteract Z resvars extcall argvars)).
+          leak_ext RV32I_bitwidth compile_ext_call (@FlatImp.SInteract Z resvars extcall argvars)).
 Proof.
-  intros. cbv [FlatToRiscvCommon.compiles_FlatToRiscv_correctly]. intros. exfalso. clear -H.
+  intros. Search compile_ext_call. cbv [FlatToRiscvCommon.compiles_FlatToRiscv_correctly]. intros.
+  apply compile_ext_call_correct. exfalso. clear -H.
   inversion H. subst. cbv [ext_spec] in *. assumption.
-Qed.
+Qed.*)
 
 Lemma compile_ext_call_length :
   (forall (stackoffset : Z) (posmap1 posmap2 : SortedListString.map Z) 
@@ -300,28 +307,28 @@ Lemma compile_ext_call_length :
           @Datatypes.length Instruction (compile_ext_call posmap2 pos2 stackoffset c)).
 Proof.
   intros. cbv [compile_ext_call]. reflexivity. Qed.
-Compute (compile compile_ext_call fs).
-Definition instrs :=
-  match (compile compile_ext_call fs) with
+Definition fs_swap := &[,swap].
+Definition instrs_swap :=
+  match (compile compile_ext_call fs_swap) with
   | Success (instrs, _, _) => instrs
   | _ => nil
   end.
-Compute instrs.
-Definition finfo :=
-  match (compile compile_ext_call fs) with
+Compute instrs_swap.
+Definition finfo_swap :=
+  match (compile compile_ext_call fs_swap) with
   | Success (_, finfo, _) => finfo
   | _ => nil
   end.
-Definition req_stack_size :=
-  match (compile compile_ext_call fs) with
+Definition req_stack_size_swap :=
+  match (compile compile_ext_call fs_swap) with
   | Success (_, _, req_stack_size) => req_stack_size
   | _ => 0
   end.
-Definition fname := "swap".
-Definition f_rel_pos := 0.
+Definition fname_swap := "swap".
+Definition f_rel_pos_swap := 0.
 Definition post : list LogItem -> mem -> list Words32Naive.word -> Prop := fun _ _ _ => True.
 Print ct_spec_of_swap.
-Check (@compiler_correct_wp _ _ Words32Naive.word mem _ ext_spec _ _ _ ext_spec_ok _ _ _ _ _ word_ok _ _ RV32I _ compile_ext_call leak_ext_call compile_ext_call_works compile_ext_call_length fs instrs finfo req_stack_size fname _ _ _ _).
+Check (@compiler_correct_wp _ _ Words32Naive.word mem _ ext_spec _ _ _ _ ext_spec_ok _ _ _ _ _ word_ok _ _ RV32I _ compile_ext_call leak_ext_call compile_ext_call_correct compile_ext_call_length fs_swap instrs_swap finfo_swap req_stack_size_swap fname_swap _ _ _ _).
 Check compiler_correct_wp.
 
 Lemma swap_ct :
@@ -330,13 +337,13 @@ Lemma swap_ct :
   forall R m a b stack_lo ret_addr
                        Rdata Rexec (initial : RiscvMachine),
     Separation.sep (Separation.sep (Scalars.scalar a_addr a) (Scalars.scalar b_addr b)) R m ->
-    req_stack_size <= word.unsigned (word.sub stack_hi stack_lo) / SeparationLogic.bytes_per_word ->
+    req_stack_size_swap <= word.unsigned (word.sub stack_hi stack_lo) / SeparationLogic.bytes_per_word ->
     word.unsigned (word.sub stack_hi stack_lo) mod SeparationLogic.bytes_per_word = 0 ->
-    getPc initial = word.add p_funcs (word.of_Z f_rel_pos) ->
+    getPc initial = word.add p_funcs (word.of_Z f_rel_pos_swap) ->
     map.get (getRegs initial) RegisterNames.ra = Some ret_addr ->
     word.unsigned ret_addr mod 4 = 0 ->
     LowerPipeline.arg_regs_contain (getRegs initial) [a_addr; b_addr] ->
-    LowerPipeline.machine_ok p_funcs stack_lo stack_hi instrs m Rdata Rexec initial ->
+    LowerPipeline.machine_ok p_funcs stack_lo stack_hi instrs_swap m Rdata Rexec initial ->
     FlatToRiscvCommon.runsTo initial
       (fun final : RiscvMachine =>
          (exists (mH' : mem) (retvals : list Words32Naive.word),
@@ -344,7 +351,7 @@ Lemma swap_ct :
              post (getLog final) mH' retvals /\
              map.only_differ (getRegs initial) reg_class.caller_saved (getRegs final) /\
              getPc final = ret_addr /\
-             LowerPipeline.machine_ok p_funcs stack_lo stack_hi instrs mH' 
+             LowerPipeline.machine_ok p_funcs stack_lo stack_hi instrs_swap mH' 
                Rdata Rexec final) /\
              final.(getTrace) = (finalTrace ++ initial.(getTrace))%list).
 Proof.
@@ -352,7 +359,7 @@ Proof.
   cbv [ProgramLogic.program_logic_goal_for] in spec.
   specialize (spec nil). cbv [ct_spec_of_swap] in spec. destruct spec as [f spec].
   intros. Print compiler_correct_wp''. Unshelve.
-  edestruct (@compiler_correct_wp'' _ _ Words32Naive.word mem _ ext_spec _ _ _ ext_spec_ok _ _ _ _ _ word_ok _ _ RV32I _ compile_ext_call leak_ext_call compile_ext_call_works compile_ext_call_length fs instrs finfo req_stack_size stack_hi p_funcs fname).
+  edestruct (@compiler_correct_wp'' _ _ Words32Naive.word mem _ ext_spec _ _ _ _ ext_spec_ok _ _ _ _ _ word_ok _ _ RV32I _ compile_ext_call leak_ext_call compile_ext_call_correct compile_ext_call_length fs_swap instrs_swap finfo_swap req_stack_size_swap stack_hi p_funcs fname_swap).
   { simpl. reflexivity. }
   { vm_compute. reflexivity. }
   exists x. intros.
@@ -362,9 +369,8 @@ Proof.
        { vm_compute. repeat constructor; eauto. }
        { vm_compute. left. reflexivity. } }
   2,3,4,5,6,7,9: eassumption.
-  2: reflexivity. Print ct_spec_of_swap. Print ct_spec_of_swap. Search ct_spec_of_swap.
-  Check swap_ok. Print ProgramLogic.program_logic_goal_for.
-  specialize (spec nil (getLog initial) m a_addr b_addr a b R H0). cbv [fs fname].
+  2: reflexivity.
+  specialize (spec nil (getLog initial) m a_addr b_addr a b R H0). cbv [fs_swap fname_swap].
   eapply WeakestPreconditionProperties.Proper_call.
   2: eapply spec.
   cbv [Morphisms.pointwise_relation Basics.impl]. intros.
@@ -372,14 +378,9 @@ Proof.
   2: cbv [post]; reflexivity.
   destruct H8 as [H8 [H9 H10] ]. subst. destruct H8 as [k'' [H8 H11] ]. subst. exists k''.
   split; eauto.
-  Unshelve.
-       - exact envH.
-       - exact word_ok'.
-       - exact mem_ok.
-       - apply SortedListString.ok.
-       - exact envH_ok.
-       - exact ext_spec_ok.
 Qed.
+
+Check (@compiler_correct_wp _ _ Words32Naive.word mem _ ext_spec _ _ _ _ ext_spec_ok _ _ _ _ _ word_ok _ _ RV32I _ compile_ext_call leak_ext_call compile_ext_call_correct compile_ext_call_length fs_swap instrs_swap finfo_swap req_stack_size_swap fname_swap _ _ _ _).
 
 Print Assumptions swap_ct.
 (* Prints:
@@ -402,7 +403,85 @@ Print Assumptions swap_ct.
         MM : Monad M
         M : Type -> Type
 
-*)
+ *)
+
+Definition fs_io_function := &[,io_function;swap].
+Definition instrs_io_function :=
+  match (compile compile_ext_call fs_io_function) with
+  | Success (instrs, _, _) => instrs
+  | _ => nil
+  end.
+Compute instrs_swap.
+Definition finfo_io_function :=
+  match (compile compile_ext_call fs_io_function) with
+  | Success (_, finfo, _) => finfo
+  | _ => nil
+  end.
+Definition req_stack_size_io_function :=
+  match (compile compile_ext_call fs_io_function) with
+  | Success (_, _, req_stack_size) => req_stack_size
+  | _ => 0
+  end.
+Definition fname_io_function := "io_function".
+Definition f_rel_pos_io_function := 0.
+
+Check (@compiler_correct_wp _ _ Words32Naive.word mem _ ext_spec _ _ _ _ ext_spec_ok _ _ _ _ _ word_ok _ _ RV32I _ compile_ext_call leak_ext_call compile_ext_call_correct compile_ext_call_length fs_io_function instrs_io_function finfo_io_function req_stack_size_io_function fname_io_function _ _ _ _).
+
+Print ct_spec_of_io_function.
+
+Lemma io_function_ct :
+  forall x p_funcs stack_hi,
+  exists finalTrace : list LeakageEvent,
+  forall R m y stack_lo ret_addr
+                       Rdata Rexec (initial : RiscvMachine),
+    (*Separation.sep (Separation.sep (Scalars.scalar a_addr a) (Scalars.scalar b_addr b)) R m ->*)
+    req_stack_size_io_function <= word.unsigned (word.sub stack_hi stack_lo) / SeparationLogic.bytes_per_word ->
+    word.unsigned (word.sub stack_hi stack_lo) mod SeparationLogic.bytes_per_word = 0 ->
+    getPc initial = word.add p_funcs (word.of_Z f_rel_pos_io_function) ->
+    map.get (getRegs initial) RegisterNames.ra = Some ret_addr ->
+    word.unsigned ret_addr mod 4 = 0 ->
+    (*LowerPipeline.arg_regs_contain (getRegs initial) [a_addr; b_addr] ->*)
+    LowerPipeline.machine_ok p_funcs stack_lo stack_hi instrs_io_function m Rdata Rexec initial ->
+    FlatToRiscvCommon.runsTo initial
+      (fun final : RiscvMachine =>
+         (exists (mH' : mem) (retvals : list Words32Naive.word),
+           LowerPipeline.arg_regs_contain (getRegs final) retvals /\
+             post (getLog final) mH' retvals /\
+             map.only_differ (getRegs initial) reg_class.caller_saved (getRegs final) /\
+             getPc final = ret_addr /\
+             LowerPipeline.machine_ok p_funcs stack_lo stack_hi instrs_io_function mH' 
+               Rdata Rexec final) /\
+           (exists x' y',
+               (final.(getLog) = [(map.empty, "MMIOREAD", [word.of_Z 0], (map.empty, [x']));
+                                 (map.empty, "MMIOREAD", [word.of_Z 0], (map.empty, [y']))] ++
+                                  initial.(getLog))%list /\
+                 (x' = x ->
+                  y' = y ->
+                  R m /\ (final.(getTrace) = finalTrace ++ initial.(getTrace))%list))).
+Proof.
+  assert (spec := @io_function_ok Words32Naive.word mem word_ok' mem_ok).
+  cbv [ProgramLogic.program_logic_goal_for] in spec.
+  specialize (spec nil). cbv [ct_spec_of_io_function] in spec.
+  intros.
+  edestruct (@compiler_correct_wp'' _ _ Words32Naive.word mem _ ext_spec _ _ _ _ ext_spec_ok _ _ _ _ _ word_ok _ _ RV32I _ compile_ext_call leak_ext_call compile_ext_call_correct compile_ext_call_length fs_io_function instrs_io_function finfo_io_function req_stack_size_io_function stack_hi p_funcs fname_io_function).
+  { simpl. reflexivity. }
+  { vm_compute. reflexivity. }
+  exists x0. intros. Print compiler_correct_wp''.
+  eapply H.
+  { simpl. repeat constructor. tauto. }
+  2: { eapply map.get_of_list_In_NoDup.
+       { vm_compute. repeat constructor; eauto. }
+       { vm_compute. left. reflexivity. } }
+  2,3,4,5,6,7,9: eassumption.
+  2: reflexivity.
+  specialize (spec nil (getLog initial) m a_addr b_addr a b R H0). cbv [fs_io_function fname_io_function].
+  eapply WeakestPreconditionProperties.Proper_call.
+  2: eapply spec.
+  cbv [Morphisms.pointwise_relation Basics.impl]. intros.
+  split.
+  2: cbv [post]; reflexivity.
+  destruct H8 as [H8 [H9 H10] ]. subst. destruct H8 as [k'' [H8 H11] ]. subst. exists k''.
+  split; eauto.
 
 (*
 (* Not sure I can actually prove this. *)
