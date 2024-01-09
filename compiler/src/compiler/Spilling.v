@@ -1454,22 +1454,17 @@ Section Spilling.
                      predicts next (k10 ++ rev k1'' ++ k1''') ->
                      predicts (fun k => f (k10 ++ rev k1'') k) k2''' ->
                      Nat.le F' fuel' ->
-                     predicts (fun k => snext_stmt' e1 fuel' next k10 fpval s1 k f) (rev k2'' ++ k2''')).              
+                     predicts (fun k => snext_stmt' e1 fuel' next k10 fpval s1 k f) (rev k2'' ++ k2''')).
 
-  Definition call_spec(e: env) '(argnames, retnames, fbody) next
+  Definition call_spec(e: env) '(argnames, retnames, fbody)
     (k: Semantics.trace)(t: Semantics.io_trace)(m: mem)(argvals: list word)
-    (post: Semantics.io_trace -> mem -> list word -> Prop): Prop :=
-    (forall l mc,
-        map.of_list_zip argnames argvals = Some l ->
-        exec e fbody k t m l mc (fun k' t' m' l' mc' =>
+    (post: trace -> Semantics.io_trace -> mem -> list word -> Prop): Prop :=
+    forall l mc,
+      map.of_list_zip argnames argvals = Some l ->
+      exec e fbody k t m l mc (fun k' t' m' l' mc' =>
                                  exists retvals, map.getmany_of_list l' retnames = Some retvals /\
-                                                   post t' m' retvals /\
-                                                   exists k'' F,
-                                                     k' = k'' ++ k /\
-                                                       forall fuel,
-                                                         le F fuel ->
-                                                         predicts (next fuel) (rev k''))).
-
+                                                   post k' t' m' retvals).
+  
                                                                                   
   (* In exec.call, there are many maps of locals involved:
 
@@ -1502,12 +1497,22 @@ Section Spilling.
     x :: l = [x] ++ l.
   Proof. reflexivity. Qed.
   
-  Lemma spill_fun_correct_aux: forall e1 e2 next argnames1 retnames1 body1 argnames2 retnames2 body2,
+  Lemma spill_fun_correct_aux: forall e1 e2 argnames1 retnames1 body1 argnames2 retnames2 body2,
       spill_fun (argnames1, retnames1, body1) = Success (argnames2, retnames2, body2) ->
       spilling_correct_for e1 e2 body1 ->
-      forall argvals k t m (post: Semantics.io_trace -> mem -> list word -> Prop),
-        call_spec e1 (argnames1, retnames1, body1) next k t m argvals post ->
-        call_spec e2 (argnames2, retnames2, body2) (fun fuel => snext_fun e1 fuel (next fuel) [] (argnames1, retnames1, body1)) k t m argvals post.
+      forall argvals k t m (post: trace -> Semantics.io_trace -> mem -> list word -> Prop),
+        call_spec e1 (argnames1, retnames1, body1) k t m argvals post ->
+        call_spec e2 (argnames2, retnames2, body2) k t m argvals
+          (fun k2' t' m' retvals =>
+             exists k1'' k2'',
+               post (k1'' ++ k) t' m' retvals /\
+                 k2' = k2'' ++ k /\
+                 forall next,
+                   predicts next (rev k1'') ->
+                   exists F,
+                   forall fuel,
+                     (F <= fuel)%nat ->
+                     predicts (snext_fun e1 fuel next [] (argnames1, retnames1, body1)) (rev k2'')).
   Proof.
     unfold call_spec, spilling_correct_for. intros * Sp IHexec * Ex lFL3 mc OL2.
     unfold spill_fun in Sp. fwd.
@@ -1645,14 +1650,15 @@ Section Spilling.
       blia. }
     1: eassumption.
     { subst kL6. subst kL4. rewrite app_one_cons. repeat rewrite app_assoc. reflexivity. }
-    { intros fuel. intros Hfuel. cbv [snext_fun]. subst kL6 kL4.
+    { intros next H.
       repeat (rewrite rev_app_distr || rewrite rev_involutive || cbn [rev List.app]).
+      exists (S F'). intros. destruct fuel as [|fuel']; [blia|].
       econstructor; eauto.
+      { reflexivity. }
+      cbn [snext_fun].
       apply predict_with_prefix_works.
-      eapply CT. Print snext_fun.
-      { apply app_inv_tail in Et1''. subst.
-        simpl. Search predicts. instantiate (1 := nil). rewrite app_nil_r.
-        instantiate (1 := (plus F F')) in Hfuel. eapply OCp2p1. blia. }
+      eapply CT.
+      { simpl. instantiate (1 := nil). rewrite app_nil_r. assumption. }
       { apply predict_with_prefix_works_end. constructor. reflexivity. }
       { blia. } }
      Unshelve.
@@ -2438,33 +2444,27 @@ Section Spilling.
       rewrite app_nil_r in H2. eassumption.
   Qed.
 
-  (*here our precondition requires the function to behave as specified by some predictor function.
-    This seems not good.  Options to fix it:
-    - add a flag 'is_ct' to call_spec, only require to be predicted by next if flag is true
-    - ??? *)
-  Print call_spec.
   Lemma spill_fun_correct: forall e1 e2 argnames1 retnames1 body1 argnames2 retnames2 body2,
       spill_functions e1 = Success e2 ->
       spill_fun (argnames1, retnames1, body1) = Success (argnames2, retnames2, body2) ->
       forall argvals k t m (post: Semantics.trace -> Semantics.io_trace -> mem -> list word -> Prop),
-        (forall l mc,
-            map.of_list_zip argnames1 argvals = Some l ->
-            exec e1 body1 k t m l mc (fun k' t' m' l' mc' =>
-                                       exists retvals,
-                                         map.getmany_of_list l' retnames1 = Some retvals /\
-                                           post k' t' m' retvals)) ->
-        (forall l mc,
-            map.of_list_zip argnames2 argvals = Some l ->
-            exec e2 body2 k t m l mc (fun k' t' m' l' mc' =>
-                                       exists k''L k''H retvals,
-                                         map.getmany_of_list l' retnames2 = Some retvals /\
-                                           post (k''H ++ k) t' m' retvals /\
-                                           k' = k''L ++ k /\
-                                           forall next,
-                                             predicts next (rev k''H) ->
-                                             exists F,(*need to stop writing exists here.*)
-                                             forall fuel,
-                                               (F <= fuel)%nat ->
-                                               predicts (snext_fun e1 fuel next [] (argnames1, retnames1, body1)) k''L)).
+        call_spec e1 (argnames1, retnames1, body1) k t m argvals post ->
+        call_spec e2 (argnames2, retnames2, body2) k t m argvals
+          (fun k2' t' m' retvals =>
+             exists k1'' k2'',
+               post (k1'' ++ k) t' m' retvals /\
+                 k2' = k2'' ++ k /\
+                 forall next,
+                   predicts next (rev k1'') ->
+                   exists F,
+                   forall fuel,
+                     (F <= fuel)%nat ->
+                     predicts (snext_fun e1 fuel next [] (argnames1, retnames1, body1)) (rev k2'')).
+  Proof.
+    intros. eapply spill_fun_correct_aux; try eassumption.
+    unfold spilling_correct_for.
+    eapply spilling_correct.
+    assumption.
+  Qed.
 
 End Spilling.
