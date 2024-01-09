@@ -378,10 +378,9 @@ Section LowerPipeline.
       compiles_FlatToRiscv_correctly compile_ext_call leak_ext_call compile_ext_call
                                      (FlatImp.SInteract resvars extcall argvars).
 
-  Definition riscv_call(p: list Instruction * pos_map * Z)
+  Definition riscv_call(p: list Instruction * pos_map * Z)(s: word(*p_funcs*) * word(*stack_pastend*))
              (f_name: string)(kL: list LeakageEvent)(t: Semantics.io_trace)(mH: mem)(argvals: list word)
-             (post: Z(*f_rel_post*) -> word(*p_funcs*) -> word(*stack_pastend*) ->
-                    list LeakageEvent -> Semantics.io_trace -> mem -> list word -> Prop): Prop :=
+             (post: list LeakageEvent -> Semantics.io_trace -> mem -> list word -> Prop): Prop :=
     let '(instrs, finfo, req_stack_size) := p in
     exists f_rel_pos,
       map.get finfo f_name = Some f_rel_pos /\
@@ -399,7 +398,7 @@ Section LowerPipeline.
           (fun final =>
              exists mH' retvals,
                arg_regs_contain final.(getRegs) retvals /\
-                 post f_rel_pos p_funcs stack_pastend final.(getTrace) final.(getLog) mH' retvals /\
+                 post final.(getTrace) final.(getLog) mH' retvals /\
                  map.only_differ initial.(getRegs) reg_class.caller_saved final.(getRegs) /\
                  final.(getPc) = ret_addr /\
                  machine_ok p_funcs stack_start stack_pastend instrs mH' Rdata Rexec final).
@@ -493,21 +492,27 @@ Section LowerPipeline.
                        (fun kH' t' m' l' mc' =>
                           exists retvals, map.getmany_of_list l' retnames = Some retvals /\
                                             post kH' t' m' retvals)) ->
-      riscv_call p2 fname kL t m argvals
-        (fun f_rel_pos p_funcs stack_pastend kL' t' m' retvals =>
-           let '(instrs, finfo, req_stack_size) := p2 in
-           exists kH'' (kL'': list LeakageEvent),
-             post (kH'' ++ kH) t' m' retvals /\
-               kL' = kL'' ++ kL /\
-               forall next,
-                 Semantics.predicts next (rev kH'') ->
-                 exists F,
-                 forall fuel,
-                   (F <= fuel)%nat ->
-                   predictsLE
-                     (fun kL''' =>
-                        rnext_fun iset compile_ext_call leak_ext_call finfo p_funcs p1 fuel next nil f_rel_pos stack_pastend argnames retnames fbody kL''' (fun _ _ => Some qendLE))
-                     (rev kL'')).
+        forall p_funcs stack_pastend,
+          riscv_call p2 (p_funcs, stack_pastend) fname kL t m argvals
+            (fun kL' t' m' retvals =>
+               let '(instrs, finfo, req_stack_size) := p2 in
+               let f_rel_pos :=
+                 match map.get finfo fname with
+                 | Some f_rel_pos => f_rel_pos
+                 | None => 0
+                 end in
+               exists kH'' (kL'': list LeakageEvent),
+                 post (kH'' ++ kH) t' m' retvals /\
+                   kL' = kL'' ++ kL /\
+                   forall next,
+                     Semantics.predicts next (rev kH'') ->
+                     exists F,
+                     forall fuel,
+                       (F <= fuel)%nat ->
+                       predictsLE
+                         (fun kL''' =>
+                            rnext_fun iset compile_ext_call leak_ext_call finfo p_funcs p1 fuel next nil f_rel_pos stack_pastend argnames retnames fbody kL''' (fun _ _ => Some qendLE))
+                         (rev kL'')).
   Proof.
     unfold riscv_call.
     intros p1 p2. destruct p2 as ((finstrs & finfo) & req_stack_size). intros.

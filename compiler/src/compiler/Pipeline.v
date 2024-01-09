@@ -60,13 +60,14 @@ Section WithWordAndMem.
 
   Record Lang := {
       Program: Type;
+      Valid: Program -> Prop;
+      Settings: Type;
       Event: Type;
       QEvent: Type;
-      LeakageInfo: Type;
-      Valid: Program -> Prop;
-      Call(p: Program)(funcname: string)(next: LeakageInfo -> nat -> list Event -> option QEvent)
-        (k: trace)(t: io_trace)(m: mem)(argvals: list word)
-        (post: io_trace -> mem -> list word -> Prop): Prop;
+      predicts: (list Event -> QEvent) -> list Event -> Prop;
+      Call(p: Program)(s: Settings)(funcname: string)
+        (k: list Event)(t: io_trace)(m: mem)(argvals: list word)
+        (post: list Event -> io_trace -> mem -> list word -> Prop): Prop;
   }.
 
   Record phase_correct{L1 L2: Lang}
@@ -79,11 +80,21 @@ Section WithWordAndMem.
     phase_preserves_post: forall p1 p2,
         L1.(Valid) p1 ->
         compile p1 = Success p2 ->
-        forall fname next,
-        exists next',
-          forall k t m argvals post,
-          L1.(Call) p1 fname next k t m argvals post ->
-          L2.(Call) p2 fname next' k t m argvals post;
+        forall s1 s2 fname,
+        exists f,
+        forall k1 k2 t m argvals post,
+          L1.(Call) p1 s1 fname k1 t m argvals post ->
+          L2.(Call) p2 s2 fname k2 t m argvals
+               (fun k2' t' m' retvals =>
+                  exists k1'' k2'',
+                    post (k1'' ++ k1) t' m' retvals /\
+                      k2' = k2'' ++ k2 /\
+                      forall next,
+                        L1.(predicts) next (rev k1'') ->
+                        exists F,
+                        forall fuel,
+                          (F <= fuel)%nat ->
+                          L2.(predicts) (f fuel next) (rev k2''));
   }.
 
   Arguments phase_correct : clear implicits.
