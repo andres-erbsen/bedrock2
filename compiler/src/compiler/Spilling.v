@@ -1507,11 +1507,11 @@ Section Spilling.
              exists k1'' k2'',
                post (k1'' ++ k) t' m' retvals /\
                  k2' = k2'' ++ k /\
-                 forall next,
-                   predicts next (rev k1'') ->
-                   exists F,
-                   forall fuel,
-                     (F <= fuel)%nat ->
+                 exists F,
+                 forall fuel,
+                   (F <= fuel)%nat ->
+                   forall next,
+                     predicts next (rev k1'') ->
                      predicts (snext_fun e1 fuel next [] (argnames1, retnames1, body1)) (rev k2'')).
   Proof.
     unfold call_spec, spilling_correct_for. intros * Sp IHexec * Ex lFL3 mc OL2.
@@ -1650,9 +1650,9 @@ Section Spilling.
       blia. }
     1: eassumption.
     { subst kL6. subst kL4. rewrite app_one_cons. repeat rewrite app_assoc. reflexivity. }
-    { intros next H.
+    { instantiate (1 := S F'). intros fuel Hfuel next H.
       repeat (rewrite rev_app_distr || rewrite rev_involutive || cbn [rev List.app]).
-      exists (S F'). intros. destruct fuel as [|fuel']; [blia|].
+      destruct fuel as [|fuel']; [blia|].
       econstructor; eauto.
       { reflexivity. }
       cbn [snext_fun].
@@ -2454,11 +2454,11 @@ Section Spilling.
              exists k1'' k2'',
                post (k1'' ++ k) t' m' retvals /\
                  k2' = k2'' ++ k /\
-                 forall next,
-                   predicts next (rev k1'') ->
-                   exists F,
-                   forall fuel,
-                     (F <= fuel)%nat ->
+                 exists F,
+                 forall fuel,
+                   (F <= fuel)%nat ->
+                   forall next,                   
+                     predicts next (rev k1'') ->
                      predicts (snext_fun e1 fuel next [] (argnames1, retnames1, body1)) (rev k2'')).
   Proof.
     intros. eapply spill_fun_correct_aux; try eassumption.

@@ -62,12 +62,18 @@ Section WithWordAndMem.
       Program: Type;
       Valid: Program -> Prop;
       Settings: Type;
+      SettingsInhabited: Settings;
       Event: Type;
       QEvent: Type;
-      predicts: (list Event -> QEvent) -> list Event -> Prop;
+      Predicts: (list Event -> QEvent) -> list Event -> Prop;
       Call(p: Program)(s: Settings)(funcname: string)
         (k: list Event)(t: io_trace)(m: mem)(argvals: list word)
         (post: list Event -> io_trace -> mem -> list word -> Prop): Prop;
+      WeakenCall: forall p s funcname k t m argvals (post1: _ -> _ -> _ -> _ -> Prop),
+        Call p s funcname k t m argvals post1 ->
+        forall post2 : _ -> _ -> _ -> _ -> Prop,
+        (forall k' t' m' retvals, post1 k' t' m' retvals -> post2 k' t' m' retvals) ->
+        Call p s funcname k t m argvals post2;
   }.
 
   Record phase_correct{L1 L2: Lang}
@@ -89,12 +95,12 @@ Section WithWordAndMem.
                   exists k1'' k2'',
                     post (k1'' ++ k1) t' m' retvals /\
                       k2' = k2'' ++ k2 /\
-                      forall next,
-                        L1.(predicts) next (rev k1'') ->
-                        exists F,
-                        forall fuel,
-                          (F <= fuel)%nat ->
-                          L2.(predicts) (f fuel next) (rev k2''));
+                      exists F,
+                      forall fuel,
+                        (F <= fuel)%nat ->
+                        forall next,
+                          L1.(Predicts) next (rev k1'') ->
+                          L2.(Predicts) (f fuel next) (rev k2''));
   }.
 
   Arguments phase_correct : clear implicits.
@@ -117,10 +123,24 @@ Section WithWordAndMem.
     intros [V12 C12] [V23 C23].
     split; intros; fwd; eauto.
     specialize (V12 p1 a E H).
-    specialize (C23 a p2 V12 H0 fname).
-    specialize (C12 p1 a H E fname next). destruct C12 as [next' C12].
-    specialize (C23 next'). destruct C23 as [next'' C23].
+    specialize (C23 a p2 V12 H0 L2.(SettingsInhabited) s2 fname).
+    specialize (C12 p1 a H E s1 L2.(SettingsInhabited) fname).
+    destruct C12 as [f12 C12]. destruct C23 as [f23 C23].
+    exists (fun n next1 => f23 n (f12 n next1)). intros.
+    eapply L3.(WeakenCall).
+    { apply C23. apply C12. apply H1. }
+    simpl. intros. destruct H2 as [k2'' [k3'' [H2 H3] ] ].
+    destruct H2 as [k1'' [k2''0 H2] ].
+    exists k1'', k3''.
+    intuition eauto.
+    apply app_inv_tail in H3. subst.
+    destruct H6 as [F23 H6]. destruct H7 as [F12 H7].
+    exists (plus F12 F23).
+    intros.
+    specialize (H6 fuel ltac:(blia)).
+    specialize (H7 fuel ltac:(blia)).
     eauto.
+    Unshelve. exact nil.
   Qed.
 
   Section WithMoreParams.
@@ -167,37 +187,63 @@ Section WithWordAndMem.
                (Exec: string_keyed_map (list Var * list Var * Cmd) ->
                       Cmd -> trace -> io_trace -> mem -> locals -> MetricLog ->
                       (trace -> io_trace -> mem -> locals -> MetricLog -> Prop) -> Prop)
-               (e: string_keyed_map (list Var * list Var * Cmd))(f: string)
-               (next: unit -> nat -> trace -> option qevent)
+               (e: string_keyed_map (list Var * list Var * Cmd))(s : unit)(f: string)
                (k: trace)(t: io_trace)(m: mem)(argvals: list word)
-               (post: io_trace -> mem -> list word -> Prop): Prop :=
+               (post: trace -> io_trace -> mem -> list word -> Prop): Prop :=
       exists argnames retnames fbody l,
         map.get e f = Some (argnames, retnames, fbody) /\
         map.of_list_zip argnames argvals = Some l /\
         forall mc, Exec e fbody k t m l mc (fun k' t' m' l' mc' =>
                        exists retvals, map.getmany_of_list l' retnames = Some retvals /\
-                                         post t' m' retvals /\
-                                         exists k'' F,
-                                           k' = k'' ++ k /\
-                                             forall fuel,
-                                               le F fuel ->
-                                               predicts (next tt fuel) (rev k'')).
+                                         post k' t' m' retvals).
+    
+    Lemma locals_based_call_spec_weaken{Var Cmd: Type}{locals: map.map Var word}
+               (Exec: string_keyed_map (list Var * list Var * Cmd) ->
+                      Cmd -> trace -> io_trace -> mem -> locals -> MetricLog ->
+                      (trace -> io_trace -> mem -> locals -> MetricLog -> Prop) -> Prop) :
+      (forall e c k t m l mc (post1: _ -> _ -> _ -> _ -> _ -> Prop),
+          Exec e c k t m l mc post1 ->
+          forall (post2 : _ -> _ -> _ -> _ -> _ -> Prop),
+          (forall k' t' m' l' mc', post1 k' t' m' l' mc' -> post2 k' t' m' l' mc') ->
+          Exec e c k t m l mc post2) ->
+      forall
+        (e: string_keyed_map (list Var * list Var * Cmd))(s : unit)(f: string)
+        (k: trace)(t: io_trace)(m: mem)(argvals: list word)
+        (post1: trace -> io_trace -> mem -> list word -> Prop),
+        locals_based_call_spec Exec e s f k t m argvals post1 ->
+        forall (post2 : _ -> _ -> _ -> _ -> Prop),
+        (forall k' t' m' retvals, post1 k' t' m' retvals -> post2 k' t' m' retvals) ->
+        locals_based_call_spec Exec e s f k t m argvals post2.
+    Proof.
+      intros. cbv [locals_based_call_spec] in *.
+      destruct H0 as (argnames & retnames & fbody & l & H2 & H3 & H4).
+      exists argnames, retnames, fbody, l. intuition eauto.
+      eapply H. 1: apply H4. simpl. intros.
+      destruct H0 as [retvals [H5 H6] ]. exists retvals. eauto.
+    Qed.      
 
     Definition ParamsNoDup{Var: Type}: (list Var * list Var * FlatImp.stmt Var) -> Prop :=
       fun '(argnames, retnames, body) => NoDup argnames /\ NoDup retnames.
+    Search Semantics.exec.
 
     Definition SrcLang: Lang := {|
-      Program := string_keyed_map (list string * list string * Syntax.cmd);
-      Valid := map.forall_values ExprImp.valid_fun;
-      Call := locals_based_call_spec Semantics.exec;
+                                 Program := string_keyed_map (list string * list string * Syntax.cmd);
+                                 Valid := map.forall_values ExprImp.valid_fun;
+                                 Call := locals_based_call_spec Semantics.exec;
+                                 SettingsInhabited := tt;
+                                 Predicts := predicts;
+                                 WeakenCall := locals_based_call_spec_weaken _ Semantics.exec.weaken;
     |}.
     (* |                 *)
     (* | FlattenExpr     *)
     (* V                 *)
     Definition FlatWithStrVars: Lang := {|
-      Program := string_keyed_map (list string * list string * FlatImp.stmt string);
-      Valid := map.forall_values ParamsNoDup;
-      Call := locals_based_call_spec FlatImp.exec;
+                                         Program := string_keyed_map (list string * list string * FlatImp.stmt string);
+                                         Valid := map.forall_values ParamsNoDup;
+                                         Call := locals_based_call_spec FlatImp.exec;
+                                         SettingsInhabited := tt;
+                                         Predicts := predicts;
+                                         WeakenCall := locals_based_call_spec_weaken _ FlatImp.exec.weaken;
     |}.
 
     (* |                 *)
@@ -209,9 +255,12 @@ Section WithWordAndMem.
     (* | RegAlloc        *)
     (* V                 *)
     Definition FlatWithZVars: Lang := {|
-      Program := string_keyed_map (list Z * list Z * FlatImp.stmt Z);
-      Valid := map.forall_values ParamsNoDup;
-      Call := locals_based_call_spec FlatImp.exec;
+                                       Program := string_keyed_map (list Z * list Z * FlatImp.stmt Z);
+                                       Valid := map.forall_values ParamsNoDup;
+                                       Call := locals_based_call_spec FlatImp.exec;
+                                       SettingsInhabited := tt;
+                                       Predicts := predicts;
+                                       WeakenCall := locals_based_call_spec_weaken _ FlatImp.exec.weaken;
     |}.
     (* |                 *)
     (* | Spilling        *)
@@ -219,20 +268,45 @@ Section WithWordAndMem.
     Definition FlatWithRegs: Lang := {|
       Program := string_keyed_map (list Z * list Z * FlatImp.stmt Z);
       Valid := map.forall_values FlatToRiscvDef.valid_FlatImp_fun;
-      Call := locals_based_call_spec FlatImp.exec;
+                                      Call := locals_based_call_spec FlatImp.exec;
+                                      SettingsInhabited := tt;
+                                      Predicts := predicts;
+                                      WeakenCall := locals_based_call_spec_weaken _ FlatImp.exec.weaken;
     |}.
     (* |                 *)
     (* | FlatToRiscv     *)
     (* V                 *) Print riscv_call. Print Lang. Check string_keyed_map Z.
+    Lemma riscv_call_weaken :
+      forall (p : list Instruction * string_keyed_map Z * Z)
+             (s : word * word) (funcname : string) (k : list LeakageEvent)
+             (t : io_trace) (m : mem) (argvals : list word)
+             (post1 : list LeakageEvent -> io_trace -> mem -> list word -> Prop),
+        riscv_call p s funcname k t m argvals post1 ->
+        forall
+          post2 : list LeakageEvent -> io_trace -> mem -> list word -> Prop,
+          (forall (k' : list LeakageEvent) (t' : io_trace) 
+                  (m' : mem) (retvals : list word),
+              post1 k' t' m' retvals -> post2 k' t' m' retvals) ->
+          riscv_call p s funcname k t m argvals post2.
+    Proof.
+      intros. cbv [riscv_call] in *. destruct p. destruct p. destruct s.
+      destruct H as [f_rel_pos H]. exists f_rel_pos. intuition eauto.
+      cbv [runsTo]. eapply runsToNonDet.runsTo_weaken. 1: eapply H2.
+      all: try eassumption. simpl. intros. fwd. exists mH', retvals.
+      intuition eauto.
+    Qed.
+      
     Definition RiscvLang: Lang := {|
-      Program :=
-        list Instruction *      (* <- code of all functions concatenated       *)
-        string_keyed_map Z *    (* <- position (offset) for each function      *)
-        Z;                      (* <- required stack space in XLEN-bit words   *)
-      (* bounds in instructions are checked by `ptsto_instr` *)
-      Valid '(insts, finfo, req_stack_size) := True;
-      Call := (fun p fname next =>
-                 riscv_call p fname next);
+                                   Program :=
+                                     list Instruction *        (* <- code of all functions concatenated       *)
+                                       string_keyed_map Z *    (* <- position (offset) for each function      *)
+                                       Z;                      (* <- required stack space in XLEN-bit words   *)
+                                   (* bounds in instructions are checked by `ptsto_instr` *)
+                                   Valid '(insts, finfo, req_stack_size) := True;
+                                   Call := riscv_call;
+                                   SettingsInhabited := (word.of_Z 0, word.of_Z 0);
+                                   Predicts := predictsLE;
+                                   WeakenCall := riscv_call_weaken;
     |}.
 
     Lemma flatten_functions_NoDup: forall funs funs',
@@ -247,6 +321,8 @@ Section WithWordAndMem.
       unfold flatten_function in *. fwd.
       eapply H. eassumption.
     Qed.
+
+    Check flattenStmt_correct_aux. Check exec.
 
     Lemma flattening_correct: phase_correct SrcLang FlatWithStrVars flatten_functions.
     Proof.
@@ -268,7 +344,8 @@ Section WithWordAndMem.
       eapply FlatImp.exec.weaken.
       - eapply flattenStmt_correct_aux with (mcH := mc).
         + eassumption.
-        + eauto.
+        + eapply Semantics.exec.exec_to_other_trace; try eassumption.
+          apply H1p2.
         + reflexivity.
         + match goal with
           | |- ?p = _ => rewrite (surjective_pairing p)
@@ -287,7 +364,9 @@ Section WithWordAndMem.
           eapply start_state_spec. 2: exact A.
           eapply ListSet.In_list_union_l. eapply ListSet.In_list_union_l. assumption.
         + eapply @freshNameGenState_disjoint_fbody.
-      - simpl. intros. fwd. eauto 8 using map.getmany_of_list_extends.
+      - simpl. intros. fwd. exists retvals. intuition eauto using map.getmany_of_list_extends.
+        exists k'', k''. intuition eauto. exists O. intros. instantiate (1 := fun n t => t).
+        simpl. assumption.
        Qed.
 
     Lemma useimmediate_functions_NoDup: forall funs funs',
@@ -326,8 +405,11 @@ Section WithWordAndMem.
       intros.
       eapply exec.weaken.
       - eapply useImmediate_correct_aux.
-        all: eauto.
-      - simpl. eauto 10.
+        1: eauto. Search exec.
+        eapply exec.exec_to_other_trace. eauto.
+      - simpl. intros. fwd. exists retvals. intuition.
+        eexists. eexists. intuition eauto. exists O. intros.
+        instantiate (1 := fun n t => t). simpl. assumption.
     Qed.
 
     Lemma regalloc_functions_NoDup: forall funs funs',
@@ -377,12 +459,15 @@ Section WithWordAndMem.
       unfold map.of_list_zip in *.
       eapply FlatImp.exec.weaken.
       - eapply checker_correct; eauto.
+        { eapply exec.exec_to_other_trace. eauto. }
         eapply states_compat_precond.
         edestruct putmany_of_list_zip_states_compat as (lL' & P' & Cp); try eassumption.
         1: eapply states_compat_empty.
         rewrite H1 in P'. inversion P'. exact Cp.
-      - simpl. intros. fwd. eexists. split. 2: split; [eassumption|].
-        1: eauto using states_compat_getmany. eauto.
+      - simpl. intros. fwd. eexists. split.
+        2: eexists; eexists; intuition eauto.
+        1: eauto using states_compat_getmany.
+        exists O. intros. instantiate (1 := fun n next => next). simpl. assumption.
     Qed.
 
     Ltac debool :=
@@ -439,7 +524,7 @@ Section WithWordAndMem.
       unfold locals_based_call_spec. intros.
       Check snext_fun.
       Check (match (map.get p1 fname) with | Some finfo => finfo | None => (nil, nil, SSkip) end).
-      exists (fun _ fuel => (snext_fun p1 fuel (next tt fuel) [] (match (map.get p1 fname) with | Some finfo => finfo | None => (nil, nil, SSkip) end))).
+      exists (fun fuel next => (snext_fun p1 fuel next [] (match (map.get p1 fname) with | Some finfo => finfo | None => (nil, nil, SSkip) end))).
       intros. fwd.
       pose proof H0 as GL.
       unfold spill_functions in GL.
@@ -457,9 +542,17 @@ Section WithWordAndMem.
       eexists argnames2, retnames2, fbody2, l'.
       split. 1: exact G2. split. 1: eassumption.
       intros. eapply exec.weaken. 1: eapply spill_fun_correct; try eassumption.
-      { unfold call_spec. intros * E. rewrite E in *. fwd. eauto. }
-      simpl. intros. fwd. exists retvals. split; [assumption|]. split; [assumption|].
-      do 2 eexists. split; [reflexivity|]. intros. eauto.
+      { unfold call_spec. intros * E. rewrite E in *. fwd. eapply exec.weaken.
+        { eapply exec.exec_to_other_trace. eauto. }
+        simpl. intros. fwd. eexists. intuition eauto.
+        instantiate (1 := fun k2' t' m' retvals =>
+                 exists k'',
+                   k2' = k'' ++ k2 /\
+                     post (k'' ++ k1) t' m' retvals).
+        simpl. eexists. intuition. }
+      simpl. intros. fwd. exists retvals. split; [assumption|]. eexists. eexists.
+      intuition eauto. exists F.
+      apply app_inv_tail in H2p1p0p0. subst. auto.
     Qed.
 
     Lemma riscv_phase_correct: phase_correct FlatWithRegs RiscvLang (riscvPhase compile_ext_call).
@@ -467,21 +560,23 @@ Section WithWordAndMem.
       unfold FlatWithRegs, RiscvLang.
       split; cbn.
       - intros p1 ((? & finfo) & ?). intros. exact I.
-      - intros. assert (E: (exists x, map.get p1 fname = Some x) -> map.get p1 fname = Some (match (map.get p1 fname) with | Some finfo => finfo | None => (nil, nil, SSkip) end)).
+      - intros. destruct s2 as [p_funcs stack_pastend].
+        assert (E: (exists x, map.get p1 fname = Some x) -> map.get p1 fname = Some (match (map.get p1 fname) with | Some finfo => finfo | None => (nil, nil, SSkip) end)).
         + intros. destruct H1 as [x H1]. destruct (map.get p1 fname); congruence.
         + destruct (match map.get p1 fname with
                     | Some finfo => finfo
                     | None => ([], [], SSkip)
                     end) as [ [argnames0 retnames0] fbody0 ].
-        (*cbv [locals_based_call_spec] in H1.
-        fwd.*) destruct p2 as [ [instrs finfo] req_stack_size]. Check flat_to_riscv_correct. eexists. intros.
-        eapply flat_to_riscv_correct; eauto.
-        cbv [locals_based_call_spec] in H1. fwd.
-        exists l.
-        assert (H1p0': map.get p1 fname = Some (argnames0, retnames0, fbody0)).
-        { eapply E. eexists. apply H1p0. }
-        rewrite H1p0 in H1p0'. injection H1p0'. intros. subst. clear H1p0'.
-        eauto.
+          destruct p2 as [ [instrs finfo] req_stack_size]. eexists. intros.
+          cbv [locals_based_call_spec] in H1. fwd.
+          assert (H1p0': map.get p1 fname = Some (argnames0, retnames0, fbody0)).
+          { eapply E. eexists. apply H1p0. }
+          Check flat_to_riscv_correct. eapply riscv_call_weaken.
+          { eapply flat_to_riscv_correct; eauto. }
+          simpl. intros. fwd. eexists. eexists. intuition eauto. exists F.
+          intros. instantiate (1 := fun _ _ => _). simpl.
+          rewrite H1p0 in H1p0'. injection H1p0'. intros. subst.
+          eapply H1p5; eauto.
     Qed.
 
     Definition composed_compile:

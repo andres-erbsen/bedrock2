@@ -382,9 +382,10 @@ Section LowerPipeline.
              (f_name: string)(kL: list LeakageEvent)(t: Semantics.io_trace)(mH: mem)(argvals: list word)
              (post: list LeakageEvent -> Semantics.io_trace -> mem -> list word -> Prop): Prop :=
     let '(instrs, finfo, req_stack_size) := p in
+    let '(p_funcs, stack_pastend) := s in
     exists f_rel_pos,
       map.get finfo f_name = Some f_rel_pos /\
-      forall p_funcs stack_start stack_pastend ret_addr Rdata Rexec (initial: MetricRiscvMachine),
+      forall stack_start ret_addr Rdata Rexec (initial: MetricRiscvMachine),
         map.get initial.(getRegs) RegisterNames.ra = Some ret_addr ->
         initial.(getTrace) = kL ->
         initial.(getLog) = t ->
@@ -492,10 +493,11 @@ Section LowerPipeline.
                        (fun kH' t' m' l' mc' =>
                           exists retvals, map.getmany_of_list l' retnames = Some retvals /\
                                             post kH' t' m' retvals)) ->
-        forall p_funcs stack_pastend,
-          riscv_call p2 (p_funcs, stack_pastend) fname kL t m argvals
+        forall s2,
+          riscv_call p2 s2 fname kL t m argvals
             (fun kL' t' m' retvals =>
                let '(instrs, finfo, req_stack_size) := p2 in
+               let '(p_funcs, stack_pastend) := s2 in
                let f_rel_pos :=
                  match map.get finfo fname with
                  | Some f_rel_pos => f_rel_pos
@@ -504,11 +506,11 @@ Section LowerPipeline.
                exists kH'' (kL'': list LeakageEvent),
                  post (kH'' ++ kH) t' m' retvals /\
                    kL' = kL'' ++ kL /\
-                   forall next,
-                     Semantics.predicts next (rev kH'') ->
-                     exists F,
-                     forall fuel,
-                       (F <= fuel)%nat ->
+                   exists F,
+                   forall fuel,
+                     (F <= fuel)%nat ->
+                     forall next,
+                       Semantics.predicts next (rev kH'') ->
                        predictsLE
                          (fun kL''' =>
                             rnext_fun iset compile_ext_call leak_ext_call finfo p_funcs p1 fuel next nil f_rel_pos stack_pastend argnames retnames fbody kL''' (fun _ _ => Some qendLE))
@@ -516,6 +518,7 @@ Section LowerPipeline.
   Proof.
     unfold riscv_call.
     intros p1 p2. destruct p2 as ((finstrs & finfo) & req_stack_size). intros.
+    destruct s2 as (p_funcs & stack_pastend).
     match goal with
     | H: riscvPhase _ = _ |- _ => pose proof H as RP; unfold riscvPhase in H
     end.
@@ -524,7 +527,7 @@ Section LowerPipeline.
     rewrite E0 in P.
     specialize P with (1 := H1p0). cbn in P.
     pose proof (compile_funs_finfo_idemp _ _ _ E0) as Q. subst r. fwd.
-    eexists. split. 1: eassumption.
+    eexists. split. 1: reflexivity.
     intros.
     assert (word.unsigned p_funcs mod 4 = 0). {
       unfold machine_ok in *. fwd.

@@ -356,12 +356,72 @@ Section semantics.
     Fixpoint evaluate_call_args_log (arges : list expr) (mc : metrics) (tr : trace) :=
       match arges with
       | e :: tl =>
-        'Some (v, mc', tr') <- eval_expr e mc tr | None;
-        'Some (args, mc'', tr'') <- evaluate_call_args_log tl mc' tr' | None;
-        Some (v :: args, mc'', tr'')
+          'Some (v, mc', tr') <- eval_expr e mc tr | None;
+          'Some (args, mc'', tr'') <- evaluate_call_args_log tl mc' tr' | None;
+          Some (v :: args, mc'', tr'')
       | _ => Some (nil, mc, tr)
-      end.
+    end.
 
+    Lemma expr_to_other_trace e mc mc' k1 k1' v :
+      eval_expr e mc k1 = Some (v, mc', k1') ->
+      exists k'',
+        k1' = k'' ++ k1 /\
+          forall k2,
+          eval_expr e mc k2 = Some (v, mc', k'' ++ k2).
+    Proof.
+      revert v. revert mc. revert k1. revert k1'. revert mc'. clear.
+      induction e; intros ? ? ? ? ? H; simpl in H; try (inversion H; subst; clear H).
+      - exists nil. auto.
+      - destruct (map.get l x) as [v0|] eqn:E; [|congruence]. inversion H1; subst; clear H1.
+        exists nil. simpl. rewrite E. auto.
+      - destruct (eval_expr _ _ _) as [v0|] eqn:E1; [|congruence].
+        destruct v0. destruct p. destruct (load _ _ _) as [v0|] eqn:E2; [|congruence].
+        inversion H1; subst; clear H1. eapply IHe in E1. destruct E1 as [k'' [E1 E3] ]. subst.
+        eexists (_ :: _). intuition. simpl. rewrite E3. rewrite E2. reflexivity.
+      - destruct (eval_expr _ _ _) as [v0|] eqn:E1; [|congruence].
+        destruct v0. destruct p. destruct (load _ _ _) as [v0|] eqn:E2; [|congruence].
+        inversion H1; subst; clear H1. eapply IHe in E1. destruct E1 as [k'' [E1 E3] ]. subst.
+        eexists (_ :: _). intuition. simpl. rewrite E3. rewrite E2. reflexivity.
+      - destruct (eval_expr e1 _ _) as [ [ [v0 mc0] p0]|] eqn:E1; [|congruence].
+        destruct (eval_expr e2 _ _) as [ [ [v1 mc1] p1]|] eqn:E2; [|congruence].
+        inversion H1; subst; clear H1.
+        eapply IHe1 in E1. destruct E1 as [k''1 [H1 H2] ]. eapply IHe2 in E2.
+        destruct E2 as [k''2 [H3 H4] ]. subst.
+        eexists (_ ++ _ ++ _). repeat rewrite <- (app_assoc _ _ k1). intuition.
+        simpl. rewrite H2. rewrite H4. f_equal. f_equal. repeat rewrite <- (app_assoc _ _ k2).
+        reflexivity.
+      - destruct (eval_expr e1 _ _) as [ [ [v0 mc0] p0]|] eqn:E1; [|congruence].
+        eapply IHe1 in E1. destruct E1 as [k''1 [H2 H3] ]. subst. simpl.
+        destruct (word.eqb _ _) eqn:E.
+        + eapply IHe3 in H1. destruct H1 as [k''3 [H1 H2] ]. subst.
+          eexists (_ ++ _ :: _). repeat rewrite <- (app_assoc _ _ k1).
+          intuition. rewrite H3. rewrite E. rewrite H2.
+          repeat rewrite <- (app_assoc _ _ k2). reflexivity.
+        + eapply IHe2 in H1. destruct H1 as [k''2 [H1 H2] ]. subst.
+          eexists (_ ++ _ :: _). repeat rewrite <- (app_assoc _ _ k1).
+          intuition. rewrite H3. rewrite E. rewrite H2.
+          repeat rewrite <- (app_assoc _ _ k2). reflexivity.
+    Qed.
+
+    Lemma call_args_to_other_trace arges mc k1 vs mc' k1' :
+      evaluate_call_args_log arges mc k1 = Some (vs, mc', k1') ->
+      exists k'',
+        k1' = k'' ++ k1 /\
+          forall k2,
+            evaluate_call_args_log arges mc k2 = Some (vs, mc', k'' ++ k2).
+    Proof.
+      revert mc. revert k1. revert vs. revert mc'. revert k1'. induction arges; intros.
+      - cbn [evaluate_call_args_log] in H. inversion H. subst.
+        exists nil. intuition.
+      - cbn [evaluate_call_args_log] in *.
+        destruct (eval_expr _ _ _) as [ [ [v0 mc0] p0]|] eqn:E1; [|congruence].
+        destruct (evaluate_call_args_log _ _ _) as [ [ [v1 mc1] p1]|] eqn:E2; [|congruence].
+        apply expr_to_other_trace in E1. apply IHarges in E2. fwd.
+        eexists (_ ++ _).
+        repeat rewrite <- (app_assoc _ _ k1). intuition. repeat rewrite <- (app_assoc _ _ k2).
+        rewrite E1p1. rewrite E2p1. reflexivity.
+    Qed.
+    
   End WithMemAndLocals.
 End semantics.
 
@@ -497,7 +557,7 @@ Module exec. Section WithEnv.
 
   Context {word_ok: word.ok word} {mem_ok: map.ok mem} {ext_spec_ok: ext_spec.ok ext_spec}.
 
-  Lemma weaken: forall k t l m mc s post1,
+  Lemma weaken: forall s k t m l mc post1,
       exec s k t m l mc post1 ->
       forall post2: _ -> _ -> _ -> _ -> _ -> Prop,
         (forall k' t' m' l' mc', post1 k' t' m' l' mc' -> post2 k' t' m' l' mc') ->
@@ -586,7 +646,55 @@ Module exec. Section WithEnv.
                end.
         eauto 10.
   Qed.
-  Print expr.expr.
 
+  Lemma exec_to_other_trace s k1 k2 t m l mc post :
+    exec s k1 t m l mc post ->
+    exec s k2 t m l mc (fun k2' t' m' l' mc' =>
+                          exists k'',
+                            k2' = k'' ++ k2 /\
+                              post (k'' ++ k1) t' m' l' mc').
+  Proof.
+    intros H. generalize dependent k2. induction H; intros.
+    - econstructor. exists nil. eauto.
+    - apply expr_to_other_trace in H. destruct H as [k'' [H1 H2] ]. subst.
+      econstructor; intuition eauto.
+    - econstructor; intuition. exists nil. intuition.
+    - apply expr_to_other_trace in H. apply expr_to_other_trace in H0.
+      destruct H as [k''a [H3 H4] ]. subst. destruct H0 as [k''v [H5 H6] ]. subst.
+      econstructor; intuition eauto. eexists (_ :: _ ++ _). simpl.
+      repeat rewrite <- (app_assoc _ _ k2). repeat rewrite <- (app_assoc _ _ k).
+      intuition.
+    - econstructor; intuition. eapply weaken. 1: eapply H1; eauto.
+      simpl. intros. fwd. exists mSmall', mStack'. intuition. eexists (_ ++ _ :: nil).
+      repeat rewrite <- (app_assoc _ _ k2). repeat rewrite <- (app_assoc _ _ k).
+      intuition.
+    - apply expr_to_other_trace in H. fwd. eapply if_true; intuition eauto.
+      eapply weaken. 1: eapply IHexec. simpl. intros. fwd. eexists (_ ++ _ :: _).
+      repeat rewrite <- (app_assoc _ _ k2). repeat rewrite <- (app_assoc _ _ k).
+      intuition.
+    - apply expr_to_other_trace in H. fwd. eapply if_false; intuition.
+      eapply weaken. 1: eapply IHexec. simpl. intros. fwd. eexists (_ ++ _ :: _).
+      repeat rewrite <- (app_assoc _ _ k2). repeat rewrite <- (app_assoc _ _ k).
+      intuition.
+    - econstructor; intuition. fwd. eapply weaken. 1: eapply H1; eauto.
+      simpl. intros. fwd. eexists (_ ++ _).
+      repeat rewrite <- (app_assoc _ _ k2). repeat rewrite <- (app_assoc _ _ k).
+      intuition.
+    - apply expr_to_other_trace in H. fwd. eapply while_false; intuition.
+      eexists (_ :: _). intuition.
+    - apply expr_to_other_trace in H. fwd. eapply while_true; intuition. fwd.
+      eapply weaken. 1: eapply H3; eauto. simpl. intros. fwd. eexists (_ ++ _ ++ _ :: _).
+      repeat rewrite <- (app_assoc _ _ k2). repeat rewrite <- (app_assoc _ _ k).
+      intuition.
+    - Search evaluate_call_args_log. apply call_args_to_other_trace in H0.
+      fwd. econstructor; intuition eauto. fwd. apply H3 in H0p2.
+      fwd. exists retvs. intuition. exists l'. intuition. eexists (_ ++ _).
+      repeat rewrite <- (app_assoc _ _ k2). repeat rewrite <- (app_assoc _ _ k).
+      intuition.
+    - apply call_args_to_other_trace in H0. fwd. econstructor; intuition eauto.
+      apply H2 in H0. fwd. exists l'. intuition. eexists (_ :: _).
+      intuition.
+  Qed.
+      
   End WithEnv.
 End exec. Notation exec := exec.exec.

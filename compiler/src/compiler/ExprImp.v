@@ -414,7 +414,7 @@ Section ExprImp2.
       try solve [state_calc | refine (map.only_differ_putmany _ _ _ _ _); eassumption].
   Qed.
 
-  Lemma weaken_exec: forall env k t l m mc s post1,
+  Lemma weaken_exec: forall env s k t m l mc post1,
       exec env s k t m l mc post1 ->
       forall post2: _ -> _ -> _ -> _ -> _ -> Prop,
         (forall k' t' m' l' mc', post1 k' t' m' l' mc' -> post2 k' t' m' l' mc') ->

@@ -482,7 +482,7 @@ Module exec.
       - assumption.
     Qed.
 
-    Lemma weaken: forall k t l m mc s post1,
+    Lemma weaken: forall s k t m l mc post1,
         exec s k t m l mc post1 ->
         forall post2,
           (forall k' t' m' l' mc', post1 k' t' m' l' mc' -> post2 k' t' m' l' mc') ->
@@ -606,6 +606,59 @@ Module exec.
         destruct H2.
         eauto.
     Qed.
+
+    Lemma exec_to_other_trace s k1 k2 t m l mc post :
+      exec s k1 t m l mc post ->
+      exec s k2 t m l mc (fun k2' t' m' l' mc' =>
+                            exists k'',
+                              k2' = k'' ++ k2 /\
+                                post (k'' ++ k1) t' m' l' mc').
+    Proof.
+      intros H. generalize dependent k2. induction H; intros.
+      - econstructor; intuition eauto. specialize (H2 mReceive resvals H3).
+        destruct H2 as [l' H2]. exists l'. intuition eauto. eexists [_]. intuition eauto.
+      - econstructor; intuition eauto. destruct H4 as [k'' [H4 H5] ].
+        specialize (H3 _ _ _ _ _ H5). subst. destruct H3 as [retvs [l' H6] ].
+        exists retvs, l'. intuition eauto.
+      - econstructor; intuition eauto. eexists [_]. intuition eauto.
+      - econstructor; intuition eauto. eexists [_]. intuition eauto.
+      - econstructor; intuition eauto. eexists [_]. intuition eauto.
+      - econstructor; intuition eauto. eapply weaken. 1: eapply H1; eassumption.
+        simpl. intros. destruct H4 as [k'' [H4 [mSmall' [mStack' [H5 [H6 H7] ] ] ] ] ].
+        subst. exists mSmall', mStack'. intuition eauto. eexists (k'' ++ [_]).
+        do 2 rewrite <- app_assoc. intuition eauto.
+      - econstructor; intuition eauto. exists nil. intuition eauto.
+      - econstructor; intuition eauto.
+      - econstructor; intuition eauto. exists nil. intuition eauto.
+      - eapply if_true; intuition eauto. eapply weaken. 1: eapply IHexec.
+        simpl. intros. destruct H1 as [k'' [H1 H2] ]. subst. eexists (k'' ++ [_]).
+        do 2 rewrite <- app_assoc. intuition eauto.
+      - eapply if_false; intuition eauto. eapply weaken. 1: eapply IHexec.
+        simpl. intros. destruct H1 as [k'' [H1 H2] ]. subst. eexists (k'' ++ [_]).
+        do 2 rewrite <- app_assoc. intuition eauto.
+      - econstructor; intuition eauto.
+        + destruct H6 as [k'' [H6 H8] ]. eauto.
+        + destruct H6 as [k'' [H6 H8] ]. subst. eexists (_ :: k''). intuition eauto.
+        + destruct H6 as [k'' [H6 H8] ]. subst. eapply weaken. 1: eapply H3; eauto.
+          simpl. intros. destruct H6 as [k''0 [H6 H9] ]. subst.
+          instantiate (1 := fun k2' t'0 m'0 l'0 mc'0 =>
+                              exists tail,
+                                k2' = tail ++ k2 /\
+                                  mid2 (tail ++ k) t'0 m'0 l'0 mc'0).
+          simpl. eexists (_ ++ [_] ++ _). simpl.
+          repeat rewrite <- (app_assoc _ _ k2). repeat rewrite <- (app_assoc _ _ k).
+          simpl. intuition eauto.
+        + simpl in H6. destruct H6 as [tail [H6 H7] ]. subst.
+          eapply weaken. 1: eapply H5; eauto.
+          simpl. intros. destruct H6 as [k'' [H6 H8] ]. subst.
+          exists (k'' ++ tail). repeat rewrite <- app_assoc. intuition eauto.
+      - econstructor; intuition eauto. destruct H2 as [k'' [H2 H3] ]. subst.
+        eapply weaken. 1: eapply H1; eauto.
+        simpl. intros. destruct H2 as [k''0 [H2 H4] ]. subst.
+        exists (k''0 ++ k''). repeat rewrite <- app_assoc. intuition eauto.
+      - econstructor; intuition eauto. exists nil. auto.
+    Qed.
+
 
   End FlatImpExec.
 End exec.
