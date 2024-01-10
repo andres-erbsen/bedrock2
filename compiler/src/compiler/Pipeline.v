@@ -739,7 +739,7 @@ Section WithWordAndMem.
         (* high-level initial state & post on final state: *)
         (kH: trace) (kL: list LeakageEvent) (t: io_trace) (mH: mem) (argvals: list word) (post: trace -> io_trace -> mem -> list word -> Prop)
         (* ghost vars that help describe the low-level machine: *)
-        (stack_lo stack_hi ret_addr p_funcs: word) (Rdata Rexec: mem -> Prop)
+        (stack_lo ret_addr : word) (Rdata Rexec: mem -> Prop)
         (* low-level machine on which we're going to run the compiled program: *)
         (initial: MetricRiscvMachine),
         NoDup (map fst fs) ->
@@ -752,6 +752,7 @@ Section WithWordAndMem.
         word.unsigned ret_addr mod 4 = 0 ->
         arg_regs_contain initial.(getRegs) argvals ->
         initial.(getLog) = t ->
+        initial.(getTrace) = kL ->
         machine_ok p_funcs stack_lo stack_hi instrs mH Rdata Rexec initial ->
         runsTo initial
           (fun final : MetricRiscvMachine =>
@@ -777,27 +778,25 @@ Section WithWordAndMem.
       eapply WeakestPreconditionProperties.sound_call' in WP.
       2: { eapply map.all_gets_from_map_of_NoDup_list; assumption. }
       fwd.
+      specialize (compiler_correct' kH kL).
       edestruct compiler_correct' as (f_rel_pos' & G & C);
         try eassumption.
       - intros.
         unfold map.of_list_zip in *. eauto 10.
       - fwd. rewrite H3 in G. injection G as G. subst.
-        (*I think eapply C should still work here*)
-        eapply C; clear C; try assumption; try congruence.
+        apply C; clear C; try assumption; try congruence.
     Qed.
 
-    
-Print FlatToRiscvDef.qLeakageEvent.
-Fixpoint trace_of_predictor so_far next fuel :=
-  match fuel with
-  | O => nil
-  | S fuel' =>
-      match next fuel so_far with
-      | Some (FlatToRiscvDef.qLE e) => e :: trace_of_predictor (app so_far (cons e nil)) next fuel'
-      | Some (FlatToRiscvDef.qendLE) => []
-      | None => []
-      end
-  end.
+    Fixpoint trace_of_predictor so_far next fuel :=
+      match fuel with
+      | O => nil
+      | S fuel' =>
+          match next fuel so_far with
+          | Some (FlatToRiscvDef.qLE e) => e :: trace_of_predictor (app so_far (cons e nil)) next fuel'
+          | Some (FlatToRiscvDef.qendLE) => []
+          | None => []
+          end
+      end.
 
 Notation predictsLE := FlatToRiscvCommon.predictsLE.
 Print FlatToRiscvDef.qLeakageEvent.
@@ -832,6 +831,32 @@ Proof.
     apply IHk. blia.
 Qed.
 
+Lemma trace_of_predictor_works_other' so_far f F kH'' kL'' :
+  (forall fuel,
+      (F <= fuel)%nat ->
+      forall next : trace -> option qevent,
+        predicts next kH'' ->
+        predictsLE (f fuel next) (so_far ++ kL'')) ->
+  exists F',
+  forall fuel,
+    (F' <= fuel)%nat ->
+    forall next,
+      predicts next kH'' ->
+      kL'' = trace_of_predictor so_far (fun fuel' => f fuel' next) fuel.
+Proof.
+  clear. intros H. generalize dependent so_far. induction kL''.
+  - intros. exists (S F). intros. destruct fuel as [|fuel]; [blia|]. simpl.
+    specialize (H (S fuel) ltac:(blia) next H1). rewrite app_nil_r in H.
+    apply predictsLE_end in H. rewrite H. reflexivity.
+  - intros.
+    specialize (IHkL'' (so_far ++ [a])%list). rewrite <- app_assoc in IHkL''.
+    specialize (IHkL'' H). destruct IHkL'' as [F' IHkL''].
+    exists (S (F + F')). intros. destruct fuel as [|fuel]; [blia|].
+    specialize (H (S fuel) ltac:(blia) next ltac:(assumption)).
+    apply FlatToRiscvFunctions.predictLE_cons in H. simpl. rewrite H. simpl.
+    f_equal. apply IHkL''; assumption || blia.
+Qed.
+
 Lemma trace_of_predictor_works next F k :
   (forall fuel,
     (F <= fuel)%nat ->
@@ -842,6 +867,23 @@ Lemma trace_of_predictor_works next F k :
         k = trace_of_predictor [] next fuel).
 Proof.
   intros. replace k with ([] ++ k)%list by reflexivity. eapply trace_of_predictor_works'.
+  apply H.
+Qed.
+
+Lemma trace_of_predictor_works_other f F kH'' kL'' :
+  (forall fuel,
+      (F <= fuel)%nat ->
+      forall next : trace -> option qevent,
+        predicts next kH'' ->
+        predictsLE (f fuel next) kL'') ->
+  exists F',
+  forall fuel,
+    (F' <= fuel)%nat ->
+    forall next,
+      predicts next kH'' ->
+      kL'' = trace_of_predictor [] (fun fuel' => f fuel' next) fuel.
+Proof.
+  intros. replace kL'' with ([] ++ kL'') by reflexivity. eapply trace_of_predictor_works_other'.
   apply H.
 Qed.
 
@@ -912,6 +954,42 @@ Proof.
   apply trace_of_predictor_works in H3. destruct H3 as [F' H3].
   intros. simpl in H. exists F'. intros. rewrite H2. f_equal.
   rewrite <- (rev_involutive tL). f_equal. apply H3. apply H0.
+Qed.
+
+Lemma a_trace_sorta_exists' :
+  forall (f : nat -> (trace -> option qevent) -> list LeakageEvent -> option FlatToRiscvDef.qLeakageEvent),
+    exists simple_f : nat -> (trace -> option qevent) -> list LeakageEvent,
+    forall (initial : MetricRiscvMachine) (P : MetricRiscvMachine -> trace -> Prop),
+    valid_machine initial ->
+    FlatToRiscvCommon.runsTo initial
+      (fun final : MetricRiscvMachine =>
+         exists kH'' kL'',
+           P final kH'' /\
+             final.(getTrace) = kL'' ++ initial.(getTrace) /\
+             exists F,
+             forall fuel,
+               (F <= fuel)%nat ->
+               forall next,
+                 predicts next (rev kH'') ->
+                 predictsLE (f fuel next) (rev kL'')) ->
+    FlatToRiscvCommon.runsTo initial
+      (fun final =>
+         exists kH'',
+           P final kH'' /\
+             exists F,
+             forall fuel,
+               (F <= fuel)%nat ->
+               forall next,
+                 predicts next (rev kH'') ->
+                 getTrace final = (simple_f fuel next) ++ getTrace initial).
+Proof.
+  intros.
+  exists (fun fuel next => (rev (trace_of_predictor nil (fun fuel' => f fuel' next) fuel))).
+  intros. cbv [FlatToRiscvCommon.runsTo]. eapply runsToNonDet.runsTo_weaken.
+  1: eapply H0. simpl. intros. fwd. exists kH''. intuition.
+  assert (H1p2' := H1p2). apply trace_of_predictor_works_other in H1p2.
+  destruct H1p2 as [F' H1p2]. exists F'. intros. rewrite H1p1. f_equal.
+  rewrite <- (rev_involutive kL''). f_equal. apply H1p2; assumption.
 Qed.
 
 Require Import riscv.Platform.MetricSane.
@@ -1015,6 +1093,158 @@ Proof.
       assumption.
 Qed.
 
+(*choice:( *) Check predictsLE.
+
+Lemma last_step' :
+  forall (simple_f : nat -> (trace -> option qevent) -> list LeakageEvent),
+  exists (simpler_f : (trace -> option qevent) -> list LeakageEvent),
+  forall (initial : MetricRiscvMachine) (P : MetricRiscvMachine -> trace -> Prop),
+  FlatToRiscvCommon.runsTo initial
+    (fun final =>
+       exists kH'',
+         P final kH'' /\
+           exists F,
+           forall fuel,
+             (F <= fuel)%nat ->
+             forall next,
+               predicts next (rev kH'') ->
+               getTrace final = (simple_f fuel next) ++ getTrace initial) ->
+  FlatToRiscvCommon.runsTo initial
+    (fun final =>
+       exists kH'',
+         P final kH'' /\
+           forall next,
+             predicts next (rev kH'') ->
+             getTrace final = (simpler_f next) ++ getTrace initial).
+Proof.
+Abort.
+
+(*Sketch.
+
+hyp
+
+|
+| Part 1: excluded middle.
+V
+
+forall next,
+exists F,
+forall fuel, (F <= fuel) ->
+simple_f fuel next = simple_f F next.
+
+|
+| Part 2: choice
+V
+
+exists (g : (trace -> option qevent) -> nat),
+forall next,
+exists F,
+forall fuel, (F <= fuel) ->
+simple_f fuel next = simple_f (g next) next.
+ *)
+
+Lemma part_one :
+  forall (simple_f : nat -> (trace -> option qevent) -> list LeakageEvent),
+  forall next,
+    exists F,
+    forall (initial : MetricRiscvMachine) (P : MetricRiscvMachine -> trace -> Prop),
+
+      FlatToRiscvCommon.runsTo initial
+        (fun final =>
+           exists kH'',
+             P final kH'' /\
+               exists F,
+               forall fuel,
+                 (F <= fuel)%nat ->
+                 forall next,
+                   predicts next (rev kH'') ->
+                   getTrace final = (simple_f fuel next) ++ getTrace initial) ->
+      
+      FlatToRiscvCommon.runsTo initial
+        (fun final =>
+           exists kH'',
+             P final kH'' /\
+               (predicts next (rev kH'') ->
+                getTrace final = (simple_f F next) ++ getTrace initial)).
+Proof.
+  intros.
+  assert (H := em (exists F, forall fuel, (F <= fuel)%nat -> simple_f fuel next = simple_f F next)).
+  destruct H as [H|H].
+  - destruct H as [F H]. exists F. intros. eapply runsToNonDet.runsTo_weaken.
+    + eassumption.
+    + simpl. intros final [kH'' [H2 [F' H3] ] ]. exists kH''. intuition.
+      specialize (H3 (F + F')%nat ltac:(blia) next ltac:(assumption)).
+      rewrite H3. f_equal. apply H. blia.
+  - exists O. intros. eapply runsToNonDet.runsTo_weaken.
+    + eassumption.
+    + simpl. intros. destruct H1 as [kH'' [H1 H2] ]. exists kH''. intuition.
+      exfalso. apply H. destruct H2 as [F H2]. exists F. intros.
+      assert (H5 := H2 F ltac:(blia) next ltac:(assumption)).
+      assert (H6 := H2 fuel ltac:(blia) next ltac:(assumption)).
+      rewrite H5 in H6. apply app_inv_tail in H6. symmetry. apply H6.
+Qed.
+
+Axiom choice : forall {A B : Type} (P : A -> B -> Prop),
+  (forall a, exists b, P a b) ->
+  exists (f : A -> B),
+    forall a, P a (f a).
+
+Lemma part_two :
+  forall (simple_f : nat -> (trace -> option qevent) -> list LeakageEvent),
+  exists (g : (trace -> option qevent) -> nat),
+    forall next,
+    forall (initial : MetricRiscvMachine) (P : MetricRiscvMachine -> trace -> Prop),
+      
+      FlatToRiscvCommon.runsTo initial
+        (fun final =>
+           exists kH'',
+             P final kH'' /\
+               exists F,
+               forall fuel,
+               (F <= fuel)%nat ->
+               forall next,
+                 predicts next (rev kH'') ->
+                 getTrace final = (simple_f fuel next) ++ getTrace initial) ->
+      
+      FlatToRiscvCommon.runsTo initial
+        (fun final =>
+           exists kH'',
+             P final kH'' /\
+               (predicts next (rev kH'') ->
+                getTrace final = (simple_f (g next) next) ++ getTrace initial)).
+Proof.
+  intros.
+  assert (H := part_one simple_f). apply choice in H. destruct H as [g H].
+  exists g. apply H.
+Qed.
+
+Lemma last_step' :
+  forall (simple_f : nat -> (trace -> option qevent) -> list LeakageEvent),
+  exists (simpler_f : (trace -> option qevent) -> list LeakageEvent),
+  forall (initial : MetricRiscvMachine) (P : MetricRiscvMachine -> trace -> Prop),
+  FlatToRiscvCommon.runsTo initial
+    (fun final =>
+       exists kH'',
+         P final kH'' /\
+           exists F,
+           forall fuel,
+             (F <= fuel)%nat ->
+             forall next,
+               predicts next (rev kH'') ->
+               getTrace final = (simple_f fuel next) ++ getTrace initial) ->
+  FlatToRiscvCommon.runsTo initial
+    (fun final =>
+       exists kH'',
+         P final kH'' /\
+           forall next,
+             predicts next (rev kH'') ->
+             getTrace final = (simpler_f next) ++ getTrace initial).
+Proof.
+  intros.
+  assert (H1 := part_two simple_f). destruct H1 as [g H1].
+  exists (fun next => simple_f (g next) next). intros.
+  
+
 Check a_trace_sorta_exists.
 Check last_step.
 
@@ -1041,57 +1271,88 @@ Proof.
   specialize (H initial P). specialize (H' initial P H1). apply H'. apply H. auto 20.
 Qed.
 
-    Lemma compiler_correct_wp': forall
-        (* input of compilation: *)
-        (fs: list (string * (list string * list string * cmd)))
-        (* output of compilation: *)
-        (instrs: list Instruction) (finfo: list (string * Z)) (req_stack_size: Z)
-        (* function we choose to call: *)
-        (stack_lo stack_hi ret_addr p_funcs: word)
-        (fname: string) next (f_rel_pos: Z),
-        (*can i move these three hyps down below the exists?*)
-        valid_src_funs fs = true ->
-        compile fs = Success (instrs, finfo, req_stack_size) ->
-        exists finalTrace, forall
-        (* high-level initial state & post on final state: *)
-        (k: trace) (t: io_trace) (mH: mem) (argvals: list word) (post: io_trace -> mem -> list word -> Prop) (initial: MetricRiscvMachine)
-        (* ghost vars that help describe the low-level machine: *)
-        (Rdata Rexec: mem -> Prop),
-        NoDup (map fst fs) ->
-        WeakestPrecondition.call fs fname k t mH argvals
-          (fun k' t' m' rets =>
-             post t' m' rets /\
-               exists k'' F,
-                 k' = k'' ++ k /\
-                   forall fuel,
-                     le F fuel ->
-                     predicts (next tt fuel) (rev k'')) ->
-        map.get (map.of_list finfo) fname = Some f_rel_pos ->
-        req_stack_size <= word.unsigned (word.sub stack_hi stack_lo) / bytes_per_word ->
-        word.unsigned (word.sub stack_hi stack_lo) mod bytes_per_word = 0 ->
-        initial.(getPc) = word.add p_funcs (word.of_Z f_rel_pos) ->
-        map.get (getRegs initial) RegisterNames.ra = Some ret_addr ->
-        word.unsigned ret_addr mod 4 = 0 ->
-        arg_regs_contain initial.(getRegs) argvals ->
-        initial.(getLog) = t ->
-        machine_ok p_funcs stack_lo stack_hi instrs mH Rdata Rexec initial ->
-        FlatToRiscvCommon.runsTo initial (fun final : MetricRiscvMachine =>
-          (exists mH' retvals,
-            arg_regs_contain (getRegs final) retvals /\
-            post final.(getLog) mH' retvals /\
-            map.only_differ initial.(getRegs) reg_class.caller_saved final.(getRegs) /\
-            final.(getPc) = ret_addr /\
-              machine_ok p_funcs stack_lo stack_hi instrs mH' Rdata Rexec final) /\
-              final.(getTrace) = finalTrace ++ initial.(getTrace)).
+
+
+Lemma predictor_thing_correct' :
+  forall (f : nat -> (trace -> option qevent) -> list LeakageEvent -> option FlatToRiscvDef.qLeakageEvent),
+    exists simple_f : (trace -> option qevent) -> list LeakageEvent,
+    forall (initial : MetricRiscvMachine) (P : MetricRiscvMachine -> trace -> Prop),
+    valid_machine initial ->
+    FlatToRiscvCommon.runsTo initial
+      (fun final : MetricRiscvMachine =>
+         exists kH'' kL'',
+           P final kH'' /\
+             final.(getTrace) = kL'' ++ initial.(getTrace) /\
+             exists F,
+             forall fuel,
+               (F <= fuel)%nat ->
+               forall next,
+                 predicts next (rev kH'') ->
+                 predictsLE (f fuel next) (rev kL'')) ->
+    FlatToRiscvCommon.runsTo initial
+      (fun final =>
+         exists kH'',
+           P final kH'' /\
+             forall next,
+               predicts next (rev kH'') ->
+               getTrace final = (simple_f next) ++ getTrace initial).
+Proof.
+  intros f.
+  assert (H := a_trace_sorta_exists' f).
+  destruct H as [simple_f H].
+  assert
+
+Lemma compiler_correct_wp': forall
+    (* input of compilation: *)
+    (fs: list (string * (list string * list string * cmd)))
+    (* output of compilation: *)
+    (instrs: list Instruction) (finfo: list (string * Z)) (req_stack_size: Z)
+    (* function we choose to call: *)
+    (fname: string) (f_rel_pos: Z) (p_funcs stack_hi : word),
+    valid_src_funs fs = true ->
+    compile fs = Success (instrs, finfo, req_stack_size) ->
+    exists simple_f, forall
+      (* high-level initial state & post on final state: *)
+      (kH: trace) (kL: list LeakageEvent) (t: io_trace) (mH: mem) (argvals: list word) (post: trace -> io_trace -> mem -> list word -> Prop)
+      (* ghost vars that help describe the low-level machine: *)
+      (stack_lo ret_addr : word) (Rdata Rexec: mem -> Prop)
+      (* low-level machine on which we're going to run the compiled program: *)
+      (initial: MetricRiscvMachine),
+      NoDup (map fst fs) ->
+      WeakestPrecondition.call fs fname kH t mH argvals post ->
+      map.get (map.of_list finfo) fname = Some f_rel_pos ->
+      req_stack_size <= word.unsigned (word.sub stack_hi stack_lo) / bytes_per_word ->
+      word.unsigned (word.sub stack_hi stack_lo) mod bytes_per_word = 0 ->
+      initial.(getPc) = word.add p_funcs (word.of_Z f_rel_pos) ->
+      map.get (getRegs initial) RegisterNames.ra = Some ret_addr ->
+      word.unsigned ret_addr mod 4 = 0 ->
+      arg_regs_contain initial.(getRegs) argvals ->
+      initial.(getLog) = t ->
+      initial.(getTrace) = kL ->
+      machine_ok p_funcs stack_lo stack_hi instrs mH Rdata Rexec initial ->
+      FlatToRiscvCommon.runsTo initial
+        (fun final : MetricRiscvMachine =>
+           exists kH'',
+             (exists mH' retvals,
+             arg_regs_contain (getRegs final) retvals /\
+               post (kH'' ++ kH) final.(getLog) mH' retvals /\
+               map.only_differ initial.(getRegs) reg_class.caller_saved final.(getRegs) /\
+               final.(getPc) = ret_addr /\
+               machine_ok p_funcs stack_lo stack_hi instrs mH' Rdata Rexec final) /\
+               forall next,
+                 predicts next (rev kH'') ->
+                 getTrace final = (simple_f next) ++ getTrace initial).
     Proof.
       intros. Check compiler_correct_wp.
-      assert (H' := compiler_correct_wp fs instrs finfo req_stack_size fname next f_rel_pos ltac:(assumption) ltac:(assumption)).
-      destruct H' as [next' H']. Check predictor_thing_correct.
-      assert (H'' := predictor_thing_correct (next' (p_funcs, f_rel_pos, stack_hi))).
-      destruct H'' as [finalTrace H''].
-      exists finalTrace. intros. apply H''.
-      - destruct H11 as (H11_1 & H11_2 & H11_3 & H11_4 & H11_5 & H11_6 & H11_7). assumption.
-      - eapply H'; eassumption.
+      Check compiler_correct_wp.
+      assert (H' := compiler_correct_wp fs instrs finfo req_stack_size fname f_rel_pos p_funcs stack_hi ltac:(assumption) ltac:(assumption)).
+      destruct H' as [f H']. Check predictor_thing_correct'.
+      assert (H'' := predictor_thing_correct' f).
+      destruct H'' as [simple_f H''].
+      exists simple_f. intros. apply H''; eauto.
+      - destruct H12 as (H11_1 & H11_2 & H11_3 & H11_4 & H11_5 & H11_6 & H11_7). assumption.
+      - eapply runsToNonDet.runsTo_weaken. 1: eapply H'; eassumption.
+        simpl. intros. fwd. do 2 eexists. intuition eauto. do 2 eexists. intuition eauto.
     Qed.
 
     Lemma compiler_correct_wp'': forall
