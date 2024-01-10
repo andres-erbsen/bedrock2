@@ -1243,7 +1243,7 @@ Proof.
   intros.
   assert (H1 := part_two simple_f). destruct H1 as [g H1].
   exists (fun next => simple_f (g next) next). intros.
-  
+  (*stuck here: how to push the forall next into postcondition?*)  
 
 Check a_trace_sorta_exists.
 Check last_step.
