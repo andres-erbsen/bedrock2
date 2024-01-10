@@ -643,32 +643,27 @@ Section WithWordAndMem.
         (* output of compilation: *)
         (instrs: list Instruction) (finfo: list (string * Z)) (req_stack_size: Z)
         (* function we choose to call: *)
-        (fname: string),
+        (fname: string) (p_funcs stack_hi : word),
         valid_src_funs functions = true ->
         compile functions = Success (instrs, finfo, req_stack_size) ->
-        forall next, exists next',
+        exists f,
         forall
         (* high-level initial state & post on final state: *)
-        (k: trace) (t: io_trace) (mH: mem) (argvals: list word) (post: io_trace -> mem -> list word -> Prop),
+        (kH: trace) (kL : list LeakageEvent) (t: io_trace) (mH: mem) (argvals: list word) (post: trace -> io_trace -> mem -> list word -> Prop),
         (exists (argnames retnames: list string) (fbody: cmd) l,
             map.get (map.of_list functions) fname = Some (argnames, retnames, fbody) /\
             map.of_list_zip argnames argvals = Some l /\
             forall mc,
-              Semantics.exec (map.of_list functions) fbody k t mH l mc
-                (fun k' t' m' l' mc' => exists retvals: list word,
+              Semantics.exec (map.of_list functions) fbody kH t mH l mc
+                (fun kH' t' m' l' mc' => exists retvals: list word,
                      map.getmany_of_list l' retnames = Some retvals /\
-                       post t' m' retvals /\
-                       exists k'' F,
-                         k' = k'' ++ k /\
-                           forall fuel,
-                             le F fuel ->
-                             predicts (next tt fuel) (rev k''))) ->
+                       post kH' t' m' retvals)) ->
         exists (f_rel_pos: Z),
           map.get (map.of_list finfo) fname = Some f_rel_pos /\
           forall (* low-level machine on which we're going to run the compiled program: *)
                  (initial: MetricRiscvMachine)
                  (* ghost vars that help describe the low-level machine: *)
-                 (stack_lo stack_hi: word) (ret_addr p_funcs: word) (Rdata Rexec: mem -> Prop),
+                 (stack_lo : word) (ret_addr : word) (Rdata Rexec: mem -> Prop),
             req_stack_size <= word.unsigned (word.sub stack_hi stack_lo) / bytes_per_word ->
             word.unsigned (word.sub stack_hi stack_lo) mod bytes_per_word = 0 ->
             initial.(getPc) = word.add p_funcs (word.of_Z f_rel_pos) ->
@@ -676,19 +671,25 @@ Section WithWordAndMem.
             word.unsigned ret_addr mod 4 = 0 ->
             arg_regs_contain initial.(getRegs) argvals ->
             initial.(getLog) = t ->
+            initial.(getTrace) = kL ->(*seems kinda stupid to put this here, since execution 
+                                       doesn't depend on trace, but we're sorta forced to since 
+                                       riscv_call takes initial trace as argument*)
             machine_ok p_funcs stack_lo stack_hi instrs mH Rdata Rexec initial ->
-            runsTo initial (fun final : MetricRiscvMachine =>
-              (exists mH' retvals,
-                arg_regs_contain (getRegs final) retvals /\
-                post final.(getLog) mH' retvals /\
-                map.only_differ initial.(getRegs) reg_class.caller_saved final.(getRegs) /\
-                final.(getPc) = ret_addr /\
-                  machine_ok p_funcs stack_lo stack_hi instrs mH' Rdata Rexec final) /\
-              exists tL F,
-              final.(getTrace) = tL ++ initial.(getTrace) /\
-                forall fuel,
-                  le F fuel ->
-                  predictsLE (next' (p_funcs, f_rel_pos, stack_hi) fuel) (rev tL)).
+            runsTo initial
+              (fun final : MetricRiscvMachine =>
+                 exists kH'' mH' retvals kL'',
+                   arg_regs_contain (getRegs final) retvals /\
+                     post (kH'' ++ kH) final.(getLog) mH' retvals /\
+                     map.only_differ initial.(getRegs) reg_class.caller_saved final.(getRegs) /\
+                     final.(getPc) = ret_addr /\
+                     machine_ok p_funcs stack_lo stack_hi instrs mH' Rdata Rexec final /\
+                     final.(getTrace) = kL'' ++ initial.(getTrace) /\
+                     exists F,
+                     forall fuel,
+                       (F <= fuel)%nat ->
+                       forall next,
+                         predicts next (rev kH'') ->
+                         predictsLE (f fuel next) (rev kL'')).
     Proof.
       intros.
       pose proof (phase_preserves_post composed_compiler_correct) as C.
@@ -701,10 +702,16 @@ Section WithWordAndMem.
         rewrite map.of_list_tuples. reflexivity.
       }
       specialize C with (1 := H0').
-      specialize (C fname next).
+      cbn [Settings] in C.
+      specialize (C tt (p_funcs, stack_hi) fname).
       cbv iota in C.
-      fwd. exists next'. intuition eauto 20.
-      specialize C with (1 := H1). clear H1. fwd. exists f_rel_pos. intuition eauto 10.
+      fwd. exists f. intuition eauto 20.
+      specialize C with (1 := H1). clear H1. fwd.
+      cbn [Event QEvent Settings Predicts] in *. specialize (C kL).
+      fwd. exists f_rel_pos. intuition eauto 10.
+      cbv [runsTo].
+      eapply runsToNonDet.runsTo_weaken.
+      1: eapply Cp1; eauto. simpl. intros. fwd. do 4 eexists. subst. intuition eauto.
     Qed.
 
     Definition instrencode(p: list Instruction): list byte :=
@@ -725,25 +732,18 @@ Section WithWordAndMem.
         (* output of compilation: *)
         (instrs: list Instruction) (finfo: list (string * Z)) (req_stack_size: Z)
         (* function we choose to call: *)
-        (fname: string) next (f_rel_pos: Z),
+        (fname: string) (f_rel_pos: Z) (p_funcs stack_hi : word),
         valid_src_funs fs = true ->
         compile fs = Success (instrs, finfo, req_stack_size) ->
-        exists next', forall
+        exists f, forall
         (* high-level initial state & post on final state: *)
-        (k: trace) (t: io_trace) (mH: mem) (argvals: list word) (post: io_trace -> mem -> list word -> Prop)
+        (kH: trace) (kL: list LeakageEvent) (t: io_trace) (mH: mem) (argvals: list word) (post: trace -> io_trace -> mem -> list word -> Prop)
         (* ghost vars that help describe the low-level machine: *)
         (stack_lo stack_hi ret_addr p_funcs: word) (Rdata Rexec: mem -> Prop)
         (* low-level machine on which we're going to run the compiled program: *)
         (initial: MetricRiscvMachine),
         NoDup (map fst fs) ->
-        WeakestPrecondition.call fs fname k t mH argvals
-          (fun k' t' m' rets =>
-             post t' m' rets /\
-               exists k'' F,
-                 k' = k'' ++ k /\
-                   forall fuel,
-                     le F fuel ->
-                     predicts (next tt fuel) (rev k'')) ->
+        WeakestPrecondition.call fs fname kH t mH argvals post ->
         map.get (map.of_list finfo) fname = Some f_rel_pos ->
         req_stack_size <= word.unsigned (word.sub stack_hi stack_lo) / bytes_per_word ->
         word.unsigned (word.sub stack_hi stack_lo) mod bytes_per_word = 0 ->
@@ -753,22 +753,26 @@ Section WithWordAndMem.
         arg_regs_contain initial.(getRegs) argvals ->
         initial.(getLog) = t ->
         machine_ok p_funcs stack_lo stack_hi instrs mH Rdata Rexec initial ->
-        runsTo initial (fun final : MetricRiscvMachine =>
-          (exists mH' retvals,
-            arg_regs_contain (getRegs final) retvals /\
-            post final.(getLog) mH' retvals /\
-            map.only_differ initial.(getRegs) reg_class.caller_saved final.(getRegs) /\
-            final.(getPc) = ret_addr /\
-              machine_ok p_funcs stack_lo stack_hi instrs mH' Rdata Rexec final) /\
-              exists tL F,
-                final.(getTrace) = tL ++ initial.(getTrace) /\
-                  forall fuel,
-                    le F fuel ->
-                    predictsLE (next' (p_funcs, f_rel_pos, stack_hi) fuel) (rev tL)).
+        runsTo initial
+          (fun final : MetricRiscvMachine =>
+             exists kH'' mH' retvals kL'',
+               arg_regs_contain (getRegs final) retvals /\
+                 post (kH'' ++ kH) final.(getLog) mH' retvals /\
+                 map.only_differ initial.(getRegs) reg_class.caller_saved final.(getRegs) /\
+                 final.(getPc) = ret_addr /\
+                 machine_ok p_funcs stack_lo stack_hi instrs mH' Rdata Rexec final /\
+                 final.(getTrace) = kL'' ++ initial.(getTrace) /\
+                 exists F,
+                 forall fuel,
+                   (F <= fuel)%nat ->
+                   forall next,
+                     predicts next (rev kH'') ->
+                     predictsLE (f fuel next) (rev kL'')).
     Proof.
-      intros.
-      destruct (compiler_correct fs instrs finfo req_stack_size fname H H0 next) as [next' compiler_correct'].
-      exists next'. intros.
+      intros. Check compiler_correct.
+      destruct (compiler_correct fs instrs finfo req_stack_size fname p_funcs stack_hi H H0) as
+        [f compiler_correct'].
+      exists f. intros.
       let H := hyp WeakestPrecondition.call in rename H into WP.
       eapply WeakestPreconditionProperties.sound_call' in WP.
       2: { eapply map.all_gets_from_map_of_NoDup_list; assumption. }
@@ -778,6 +782,7 @@ Section WithWordAndMem.
       - intros.
         unfold map.of_list_zip in *. eauto 10.
       - fwd. rewrite H3 in G. injection G as G. subst.
+        (*I think eapply C should still work here*)
         eapply C; clear C; try assumption; try congruence.
     Qed.
 
