@@ -1093,7 +1093,7 @@ Proof.
       assumption.
 Qed.
 
-(*choice:( *) Check predictsLE.
+(*choice? *) Check predictsLE.
 
 Lemma last_step' :
   forall (simple_f : nat -> (trace -> option qevent) -> list LeakageEvent),
@@ -1243,7 +1243,8 @@ Proof.
   intros.
   assert (H1 := part_two simple_f). destruct H1 as [g H1].
   exists (fun next => simple_f (g next) next). intros.
-  (*stuck here: how to push the forall next into postcondition?*)  
+  (*stuck here: how to push the forall next into postcondition?*)
+Abort.
 
 Check a_trace_sorta_exists.
 Check last_step.
@@ -1296,11 +1297,7 @@ Lemma predictor_thing_correct' :
              forall next,
                predicts next (rev kH'') ->
                getTrace final = (simple_f next) ++ getTrace initial).
-Proof.
-  intros f.
-  assert (H := a_trace_sorta_exists' f).
-  destruct H as [simple_f H].
-  assert
+Proof. Abort.
 
 Lemma compiler_correct_wp': forall
     (* input of compilation: *)
@@ -1354,6 +1351,7 @@ Lemma compiler_correct_wp': forall
       - eapply runsToNonDet.runsTo_weaken. 1: eapply H'; eassumption.
         simpl. intros. fwd. do 2 eexists. intuition eauto. do 2 eexists. intuition eauto.
     Qed.
+
 
     Lemma compiler_correct_wp'': forall
         (* input of compilation: *)
@@ -1410,5 +1408,47 @@ Lemma compiler_correct_wp': forall
         subst. exists k'', O. split; [reflexivity|]. intros. apply predictor_works.
         assumption.
     Qed.*)
+
+    
+    Lemma compiler_correct_wp'': forall
+        (* input of compilation: *)
+        (fs: list (string * (list string * list string * cmd)))
+        (* output of compilation: *)
+        (instrs: list Instruction) (finfo: list (string * Z)) (req_stack_size: Z)
+        (* part of function we choose to call: *)
+        (stack_hi p_funcs: word)
+        (fname: string) (f_rel_pos: Z),
+        (*can i move these three hyps down below the exists?*)
+        valid_src_funs fs = true ->
+        compile fs = Success (instrs, finfo, req_stack_size) ->
+        exists f, forall
+          (* rest of function we choose to call: *)
+          (stack_lo ret_addr : word)
+          (* high-level initial state & post on final state: *)
+          (k: trace) (t: io_trace) (mH: mem) (argvals: list word) (post: trace -> io_trace -> mem -> list word -> Prop) (initial: MetricRiscvMachine)
+          (* ghost vars that help describe the low-level machine: *)
+          (Rdata Rexec: mem -> Prop),
+          NoDup (map fst fs) ->
+          WeakestPrecondition.call fs fname k t mH argvals post ->
+          map.get (map.of_list finfo) fname = Some f_rel_pos ->
+          req_stack_size <= word.unsigned (word.sub stack_hi stack_lo) / bytes_per_word ->
+          word.unsigned (word.sub stack_hi stack_lo) mod bytes_per_word = 0 ->
+          initial.(getPc) = word.add p_funcs (word.of_Z f_rel_pos) ->
+          map.get (getRegs initial) RegisterNames.ra = Some ret_addr ->
+          word.unsigned ret_addr mod 4 = 0 ->
+          arg_regs_contain initial.(getRegs) argvals ->
+          initial.(getLog) = t ->
+          machine_ok p_funcs stack_lo stack_hi instrs mH Rdata Rexec initial ->
+          FlatToRiscvCommon.runsTo initial
+            (fun final : MetricRiscvMachine =>
+               (exists k'' mH' retvals,
+                   arg_regs_contain (getRegs final) retvals /\
+                     post (rev k'' ++ k) final.(getLog) mH' retvals /\
+                     map.only_differ initial.(getRegs) reg_class.caller_saved final.(getRegs) /\
+                     final.(getPc) = ret_addr /\
+                     machine_ok p_funcs stack_lo stack_hi instrs mH' Rdata Rexec final /\
+                     final.(getTrace) = f k'' ++ initial.(getTrace)
+               )).
+    Proof. Admitted.
   End WithMoreParams.
 End WithWordAndMem.

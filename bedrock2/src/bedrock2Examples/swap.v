@@ -228,6 +228,19 @@ in the assembly-level trace.
         if (x) { /*skip*/ }
       }.
 
+  Definition weird_function :=
+    func! () {
+        io! y = MMIOREAD($0);
+        io! x = MMIOREAD($0);
+        stackalloc 4 as a;
+        stackalloc 4 as b;
+        if (a < b) {
+               if (x){
+                      /*skip*/
+                    }
+             }
+      }.
+
   (*Instance ext_spec : ExtSpec :=
     fun t mGive action (argvals: list word) (post: (mem -> list word -> Prop)) =>
       match argvals with
