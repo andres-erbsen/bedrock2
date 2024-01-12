@@ -204,20 +204,44 @@ Section Spilling.
   Notation predict_with_prefix_works_end := Semantics.predict_with_prefix_works_end.
   Print SStackalloc.
 
+  Require Import Coq.Wellfounded.Lexicographic_Product.
+  Require Import Relation_Operators.
+
   Inductive subexpression : stmt -> stmt -> Prop :=
   | SStackalloc_subexp : forall x1 x2 s, subexpression s (SStackalloc x1 x2 s).
-    
-  Inductive plus {A : Type} (R : A -> A -> Prop) : A -> A -> Prop :=
-  | one_step : forall x y, R x y -> plus R x y
-  | another_step : forall x y z, R x y -> plus R y z -> plus R x z.
 
-  Definition lt_tuple (tup1 tup2 : list nat * stmt) : Prop :=
-    let (l1, s1) := tup1 in
-    let (l2, s2) := tup2 in
-    (length l1 < length l2)%nat \/
-      (length l1 = length l2 /\ plus subexpression s1 s2).
+  Lemma wf_subexpression : well_founded subexpression.
+  Proof.
+    cbv [well_founded]. intros a. induction a.
+    all: try solve [constructor; intros ? H; inversion H].
+    constructor. intros y H. inversion H. subst. assumption.
+  Qed.      
 
-  Lemma lt_tuple_wf : well_founded lt_tuple. Admitted.
+  Definition stmt_lt :=
+    clos_trans _ subexpression.
+
+  Lemma wf_stmt_lt : well_founded stmt_lt.
+  Proof.
+    cbv [stmt_lt]. Search (well_founded (clos_trans _ _)).
+    apply Transitive_Closure.wf_clos_trans.
+    apply wf_subexpression.
+  Qed. Check ltof.
+
+  Definition list_lt : list nat -> list nat -> Prop := ltof _ (@length _).
+  
+  Lemma wf_list_lt : well_founded list_lt.
+  Proof.
+    cbv [list_lt]. Search well_founded. apply well_founded_ltof.
+  Qed.
+  
+  Definition lt_tuple := slexprod _ _ list_lt stmt_lt.
+
+  Lemma lt_tuple_wf : well_founded lt_tuple.
+  Proof.
+    apply wf_slexprod.
+    - apply wf_list_lt.
+    - apply wf_stmt_lt.
+  Qed.
 
   Program Fixpoint make_stmt_or_list_smaller (l : list nat) (s : stmt) {measure (l, s) lt_tuple} :=
     match s with
@@ -231,7 +255,10 @@ Section Spilling.
     end.
 
   Next Obligation.
-    right. intuition. apply one_step. constructor.
+    right. cbv [stmt_lt]. apply t_step. constructor.
+  Qed.
+  Next Obligation.
+    left. cbv [list_lt ltof]. simpl. blia.
   Qed.
   Next Obligation.
     apply Wf.measure_wf. apply lt_tuple_wf.
