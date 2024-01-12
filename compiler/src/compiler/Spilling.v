@@ -364,6 +364,103 @@ Section Spilling.
         end
     end.
 
+  Section posets.
+  Context {A : Type} (covers : A -> A -> Prop).
+
+  (* insight: should take covering relation as primitive
+     and define le as star of covering relation.*)
+  Inductive le : A -> A -> Prop :=
+  | le_refl : forall x, le x x
+  | lt_step : forall x y z, le x y -> covers z y -> le x z.
+
+  Inductive chain : A -> A -> Prop :=
+  | chain_O : forall x, chain x x
+  | chain_S : forall x y z,
+      covers x y ->
+      chain y z ->
+      chain x z.
+
+  (* means there are no infinite decreasing chains starting at x.*)
+  Inductive no_dec_chains (x : A) : Prop :=
+  | ndc (_ : forall y, covers x y -> no_dec_chains y).
+
+  Lemma poset_induction (P : A -> Prop) :
+    (forall x, no_dec_chains x) ->
+    (forall x, (forall y, covers x y -> P y) -> P x) ->
+    (forall y, P y).
+  Proof.
+    intros H inductive_step y.
+    specialize (H y). induction H.
+    apply inductive_step. apply H0.
+  Qed.
+
+  Lemma strong_poset_induction (P : A -> Prop) :
+    (forall x, no_dec_chains x) ->
+    (forall x, (forall y, le y x -> y = x \/ P y) -> P x) ->
+    (forall x, P x).
+  Proof.
+    intros no_dec_chains strong_inductive_step.
+    assert (H' := poset_induction (fun x => forall x', le x' x -> P x') no_dec_chains).
+    clear no_dec_chains. simpl in H'.
+    assert (H'' : forall y x', le x' y -> P x').
+    - apply H'; clear H'.
+      intros x IHx x' x'_le_x.
+      destruct x'_le_x.
+      + apply strong_inductive_step. intros y y_le_x. destruct y_le_x.
+        -- left. reflexivity.
+        -- right. eapply IHx; eauto.
+      + eapply IHx; eauto.
+    - intros x. apply (H'' x x). constructor.
+  Qed.
+  End posets.
+
+  Definition pred_covers f t1 t2 :=
+    exists e, f t1 = Some (quot e) /\ t2 = t1 ++ [e].
+
+  Definition pred_le f := le (pred_covers f).
+
+  Inductive trace_finite : (trace -> option qevent) -> trace -> Prop :=
+  | nil_none_finite : forall f k,
+      f k = None ->
+      trace_finite f k
+  | nil_end_finite : forall f k,
+      f k = Some qend ->
+      trace_finite f k
+  | leak_unit_finite : forall f k,
+      f k = Some qleak_unit ->
+      trace_finite f (k ++ [leak_unit]) ->
+      trace_finite f k
+  | leak_bool_finite : forall f k b,
+      f k = Some (qleak_bool b) ->
+      trace_finite f (k ++ [leak_bool b]) ->
+      trace_finite f k
+  | leak_word_finite : forall f k w,
+      f k = Some (qleak_word w) ->
+      trace_finite f (k ++ [leak_word w]) ->
+      trace_finite f k
+  | consume_word_finite : forall f k,
+      f k = Some qconsume ->
+      (forall w, trace_finite f (k ++ [consume_word w])) ->
+      trace_finite f k.
+
+  Lemma it_has_finite_chains f t :
+    trace_finite f t ->
+    no_dec_chains (pred_covers f) t.
+  Proof.
+    clear. intros H. induction H.
+    - constructor. cbv [pred_covers]. intros. fwd. congruence.
+    - constructor. cbv [pred_covers]. intros. fwd. rewrite H in H0p0.
+      injection H0p0. intros. destruct e; simpl in H0; congruence.
+    - constructor. intros y Hy. cbv [pred_covers] in Hy. fwd.
+      destruct e; simpl in Hyp0; try congruence.
+    - constructor. intros y Hy. cbv [pred_covers] in Hy. fwd.
+      destruct e; simpl in Hyp0; try congruence.
+    - constructor. intros y Hy. cbv [pred_covers] in Hy. fwd.
+      destruct e; simpl in Hyp0; try congruence.
+    - constructor. intros y Hy. cbv [pred_covers] in Hy. fwd.
+      destruct e; simpl in Hyp0; try congruence. apply H1.
+  Qed.
+
   Definition snext_stmt {env : map.map string (list Z * list Z * stmt)} e next fpval s sk_so_far fuel :=
     snext_stmt' e fuel next [] fpval s sk_so_far
       (fun next' k_so_far => Some qend).
