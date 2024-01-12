@@ -202,6 +202,40 @@ Section Spilling.
   Notation predict_with_prefix := Semantics.predict_with_prefix.
   Notation predict_with_prefix_works := Semantics.predict_with_prefix_works.
   Notation predict_with_prefix_works_end := Semantics.predict_with_prefix_works_end.
+  Print SStackalloc.
+
+  Inductive subexpression : stmt -> stmt -> Prop :=
+  | SStackalloc_subexp : forall x1 x2 s, subexpression s (SStackalloc x1 x2 s).
+    
+  Inductive plus {A : Type} (R : A -> A -> Prop) : A -> A -> Prop :=
+  | one_step : forall x y, R x y -> plus R x y
+  | another_step : forall x y z, R x y -> plus R y z -> plus R x z.
+
+  Definition lt_tuple (tup1 tup2 : list nat * stmt) : Prop :=
+    let (l1, s1) := tup1 in
+    let (l2, s2) := tup2 in
+    (length l1 < length l2)%nat \/
+      (length l1 = length l2 /\ plus subexpression s1 s2).
+
+  Lemma lt_tuple_wf : well_founded lt_tuple. Admitted.
+
+  Program Fixpoint make_stmt_or_list_smaller (l : list nat) (s : stmt) {measure (l, s) lt_tuple} :=
+    match s with
+    | SStackalloc _ _ body =>
+        make_stmt_or_list_smaller l body
+    | _ =>
+        match l with
+        | _ :: l' => make_stmt_or_list_smaller l' s
+        | _ => 5
+        end
+    end.
+
+  Next Obligation.
+    right. intuition. apply one_step. constructor.
+  Qed.
+  Next Obligation.
+    apply Wf.measure_wf. apply lt_tuple_wf.
+  Qed.
   
   Fixpoint snext_stmt' {env: map.map String.string (list Z * list Z * stmt)}
     (e: env) (fuel : nat) (next : trace -> option qevent) (k_so_far : trace) (fpval: word) (s : stmt) (sk_so_far : trace)
