@@ -207,7 +207,7 @@ Section Spilling.
   Require Import Coq.Wellfounded.Lexicographic_Product.
   Require Import Relation_Operators.
 
-  Inductive subexpression : stmt -> stmt -> Prop :=
+  (*Inductive subexpression : stmt -> stmt -> Prop :=
   | SStackalloc_subexp : forall x1 x2 s, subexpression s (SStackalloc x1 x2 s).
 
   Lemma wf_subexpression : well_founded subexpression.
@@ -262,15 +262,70 @@ Section Spilling.
   Qed.
   Next Obligation.
     apply Wf.measure_wf. apply lt_tuple_wf.
+  Qed.*)
+
+  Print FlatImp.stmt.
+
+  Inductive subexpression : stmt -> stmt -> Prop :=
+  | SStackalloc_subexp : forall x1 x2 s, subexpression s (SStackalloc x1 x2 s)
+  | SIf_then_subexp : forall x1 x2 s, subexpression s (SIf x1 s x2)
+  | SIf_else_subexp : forall x1 x2 s, subexpression s (SIf x1 x2 s)
+  | SLoop_body1_subexp : forall x1 x2 s, subexpression s (SLoop s x1 x2)
+  | SLoop_body2_subexp : forall x1 x2 s, subexpression s (SLoop x1 x2 s)
+  | SSeq_body1_subexp : forall x1 s, subexpression s (SSeq s x1)
+  | SSeq_body2_subexp : forall x1 s, subexpression s (SSeq x1 s).
+
+  Lemma wf_subexpression : well_founded subexpression.
+  Proof.
+    cbv [well_founded]. intros a. induction a.
+    all: constructor; intros ? H; inversion H; subst; assumption.
+  Qed.
+
+  Definition stmt_lt :=
+    clos_trans _ subexpression.
+
+  Lemma wf_stmt_lt : well_founded stmt_lt.
+  Proof.
+    cbv [stmt_lt].
+    apply Transitive_Closure.wf_clos_trans.
+    apply wf_subexpression.
+  Qed.
+
+  Definition trace_lt : trace -> trace -> Prop := ltof _ (@length _).
+  
+  Lemma wf_trace_lt : well_founded trace_lt.
+  Proof.
+    cbv [trace_lt]. apply well_founded_ltof.
+  Qed.
+
+  Lemma wf_bool_lt : well_founded Bool.lt.
+  Proof.
+    cbv [well_founded]. intros a. destruct a.
+    - constructor. intros b H. destruct b; simpl in H; try solve [destruct H].
+      constructor. intros c H'. Print Bool.lt. destruct c; simpl in H'; try solve [destruct H'].
+      congruence.
+    - constructor. intros b H. destruct b; simpl in H; try solve [destruct H]. congruence.
+  Qed.
+
+  Search (bool -> bool -> Prop).
+  Definition lt_tuple := slexprod _ _ (slexprod _ _ Bool.lt lt) stmt_lt.
+
+  Lemma lt_tuple_wf : well_founded lt_tuple.
+  Proof.
+    apply wf_slexprod.
+    - apply wf_slexprod.
+      + apply wf_bool_lt.
+      + apply lt_wf.
+    - apply wf_stmt_lt.
   Qed.
   
-  Fixpoint snext_stmt' {env: map.map String.string (list Z * list Z * stmt)}
-    (e: env) (fuel : nat) (next : trace -> option qevent) (k_so_far : trace) (fpval: word) (s : stmt) (sk_so_far : trace)
-    (f : forall (k_so_far : trace) (sk_so_far : trace), option qevent) : option qevent :=
-    match fuel with
-    | O => None
-    | S fuel' =>
-        let snext_stmt' := snext_stmt' e fuel' next in
+  Program Fixpoint snext_stmt' {env: map.map String.string (list Z * list Z * stmt)}
+    (e: env) (next : trace -> option qevent) (k_so_far : trace) (fpval: word) (s : stmt) (sk_so_far : trace)
+    (live : bool) (* kill the program and return none if this is false *)
+    (f : forall (k_so_far : trace) (sk_so_far : trace), option qevent) {measure (live, length sk_so_far, s) lt_tuple} : option qevent :=
+    let snext_stmt' := snext_stmt' e next in
+    match live with
+    | true =>
         match s with
         | SLoad sz x y o =>
             match next k_so_far with
@@ -304,7 +359,9 @@ Section Spilling.
             | consume_word a :: sk_so_far' =>
                 predict_with_prefix
                   (leak_save_ires_reg fpval x)
-                  (fun sk_so_far'' => snext_stmt' (k_so_far ++ [consume_word a]) fpval body sk_so_far'' f)
+                  (fun sk_so_far'' =>
+                     snext_stmt' (k_so_far ++ [consume_word a]) fpval body sk_so_far''
+                       (length sk_so_far'' <=? length sk_so_far')%nat f _)
                   sk_so_far'
             | nil => Some qconsume
             | _ => None
@@ -316,26 +373,26 @@ Section Spilling.
               sk_so_far
         | SOp x op y oz =>
             let newt :=
-                match op with
-                | Syntax.bopname.divu
-                | Syntax.bopname.remu =>
-                    match next k_so_far with
-                    | Some (qleak_word x1) =>
-                        match next (k_so_far ++ [leak_word x1]) with
-                        | Some (qleak_word x2) => Some [leak_word x1; leak_word x2]
-                        | _ => None
-                        end
-                    | _ => None
-                    end
-                | Syntax.bopname.slu
-                | Syntax.bopname.sru
-                | Syntax.bopname.srs =>
-                    match next k_so_far with
-                    | Some (qleak_word x2) => Some [leak_word x2]
-                    | _ => None
-                    end
-                | _ => Some []
-                end
+              match op with
+              | Syntax.bopname.divu
+              | Syntax.bopname.remu =>
+                  match next k_so_far with
+                  | Some (qleak_word x1) =>
+                      match next (k_so_far ++ [leak_word x1]) with
+                      | Some (qleak_word x2) => Some [leak_word x1; leak_word x2]
+                      | _ => None
+                      end
+                  | _ => None
+                  end
+              | Syntax.bopname.slu
+              | Syntax.bopname.sru
+              | Syntax.bopname.srs =>
+                  match next k_so_far with
+                  | Some (qleak_word x2) => Some [leak_word x2]
+                  | _ => None
+                  end
+              | _ => Some []
+              end
             in
             match newt with
             | Some newt =>
@@ -361,12 +418,13 @@ Section Spilling.
             | Some (qleak_bool b) =>
                 predict_with_prefix
                   (leak_prepare_bcond fpval c ++ leak_spill_bcond ++ [leak_bool b])
-                  (fun sk_so_far' => snext_stmt' (k_so_far ++ [leak_bool b]) fpval (if b then thn else els) sk_so_far' f)
+                  (fun sk_so_far' => snext_stmt' (k_so_far ++ [leak_bool b]) fpval (if b then thn else els) sk_so_far' (length sk_so_far' <? length sk_so_far)%nat f _)
                   sk_so_far
             | _ => None
             end
         | SLoop s1 c s2 =>
             snext_stmt' k_so_far fpval s1 sk_so_far
+              true
               (fun k_so_far' sk_so_far' =>
                  match next k_so_far' with
                  | Some (qleak_bool true) =>
@@ -374,8 +432,10 @@ Section Spilling.
                        (leak_prepare_bcond fpval c ++ leak_spill_bcond ++ [leak_bool true])
                        (fun sk_so_far'' =>
                           snext_stmt' (k_so_far' ++ [leak_bool true]) fpval s2 sk_so_far''
+                            (length sk_so_far'' <? length sk_so_far)%nat
                             (fun k_so_far'' sk_so_far''' =>
-                               snext_stmt' k_so_far'' fpval s sk_so_far''' f))
+                               snext_stmt' k_so_far'' fpval s sk_so_far'''
+                                 (length sk_so_far''' <? length sk_so_far)%nat f _) _)
                        sk_so_far'
                  | Some (qleak_bool false) =>
                      predict_with_prefix
@@ -383,10 +443,11 @@ Section Spilling.
                        (f (k_so_far' ++ [leak_bool false]))
                        sk_so_far'
                  | _ => None
-                 end) 
+                 end) _
         | SSeq s1 s2 =>
-            snext_stmt' k_so_far fpval s1 sk_so_far
-              (fun k_so_far' sk_so_far' => snext_stmt' k_so_far' fpval s2 sk_so_far' f)
+            snext_stmt' k_so_far fpval s1 sk_so_far true
+              (fun k_so_far' sk_so_far' => snext_stmt' k_so_far' fpval s2 sk_so_far'
+                                             (length sk_so_far' <=? length sk_so_far)%nat f _) _
         | SSkip => f k_so_far sk_so_far
         | SCall resvars fname argvars =>
             match @map.get _ _ env e fname with
@@ -399,12 +460,13 @@ Section Spilling.
                          predict_with_prefix
                            (leak_set_vars_to_reg_range fpval' params)
                            (fun sk_so_far''' =>
-                             snext_stmt' (k_so_far ++ [leak_unit]) fpval' fbody sk_so_far'''
-                               (fun k_so_far' sk_so_far'''' =>
-                                  predict_with_prefix
-                                    (leak_set_reg_range_to_vars fpval' rets ++ leak_set_vars_to_reg_range fpval resvars)
-                                    (f k_so_far')
-                                    sk_so_far'''')) 
+                              snext_stmt' (k_so_far ++ [leak_unit]) fpval' fbody sk_so_far'''
+                                (length sk_so_far''' <? length sk_so_far)%nat
+                                (fun k_so_far' sk_so_far'''' =>
+                                   predict_with_prefix
+                                     (leak_set_reg_range_to_vars fpval' rets ++ leak_set_vars_to_reg_range fpval resvars)
+                                     (f k_so_far')
+                                     sk_so_far'''') _) 
                            sk_so_far''
                      | nil => Some qconsume
                      | _ => None
@@ -415,7 +477,6 @@ Section Spilling.
         | SInteract resvars _ argvars =>
             match next k_so_far with
             | Some (qleak_list l) =>
-                
                 predict_with_prefix
                   (leak_set_reg_range_to_vars fpval argvars ++ [leak_list l] ++ leak_set_vars_to_reg_range fpval resvars)
                   (f (k_so_far ++ [leak_list l]))
@@ -423,62 +484,125 @@ Section Spilling.
             | _ => None
             end
         end
+    | false => None
     end.
 
-  Section posets.
-  Context {A : Type} (covers : A -> A -> Prop).
-
-  (* insight: should take covering relation as primitive
-     and define le as star of covering relation.*)
-  Inductive le : A -> A -> Prop :=
-  | le_refl : forall x, le x x
-  | lt_step : forall x y z, le x y -> covers z y -> le x z.
-
-  Inductive chain : A -> A -> Prop :=
-  | chain_O : forall x, chain x x
-  | chain_S : forall x y z,
-      covers x y ->
-      chain y z ->
-      chain x z.
-
-  (* means there are no infinite decreasing chains starting at x.*)
-  Inductive no_dec_chains (x : A) : Prop :=
-  | ndc (_ : forall y, covers x y -> no_dec_chains y).
-
-  Lemma poset_induction (P : A -> Prop) :
-    (forall x, no_dec_chains x) ->
-    (forall x, (forall y, covers x y -> P y) -> P x) ->
-    (forall y, P y).
-  Proof.
-    intros H inductive_step y.
-    specialize (H y). induction H.
-    apply inductive_step. apply H0.
+  Next Obligation.
+    destruct (_ <=? _)%nat eqn:E.
+    - left. right. cbv [trace_lt ltof]. apply Nat.leb_le in E. simpl. blia.
+    - left. left. reflexivity.
   Qed.
-
-  Lemma strong_poset_induction (P : A -> Prop) :
-    (forall x, no_dec_chains x) ->
-    (forall x, (forall y, le y x -> y = x \/ P y) -> P x) ->
-    (forall x, P x).
-  Proof.
-    intros no_dec_chains strong_inductive_step.
-    assert (H' := poset_induction (fun x => forall x', le x' x -> P x') no_dec_chains).
-    clear no_dec_chains. simpl in H'.
-    assert (H'' : forall y x', le x' y -> P x').
-    - apply H'; clear H'.
-      intros x IHx x' x'_le_x.
-      destruct x'_le_x.
-      + apply strong_inductive_step. intros y y_le_x. destruct y_le_x.
-        -- left. reflexivity.
-        -- right. eapply IHx; eauto.
-      + eapply IHx; eauto.
-    - intros x. apply (H'' x x). constructor.
+  (* What are these?  I did not expect them. *)
+  Next Obligation.
+    intuition congruence.
   Qed.
-  End posets.
-
-  Definition pred_covers f t1 t2 :=
-    exists e, f t1 = Some (quot e) /\ t2 = t1 ++ [e].
-
-  Definition pred_le f := le (pred_covers f).
+  Next Obligation.
+    intuition congruence.
+  Qed.
+  Next Obligation.
+    intuition congruence.
+  Qed.
+  Next Obligation.
+    intuition congruence.
+  Qed.
+  Next Obligation.
+    intuition congruence.
+  Qed.
+  Next Obligation.
+    intuition congruence.
+  Qed.
+  Next Obligation.
+    intuition congruence.
+  Qed.
+  Next Obligation.
+    intuition congruence.
+  Qed.
+  Next Obligation.
+    intuition congruence.
+  Qed.
+  Next Obligation.
+    intuition congruence.
+  Qed.
+  Next Obligation.
+    intuition congruence.
+  Qed.
+  Next Obligation.
+    intuition congruence.
+  Qed.
+  Next Obligation.
+    intuition congruence.
+  Qed.
+  Next Obligation.
+    intuition congruence.
+  Qed.
+  Next Obligation.
+    destruct (_ <? _)%nat eqn:E.
+    - left. right. apply Nat.ltb_lt in E. cbv [trace_lt ltof]. blia.
+    - left. left. reflexivity.
+  Qed.    
+  Next Obligation.
+    destruct (_ <? _)%nat eqn:E.
+    - left. right. apply Nat.ltb_lt in E. cbv [trace_lt ltof]. blia.
+    - left. left. reflexivity.
+  Qed.
+  Next Obligation.
+    destruct (_ <? _)%nat eqn:E.
+    - left. right. apply Nat.ltb_lt in E. cbv [trace_lt ltof]. blia.
+    - left. left. reflexivity.
+  Qed.
+  Next Obligation.
+    intuition congruence.
+  Qed.
+  Next Obligation.
+    intuition congruence.
+  Qed.
+  Next Obligation.
+    intuition congruence.
+  Qed.
+  Next Obligation.
+    intuition congruence.
+  Qed.
+  Next Obligation.
+    intuition congruence.
+  Qed.
+  Next Obligation.
+    intuition congruence.
+  Qed.
+  Next Obligation.
+    right. constructor. constructor.
+  Qed.
+  Next Obligation.
+    destruct (_ <=? _)%nat eqn:E.
+    - apply Nat.leb_le in E.
+      destruct (length sk_so_far' =? length sk_so_far)%nat eqn:E'.
+      + apply Nat.eqb_eq in E'. rewrite E'. right. constructor. constructor.
+      + apply Nat.eqb_neq in E'. left. right. blia.
+    - left. left. reflexivity.
+  Qed.
+  Next Obligation.
+    right. constructor. constructor.
+  Qed.
+  Next Obligation.
+    destruct (_ <? _)%nat eqn:E.
+    - apply Nat.ltb_lt in E. left. right. blia.
+    - left. left. reflexivity.
+  Qed.
+  Next Obligation.
+    intuition congruence.
+  Qed.
+  Next Obligation.
+    intuition congruence.
+  Qed.
+  Next Obligation.
+    intuition congruence.
+  Qed.
+  Next Obligation.
+    intuition congruence.
+  Qed.
+  Next Obligation.
+    apply Wf.measure_wf. apply lt_tuple_wf.
+  Qed.
+  Obligations.
 
   Inductive trace_finite : (trace -> option qevent) -> trace -> Prop :=
   | nil_none_finite : forall f k,
@@ -504,26 +628,8 @@ Section Spilling.
       (forall w, trace_finite f (k ++ [consume_word w])) ->
       trace_finite f k.
 
-  Lemma it_has_finite_chains f t :
-    trace_finite f t ->
-    no_dec_chains (pred_covers f) t.
-  Proof.
-    clear. intros H. induction H.
-    - constructor. cbv [pred_covers]. intros. fwd. congruence.
-    - constructor. cbv [pred_covers]. intros. fwd. rewrite H in H0p0.
-      injection H0p0. intros. destruct e; simpl in H0; congruence.
-    - constructor. intros y Hy. cbv [pred_covers] in Hy. fwd.
-      destruct e; simpl in Hyp0; try congruence.
-    - constructor. intros y Hy. cbv [pred_covers] in Hy. fwd.
-      destruct e; simpl in Hyp0; try congruence.
-    - constructor. intros y Hy. cbv [pred_covers] in Hy. fwd.
-      destruct e; simpl in Hyp0; try congruence.
-    - constructor. intros y Hy. cbv [pred_covers] in Hy. fwd.
-      destruct e; simpl in Hyp0; try congruence. apply H1.
-  Qed.
-
-  Definition snext_stmt {env : map.map string (list Z * list Z * stmt)} e next fpval s sk_so_far fuel :=
-    snext_stmt' e fuel next [] fpval s sk_so_far
+  Definition snext_stmt {env : map.map string (list Z * list Z * stmt)} e next fpval s sk_so_far :=
+    snext_stmt' e next [] fpval s sk_so_far true
       (fun next' k_so_far => Some qend).
    
   Fixpoint spill_stmt(s: stmt): stmt :=
