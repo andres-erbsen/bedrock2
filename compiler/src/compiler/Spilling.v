@@ -390,7 +390,106 @@ Compute silly (10, 0)%nat 5 5.
   Defined.
   Check Fix_eq.
 
+  (*Section FixPoint2.
+    Variable A : Type.
+    Variable B : Type.
+    Variable R : B -> B -> Prop.
+    Variable P : A -> B -> Type.
+    Variable F : forall (x:A) (y:B), (forall (x':A) (y':B), R y' y -> P x' y') -> P x y.
+    Hypothesis Rwf : well_founded R.
+    
+    Fixpoint Fix_F (x:A) (y:B) (a:Acc R y) : P x y :=
+      F x y (fun (x':A) (y':B) (h:R y' y) => Fix_F x' y' (Acc_inv a h)).
+    
+    Scheme Acc_inv_dep := Induction for Acc Sort Prop.
+    
+    Lemma Fix_F_eq (x:A) (y:B) (r:Acc R y) :
+      F x y (fun (x':A) (y':B) (p:R y' y) => Fix_F x' y' (Acc_inv r p)) = Fix_F x y r.
+    Proof.
+      destruct r using Acc_inv_dep; auto.
+    Qed.
+    
+    Definition Fix (x:A) (y:B) := Fix_F x y (Rwf y).
+
+    Hypothesis
+      F_ext :
+      forall (x:A) (y:B) (f g:forall (x':A) (y':B), R y' y -> P x' y'),
+        (forall (x':A) (y':B) (p:R y' y), f x' y' p = g x' y' p) -> F x y f = F x y g.
+    
+    Lemma Fix_F_inv : forall (x:A) (y:B) (r s:Acc R y), Fix_F x y r = Fix_F x y s.
+    Proof.
+      intros x y. revert x. induction (Rwf y); intros x1 r s.
+      rewrite <- (Fix_F_eq x1 x r); rewrite <- (Fix_F_eq x1 x s); intros.
+      apply F_ext; auto.
+    Qed.
+
+  Lemma Fix_eq : forall x y, Fix x y = F x y (fun (x':A) (y':B) (p:R y' y) => Fix x' y').
+  Proof.
+    intros x y; unfold Fix.
+    rewrite <- Fix_F_eq.
+    apply F_ext; intros.
+   apply Fix_F_inv.
+  Qed.
+
+ End FixPoint.*)
+
+  
+  Section FixPoint.
+    Variable A : Type.
+    Variable R : A -> A -> Prop.
+    Hypothesis Rwf : well_founded R.
+    Variable P : Type. (* really I want to say that P gives one type for each equivalence class
+                          of A wrt the equivalence relation E.  Not clear how to say this though.*)
+    Variable F : forall x:A, (forall y:A, R y x -> P) -> P.
+    Variable E : A -> A -> Prop.
+        
+    Fixpoint my_Fix_F (x:A) (a:Acc R x) : P :=
+      F x (fun (y:A) (h:R y x) => my_Fix_F y (Acc_inv a h)).
+    
+    Scheme Acc_inv_dep := Induction for Acc Sort Prop.
+    
+    Lemma my_Fix_F_eq (x:A) (r:Acc R x) :
+      F x (fun (y:A) (p:R y x) => my_Fix_F y (Acc_inv r p)) = my_Fix_F x r.
+    Proof.
+      destruct r using Acc_inv_dep; auto.
+    Qed.
+    
+    Definition my_Fix (x:A) := my_Fix_F x (Rwf x).
+    
+    (** Proof that [well_founded_induction] satisfies the fixpoint equation.
+        It requires an extra property of the functional *)
+    
+    Hypothesis
+      F_ext :
+      forall (x1 x2:A) (f1:forall y:A, R y x1 -> P) (f2:forall y:A, R y x2 -> P),
+        E x1 x2 ->
+        (forall (y1 y2:A) (p1:R y1 x1) (p2:R y2 x2),
+            E y1 y2 -> f1 y1 p1 = f2 y2 p2) -> F x1 f1 = F x2 f2.
+
+    Lemma my_Fix_F_inv : forall (x1 x2:A) (r1:Acc R x1) (r2:Acc R x2),
+        E x1 x2 -> my_Fix_F x1 r1 = my_Fix_F x2 r2.
+    Proof.
+      intro x1; induction (Rwf x1); intros x2 r1 r2.
+      rewrite <- (my_Fix_F_eq x r1); rewrite <- (my_Fix_F_eq x2 r2); intros.
+      apply F_ext; auto.
+    Qed.
+
+    Lemma my_Fix_eq : forall (x1 x2:A),
+        E x1 x2 -> my_Fix x1 = F x2 (fun (y:A) (p:R y x2) => my_Fix y).
+    Proof.
+      intro x; unfold my_Fix.
+      rewrite <- my_Fix_F_eq.
+      intros. apply F_ext; intros.
+      - assumption.
+      - apply my_Fix_F_inv. assumption.
+    Qed.
+
+ End FixPoint.
+
   (*I have difficulty with Fix_eq (hard to prove funext property) if fix returns a function.*)
+  Print existT.
+  Check ({x:nat & 3 = 3}).
+  Locate "{ : }".
   Definition snext_stmt'_body {env: map.map String.string (list Z * list Z * stmt)} (e: env) (next : trace -> option qevent)
     (live__sk_so_far__s__k_so_far__fpval__f : bool * trace * stmt * trace * word * (trace -> trace -> option qevent))
     (snext_stmt' : forall othertuple, lt_tuple othertuple live__sk_so_far__s__k_so_far__fpval__f -> option qevent)
@@ -603,33 +702,43 @@ Compute silly (10, 0)%nat 5 5.
     Defined.
 
     Check snext_stmt'_body.
-
+    Check my_Fix.
     Definition snext_stmt'
       {env: map.map String.string (list Z * list Z * stmt)} e next
-      := Fix lt_tuple_wf _ (snext_stmt'_body e next).
+      := my_Fix _ _ lt_tuple_wf _ (snext_stmt'_body e next).
+
+    Check snext_stmt'.
+    Opaque snext_stmt'.
+    Compute (snext_stmt' map.empty (fun _ => None) (false, [], SSkip, [], word.of_Z 0, (fun _ _ => None))).
+
+    Definition E (x y : bool * trace * stmt * trace * word * (trace -> trace -> option qevent)) :=
+      let '(x1, x2, x3, x4, x5, fx) := x in
+      let '(y1, y2, y3, y4, y5, fy) := y in
+      (x1, x2, x3, x4, x5) = (y1, y2, y3, y4, y5) /\
+        forall z1 z2, fx z1 z2 = fy z1 z2.
 
     Lemma snext_stmt'_step {env: map.map String.string (list Z * list Z * stmt)} e next bigtuple : ltac:(
                                      let t := eval cbv beta delta [snext_stmt'_body] in
                                      (snext_stmt' e next bigtuple = snext_stmt'_body e next bigtuple (fun y _ => snext_stmt' e next y))
                                        in exact t).
     Proof.
-      cbv [snext_stmt']. Check Fix_eq. Search Fix. rewrite Fix_eq with (F:=snext_stmt'_body e next).
+      cbv [snext_stmt']. Check Fix_eq. Search Fix. rewrite my_Fix_eq with (E:=E) (x1:=bigtuple) (x2:=bigtuple) (F:=snext_stmt'_body e next).
       1: reflexivity.
       { intros. cbv [snext_stmt'_body]. cbv beta.
-        destruct x as [ [ [ [ [live_ sk_so_far_] s_] k_so_far_] fpval_] f_].
+        destruct x1 as [ [ [ [ [live_1 sk_so_far_1] s_1] k_so_far_1] fpval_1] f_1].
+        destruct x2 as [ [ [ [ [live_2 sk_so_far_2] s_2] k_so_far_2] fpval_2] f_2].
         cbn [fst snd].
-        repeat (Tactics.destruct_one_match; try reflexivity).
-        all: try (apply predict_with_prefix_ext; intros; apply H).
-        { rewrite H. Check Fix_eq. Print Fix_F. Print Acc_inv. f_equal.
-          { f_equal. f_equal.
-          1: repeat f_equal.
-          { f_equal. f_equal.
-        { apply predictauto. assumption.
-        Tactics.destruct_one_match; try reflexivity.
-        - Tactics.destruct_one_match; try reflexivity. 
-        Tactics.destruct_one_match; try reflexivity. rewrite 
-        all: Tactics.destruct_one_match; try reflexivity. Tactics.destruct_one_match; try reflexivity. rewrite predict_with_prefix_ext. Search predict_with_prefix.
-        - rewrite H; reflexivity.
+        cbv [E] in H. destruct H as [H1 H2]. injection H1. intros. subst. clear H1.
+        repeat (Tactics.destruct_one_match; try reflexivity || apply predict_with_prefix_ext || apply H2 || intros || apply H0 || cbv [E]; intuition).
+        all: cbv [E]; intuition.
+        all: repeat (Tactics.destruct_one_match; try reflexivity || apply predict_with_prefix_ext || apply H2 || intros || apply H0 || cbv [E]; intuition).
+        all: cbv [E]; intuition.
+        all: repeat (Tactics.destruct_one_match; try reflexivity || apply predict_with_prefix_ext || apply H2 || intros || apply H0 || cbv [E]; intuition).
+        all: cbv [E]; intuition.
+        all: repeat (Tactics.destruct_one_match; try reflexivity || apply predict_with_prefix_ext || apply H2 || intros || apply H0 || cbv [E]; intuition).
+        apply predict_with_prefix_ext. intros. apply H2. }
+      { destruct bigtuple as [ [ [ [ [live_ sk_so_far_] s_] k_so_far_] fpval_] f_].
+        cbv [E]. intuition. }
     Qed.
     Opaque silly.
     
