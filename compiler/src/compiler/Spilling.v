@@ -394,8 +394,6 @@ Compute silly (10, 0)%nat 5 5.
   Definition snext_stmt'_body {env: map.map String.string (list Z * list Z * stmt)} (e: env) (next : trace -> option qevent)
     (live__sk_so_far__s__k_so_far__fpval__f : bool * trace * stmt * trace * word * (trace -> trace -> option qevent))
     (snext_stmt' : forall othertuple, lt_tuple othertuple live__sk_so_far__s__k_so_far__fpval__f -> option qevent)
-    (k_so_far : trace) (fpval: word)
-    (f : forall (k_so_far : trace) (sk_so_far : trace), option qevent)
     : option qevent.
     refine (
         let xx := live__sk_so_far__s__k_so_far__fpval__f in
@@ -572,12 +570,14 @@ Compute silly (10, 0)%nat 5 5.
         | false => fun _ => None
         end%nat (eq_refl live)).
     Proof.
+      Unshelve.
       all: destruct live__sk_so_far__s__k_so_far__fpval__f as [ [ [ [ [live_ sk_so_far_] s_] k_so_far_] fpval_] f_].
-      all: subst xx.
+      all: subst xx live sk_so_far s k_so_far fpval f.
       all: cbn [fst snd] in *.
       all: cbv [lt_tuple project_tuple].
+      all: repeat match goal with | H: _ |- _ => rewrite H end.
       - destruct (_ <=? _)%nat eqn:E.
-        + left. subst live. rewrite e0. right. apply Nat.leb_le in E. simpl. blia.
+        + left. right. apply Nat.leb_le in E. simpl. blia.
         + left. left. reflexivity.
       - destruct (_ <? _)%nat eqn:E.
         + left. right. Print Nat.ltb_lt. apply Nat.ltb_lt in E. cbv [trace_lt ltof]. blia.
@@ -587,28 +587,18 @@ Compute silly (10, 0)%nat 5 5.
       - destruct (_ <? _)%nat eqn:E.
         + left. right. apply Nat.ltb_lt in E. cbv [trace_lt ltof]. blia.
         + left. left. reflexivity.
-          
-          Unshelve.
-          all: destruct live__sk_so_far__s__k_so_far__fpval__f as [ [ [ [ [live_ sk_so_far_] s_] k_so_far_] fpval_] f_].
-          all: subst xx.
-          all: cbn [fst snd] in *.
-          all: cbv [lt_tuple project_tuple].
-
-                
-          
       - destruct (_ <? _)%nat eqn:E.
         + left. right. apply Nat.ltb_lt in E. cbv [trace_lt ltof]. blia.
         + left. left. reflexivity.
-      - right. constructor. constructor.
-      - destruct (_ <=? _)%nat eqn:E.
-        + apply Nat.leb_le in E. Print Nat.eqb_eq.
-          -- destruct (length sk_so_far' =? length sk_so_far)%nat eqn:E'.
-             ++ apply Nat.eqb_eq in E'. cbv [lt_tuple Spilling.f]. rewrite E'.
-                right. constructor. constructor.
-             ++ apply Nat.eqb_neq in E'. left. right. blia.
-        + left. left. reflexivity.
       - destruct (_ <? _)%nat eqn:E. Print Nat.ltb_lt.
         + apply Nat.ltb_lt in E. left. right. blia.
+        + left. left. reflexivity.
+      - destruct (_ <=? _)%nat eqn:E.
+        + apply Nat.leb_le in E. Print Nat.eqb_eq.
+          -- destruct (length sk_so_far' =? length sk_so_far_)%nat eqn:E'.
+             ++ apply Nat.eqb_eq in E'. rewrite E'.
+                right. constructor. constructor.
+             ++ apply Nat.eqb_neq in E'. left. right. blia.
         + left. left. reflexivity.
     Defined.
 
@@ -617,18 +607,28 @@ Compute silly (10, 0)%nat 5 5.
     Definition snext_stmt'
       {env: map.map String.string (list Z * list Z * stmt)} e next
       := Fix lt_tuple_wf _ (snext_stmt'_body e next).
-    Print snext_stmt'. Print snext_stmt'_body.
 
-    Lemma snext_stmt'_step {env: map.map String.string (list Z * list Z * stmt)} e next live_sk_so_far_s k_so_far fpval f : ltac:(
+    Lemma snext_stmt'_step {env: map.map String.string (list Z * list Z * stmt)} e next bigtuple : ltac:(
                                      let t := eval cbv beta delta [snext_stmt'_body] in
-                                     (snext_stmt' e next live_sk_so_far_s k_so_far fpval f = snext_stmt'_body e next live_sk_so_far_s (fun y _ => snext_stmt' e next y) k_so_far fpval f)
+                                     (snext_stmt' e next bigtuple = snext_stmt'_body e next bigtuple (fun y _ => snext_stmt' e next y))
                                        in exact t).
     Proof.
       cbv [snext_stmt']. Check Fix_eq. Search Fix. rewrite Fix_eq with (F:=snext_stmt'_body e next).
       1: reflexivity.
-      { intros. cbv [snext_stmt'_body]. simpl. destruct x as [ [live tr] s]. simpl.
-        Tactics.destruct_one_match; [|reflexivity]. Tactics.destruct_one_match; try reflexivity.
-        - Tactics.destruct_one_match; try reflexivity. Tactics.destruct_one_match; try reflexivity. rewrite predict_with_prefix_ext. Search predict_with_prefix.
+      { intros. cbv [snext_stmt'_body]. cbv beta.
+        destruct x as [ [ [ [ [live_ sk_so_far_] s_] k_so_far_] fpval_] f_].
+        cbn [fst snd].
+        repeat (Tactics.destruct_one_match; try reflexivity).
+        all: try (apply predict_with_prefix_ext; intros; apply H).
+        { rewrite H. Check Fix_eq. Print Fix_F. Print Acc_inv. f_equal.
+          { f_equal. f_equal.
+          1: repeat f_equal.
+          { f_equal. f_equal.
+        { apply predictauto. assumption.
+        Tactics.destruct_one_match; try reflexivity.
+        - Tactics.destruct_one_match; try reflexivity. 
+        Tactics.destruct_one_match; try reflexivity. rewrite 
+        all: Tactics.destruct_one_match; try reflexivity. Tactics.destruct_one_match; try reflexivity. rewrite predict_with_prefix_ext. Search predict_with_prefix.
         - rewrite H; reflexivity.
     Qed.
     Opaque silly.
