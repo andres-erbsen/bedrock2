@@ -184,12 +184,13 @@ Section Spilling.
   Notation event := Semantics.event.
   Notation io_trace := Semantics.io_trace.
   
-  (*Fixpoint pop_elts (start : trace) (t : trace) : event(*first elt of start not exhausted*) + trace(*remaining part of trace after start exhausted*) :=
+  Fixpoint pop_elts (start : trace) (t : trace) : event(*first elt of start not exhausted*) + trace(*remaining part of trace after start exhausted*) :=
     match start, t with
     | _ :: start', _ :: t' => pop_elts start' t'
     | e :: start', nil => inl e
     | nil, _ => inr t
-    end.*)
+    end.
+
   Check Fix.
 
   Require Import Coq.Init.Wf Relation_Operators Wellfounded PeanoNat Lia.
@@ -235,7 +236,8 @@ Qed.
 
 Compute silly (10, 0)%nat 5 5.
   
-  Notation qevent := Semantics.qevent. Search qevent.
+Notation qevent := Semantics.qevent. Search qevent.
+
   Notation quot := Semantics.quot.
   Notation qleak_unit := Semantics.qleak_unit.
   Notation qleak_bool := Semantics.qleak_bool.
@@ -253,6 +255,15 @@ Compute silly (10, 0)%nat 5 5.
   
   Require Import Coq.Wellfounded.Lexicographic_Product.
   Require Import Relation_Operators.
+
+  
+  Definition predictor_of_end (prefix : trace) (t : trace) : option qevent :=
+    match pop_elts prefix t with
+    | inl e => Some (quot e)
+    | inr t' => Some qend
+    end.
+
+    
 
   (*Inductive subexpression : stmt -> stmt -> Prop :=
   | SStackalloc_subexp : forall x1 x2 s, subexpression s (SStackalloc x1 x2 s).
@@ -316,12 +327,15 @@ Compute silly (10, 0)%nat 5 5.
   Print make_stmt_or_list_smaller_func.
   Check @make_stmt_or_list_smaller.*)
 
-  Check predict_with_prefix.
-  Lemma predict_with_prefix_ext x1 f1 f2 x2 :
-    (forall x, f1 x = f2 x) ->
-    predict_with_prefix x1 f1 x2 = predict_with_prefix x1 f2 x2.
-  Proof. Admitted.
- 
+  Lemma predict_with_prefix_ext x1 x2 f1 f2  :
+    (forall y1 y2, f1 y1 y2 = f2 y1 y2) ->
+    predict_with_prefix x1 x2 f1 = predict_with_prefix x1 x2 f2.
+  Proof.
+    intros. generalize dependent x2. induction x1.
+    - intros. simpl. apply H.
+    - intros. simpl. destruct x2; try reflexivity. apply IHx1. intros. apply H.
+  Qed.
+    
   Inductive subexpression : stmt -> stmt -> Prop :=
   | SStackalloc_subexp : forall x1 x2 s, subexpression s (SStackalloc x1 x2 s)
   | SIf_then_subexp : forall x1 x2 s, subexpression s (SIf x1 s x2)
@@ -365,11 +379,11 @@ Compute silly (10, 0)%nat 5 5.
 
   Search (bool -> bool -> Prop).
   Print slexprod. Search well_founded.
-  Definition lt_tuple' := slexprod _ _ (slexprod _ _ Bool.lt lt) stmt_lt.
+  Definition lt_tuple' := slexprod _ _ lt stmt_lt.
 
-  Definition project_tuple (live__sk_so_far__s__k_so_far__fpval__f : bool * trace * stmt * trace * word * (trace -> trace -> option qevent)) :=
-    let '(lx, tx, sx, _, _, _) := live__sk_so_far__s__k_so_far__fpval__f in (lx, length tx, sx).
-  Definition lt_tuple (x y : bool * trace * stmt * trace * word * (trace -> trace -> option qevent)) :=
+  Definition project_tuple (sk_so_far__s__k_so_far__fpval__f : trace * stmt * trace * word * (trace -> trace -> option qevent)) :=
+    let '(tx, sx, _, _, _) := sk_so_far__s__k_so_far__fpval__f in (length tx, sx).
+  Definition lt_tuple (x y : trace * stmt * trace * word * (trace -> trace -> option qevent)) :=
     lt_tuple' (project_tuple x) (project_tuple y).    
   
   Print ltof. Search well_founded. Print inv_lt_rel. Print lexprod. Print lex_exp.
@@ -378,9 +392,7 @@ Compute silly (10, 0)%nat 5 5.
   Lemma lt_tuple'_wf : well_founded lt_tuple'.
   Proof.
     apply wf_slexprod.
-    - apply wf_slexprod.
-      + apply wf_bool_lt.
-      + apply lt_wf.
+    - apply lt_wf.
     - apply wf_stmt_lt.
   Defined.
 
@@ -491,198 +503,194 @@ Compute silly (10, 0)%nat 5 5.
   Check ({x:nat & 3 = 3}).
   Locate "{ : }".
   Definition snext_stmt'_body {env: map.map String.string (list Z * list Z * stmt)} (e: env) (next : trace -> option qevent)
-    (live__sk_so_far__s__k_so_far__fpval__f : bool * trace * stmt * trace * word * (trace -> trace -> option qevent))
-    (snext_stmt' : forall othertuple, lt_tuple othertuple live__sk_so_far__s__k_so_far__fpval__f -> option qevent)
+    (sk_so_far__s__k_so_far__fpval__f : trace * stmt * trace * word * (trace -> trace -> option qevent))
+    (snext_stmt' : forall othertuple, lt_tuple othertuple sk_so_far__s__k_so_far__fpval__f -> option qevent)
     : option qevent.
     refine (
-        let xx := live__sk_so_far__s__k_so_far__fpval__f in
-        let live := fst (fst (fst (fst (fst xx)))) in
-        let sk_so_far := snd (fst (fst (fst (fst xx)))) in
+        let xx := sk_so_far__s__k_so_far__fpval__f in
+        let sk_so_far := fst (fst (fst (fst xx))) in
         let s := snd (fst (fst (fst xx))) in
         let k_so_far := snd (fst (fst xx)) in
         let fpval := snd (fst xx) in
         let f := snd xx in
-        match live as x return live = x -> _ with
-        | true => fun _ =>
-            match s as x return s = x -> _ with
-            | SLoad sz x y o => fun _ => 
-                match next k_so_far with
-                | Some (qleak_word a) =>
-                    predict_with_prefix
-                      (leak_load_iarg_reg fpval y ++ [leak_word a] ++ leak_save_ires_reg fpval x)
-                      (f (k_so_far ++ [leak_word a]))
-                      sk_so_far
-                | _ => None
-                end
-            | SStore sz x y o => fun _ =>
-                match next k_so_far with
-                | Some (qleak_word a) =>
-                    predict_with_prefix
-                      (leak_load_iarg_reg fpval x ++ leak_load_iarg_reg fpval y ++ [leak_word a])
-                      (f (k_so_far ++ [leak_word a]))
-                      sk_so_far
-                | _ => None
-                end
-            | SInlinetable _ x _ i => fun _ =>
-                match next k_so_far with
-                | Some (qleak_word i') =>
-                    predict_with_prefix
-                      (leak_load_iarg_reg fpval i ++ [leak_word i'] ++ leak_save_ires_reg fpval x)
-                      (f (k_so_far ++ [leak_word i']))
-                      sk_so_far
-                | _ => None
-                end
-            | SStackalloc x _ body => fun _ =>
-                match sk_so_far as x return sk_so_far = x -> option qevent with
-                | consume_word a :: sk_so_far' => fun _ =>
-                    predict_with_prefix
-                      (leak_save_ires_reg fpval x)
-                      (fun sk_so_far'' =>
-                         snext_stmt'
-                           (length sk_so_far'' <=? length sk_so_far', sk_so_far'', body, (k_so_far ++ [consume_word a]), fpval, f)%nat _)
-                      sk_so_far'
-                | nil => fun _ => Some qconsume
-                | _ => fun _ => None
-                end (eq_refl sk_so_far)
-            | SLit x _ => fun _ =>
-                predict_with_prefix
-                  (leak_save_ires_reg fpval x)
-                  (f k_so_far)
-                  sk_so_far
-            | SOp x op y oz => fun _ =>
-                let newt :=
-                  match op with
-                  | Syntax.bopname.divu
-                  | Syntax.bopname.remu =>
-                      match next k_so_far with
-                      | Some (qleak_word x1) =>
-                          match next (k_so_far ++ [leak_word x1]) with
-                          | Some (qleak_word x2) => Some [leak_word x1; leak_word x2]
-                          | _ => None
-                          end
-                      | _ => None
-                      end
-                  | Syntax.bopname.slu
-                  | Syntax.bopname.sru
-                  | Syntax.bopname.srs =>
-                      match next k_so_far with
-                      | Some (qleak_word x2) => Some [leak_word x2]
-                      | _ => None
-                      end
-                  | _ => Some []
-                  end
-                in
-                match newt with
-                | Some newt =>
-                    predict_with_prefix
-                      (leak_load_iarg_reg fpval y ++
-                         match oz with 
-                         | Var z => leak_load_iarg_reg fpval z
-                         | Const _ => []
-                         end
-                         ++ newt
-                         ++ leak_save_ires_reg fpval x)
-                      (f (k_so_far ++ newt))
-                      sk_so_far
-                | None => None
-                end
-            | SSet x y => fun _ =>
-                predict_with_prefix
-                  (leak_load_iarg_reg fpval y ++ leak_save_ires_reg fpval x)
-                  (f k_so_far)
-                  sk_so_far
-            | SIf c thn els => fun _ =>
-                match next k_so_far with
-                | Some (qleak_bool b) =>
-                    predict_with_prefix
-                      (leak_prepare_bcond fpval c ++ leak_spill_bcond ++ [leak_bool b])
-                      (fun sk_so_far' =>
-                         snext_stmt'
-                           (length sk_so_far' <? length sk_so_far, sk_so_far', (if b then thn else els), (k_so_far ++ [leak_bool b]), fpval, f)%nat _)
-                      sk_so_far
-                | _ => None
-                end
-            | SLoop s1 c s2 => fun _ =>
-                snext_stmt'
-                  (true, sk_so_far, s1, k_so_far, fpval,
-                  (fun k_so_far' sk_so_far' =>
-                     match next k_so_far' with
-                     | Some (qleak_bool true) =>
-                         predict_with_prefix
-                           (leak_prepare_bcond fpval c ++ leak_spill_bcond ++ [leak_bool true])
-                           (fun sk_so_far'' =>
-                              snext_stmt'
-                                (length sk_so_far'' <? length sk_so_far, sk_so_far'', s2, (k_so_far' ++ [leak_bool true]), fpval,
-                                  (fun k_so_far'' sk_so_far''' =>
-                                     snext_stmt'
-                                       (length sk_so_far''' <? length sk_so_far, sk_so_far''', s, k_so_far'', fpval, f) _)) _)
-                           sk_so_far'
-                     | Some (qleak_bool false) =>
-                         predict_with_prefix
-                           (leak_prepare_bcond fpval c ++ leak_spill_bcond ++ [leak_bool false])
-                           (f (k_so_far' ++ [leak_bool false]))
-                           sk_so_far'
-                     | _ => None
-                     end)) _
-            | SSeq s1 s2 => fun _ =>
-                snext_stmt'
-                  (true, sk_so_far, s1, k_so_far, fpval,
-                    (fun k_so_far' sk_so_far' =>
-                       snext_stmt'
-                         (length sk_so_far' <=? length sk_so_far, sk_so_far', s2, k_so_far', fpval, f) _)) _
-            | SSkip => fun _ => f k_so_far sk_so_far
-            | SCall resvars fname argvars => fun _ =>
-                match @map.get _ _ env e fname with
-                | Some (params, rets, fbody) =>
-                    predict_with_prefix
-                      (leak_set_reg_range_to_vars fpval argvars ++ [leak_unit])
-                      (fun sk_so_far' =>
-                         match sk_so_far' with (* would be nice if predict_with_prefix would do this *)
-                         | consume_word fpval' :: sk_so_far'' =>
-                             predict_with_prefix
-                               (leak_set_vars_to_reg_range fpval' params)
-                               (fun sk_so_far''' =>
-                                  snext_stmt'
-                                    (length sk_so_far''' <? length sk_so_far, sk_so_far''', fbody, k_so_far ++ [leak_unit], fpval',
-                                      (fun k_so_far' sk_so_far'''' =>
-                                         predict_with_prefix
-                                           (leak_set_reg_range_to_vars fpval' rets ++ leak_set_vars_to_reg_range fpval resvars)
-                                           (f k_so_far')
-                                           sk_so_far'''')) _) 
-                               sk_so_far''
-                         | nil => Some qconsume
-                         | _ => None
-                         end)
-                      sk_so_far
-                | None => None
-                end
-            | SInteract resvars _ argvars => fun _ =>
-                match next k_so_far with
-                | Some (qleak_list l) =>
-                    predict_with_prefix
-                      (leak_set_reg_range_to_vars fpval argvars ++ [leak_list l] ++ leak_set_vars_to_reg_range fpval resvars)
-                      (f (k_so_far ++ [leak_list l]))
-                      sk_so_far
-                | _ => None
-                end
-            end (eq_refl _)
-        | false => fun _ => None
-        end%nat (eq_refl live)).
+        match s as x return s = x -> _ with
+        | SLoad sz x y o => fun _ => 
+                              match next k_so_far with
+                              | Some (qleak_word a) =>
+                                  predict_with_prefix
+                                    (leak_load_iarg_reg fpval y ++ [leak_word a] ++ leak_save_ires_reg fpval x)
+                                    sk_so_far
+                                    (fun sk_so_far' pf => f (k_so_far ++ [leak_word a]) sk_so_far')
+                              | _ => None
+                              end
+        | SStore sz x y o => fun _ =>
+                               match next k_so_far with
+                               | Some (qleak_word a) =>
+                                   predict_with_prefix
+                                     (leak_load_iarg_reg fpval x ++ leak_load_iarg_reg fpval y ++ [leak_word a])
+                                     sk_so_far
+                                     (fun sk_so_far' pf => f (k_so_far ++ [leak_word a]) sk_so_far')
+                               | _ => None
+                               end
+        | SInlinetable _ x _ i => fun _ =>
+                                    match next k_so_far with
+                                    | Some (qleak_word i') =>
+                                        predict_with_prefix
+                                          (leak_load_iarg_reg fpval i ++ [leak_word i'] ++ leak_save_ires_reg fpval x)
+                                          sk_so_far
+                                          (fun sk_so_far' pf => f (k_so_far ++ [leak_word i']) sk_so_far')
+                                    | _ => None
+                                    end
+        | SStackalloc x _ body => fun _ =>
+                                    match sk_so_far as x return sk_so_far = x -> option qevent with
+                                    | consume_word a :: sk_so_far' => fun _ =>
+                                                                        predict_with_prefix
+                                                                          (leak_save_ires_reg fpval x)
+                                                                          sk_so_far'
+                                                                          (fun sk_so_far'' pf =>
+                                                                             snext_stmt'
+                                                                               (sk_so_far'', body, (k_so_far ++ [consume_word a]), fpval, f)%nat _)
+                                    | nil => fun _ => Some qconsume
+                                    | _ => fun _ => None
+                                    end (eq_refl sk_so_far)
+        | SLit x _ => fun _ =>
+                        predict_with_prefix
+                          (leak_save_ires_reg fpval x)
+                          sk_so_far
+                          (fun sk_so_far' pf => f k_so_far sk_so_far')
+        | SOp x op y oz => fun _ =>
+                             let newt :=
+                               match op with
+                               | Syntax.bopname.divu
+                               | Syntax.bopname.remu =>
+                                   match next k_so_far with
+                                   | Some (qleak_word x1) =>
+                                       match next (k_so_far ++ [leak_word x1]) with
+                                       | Some (qleak_word x2) => Some [leak_word x1; leak_word x2]
+                                       | _ => None
+                                       end
+                                   | _ => None
+                                   end
+                               | Syntax.bopname.slu
+                               | Syntax.bopname.sru
+                               | Syntax.bopname.srs =>
+                                   match next k_so_far with
+                                   | Some (qleak_word x2) => Some [leak_word x2]
+                                   | _ => None
+                                   end
+                               | _ => Some []
+                               end
+                             in
+                             match newt with
+                             | Some newt =>
+                                 predict_with_prefix
+                                   (leak_load_iarg_reg fpval y ++
+                                      match oz with 
+                                      | Var z => leak_load_iarg_reg fpval z
+                                      | Const _ => []
+                                      end
+                                      ++ newt
+                                      ++ leak_save_ires_reg fpval x)
+                                   sk_so_far
+                                   (fun sk_so_far' pf => f (k_so_far ++ newt) sk_so_far')
+                             | None => None
+                             end
+        | SSet x y => fun _ =>
+                        predict_with_prefix
+                          (leak_load_iarg_reg fpval y ++ leak_save_ires_reg fpval x)
+                          sk_so_far
+                          (fun sk_so_far' pf => f k_so_far sk_so_far')
+        | SIf c thn els => fun _ =>
+                             match next k_so_far with
+                             | Some (qleak_bool b) =>
+                                 predict_with_prefix
+                                   (leak_prepare_bcond fpval c ++ leak_spill_bcond ++ [leak_bool b])
+                                   sk_so_far
+                                   (fun sk_so_far' pf =>
+                                      snext_stmt'
+                                        (sk_so_far', (if b then thn else els), (k_so_far ++ [leak_bool b]), fpval, f)%nat _)
+                             | _ => None
+                             end
+        | SLoop s1 c s2 => fun _ =>
+                             snext_stmt'
+                               (sk_so_far, s1, k_so_far, fpval,
+                                 (fun k_so_far' sk_so_far' =>
+                                    match next k_so_far' with
+                                    | Some (qleak_bool true) =>
+                                        predict_with_prefix
+                                          (leak_prepare_bcond fpval c ++ leak_spill_bcond ++ [leak_bool true])
+                                          sk_so_far'
+                                          (fun sk_so_far'' pf =>
+                                             snext_stmt'
+                                               (sk_so_far'', s2, (k_so_far' ++ [leak_bool true]), fpval,
+                                                 (fun k_so_far'' sk_so_far''' =>
+                                                    snext_stmt'
+                                                      (sk_so_far''', s, k_so_far'', fpval, f) _)) _)
+                                    | Some (qleak_bool false) =>
+                                        predict_with_prefix
+                                          (leak_prepare_bcond fpval c ++ leak_spill_bcond ++ [leak_bool false])
+                                          sk_so_far'
+                                          (fun sk_so_far'' pf => f (k_so_far' ++ [leak_bool false]) sk_so_far'')
+                                    | _ => None
+                                    end)) _
+        | SSeq s1 s2 => fun _ =>
+                          snext_stmt'
+                            (sk_so_far, s1, k_so_far, fpval,
+                              (fun k_so_far' sk_so_far' =>
+                                 snext_stmt'
+                                   (sk_so_far', s2, k_so_far', fpval, f) _)) _
+        | SSkip => fun _ => f k_so_far sk_so_far
+        | SCall resvars fname argvars => fun _ =>
+                                           match @map.get _ _ env e fname with
+                                           | Some (params, rets, fbody) =>
+                                               predict_with_prefix
+                                                 (leak_set_reg_range_to_vars fpval argvars ++ [leak_unit])
+                                                 sk_so_far
+                                                 (fun sk_so_far' pf =>
+                                                    match sk_so_far' with (* would be nice if predict_with_prefix would do this *)
+                                                    | consume_word fpval' :: sk_so_far'' =>
+                                                        predict_with_prefix
+                                                          (leak_set_vars_to_reg_range fpval' params)
+                                                          sk_so_far''
+                                                          (fun sk_so_far''' pf =>
+                                                             snext_stmt'
+                                                               (sk_so_far''', fbody, k_so_far ++ [leak_unit], fpval',
+                                                                 (fun k_so_far' sk_so_far'''' =>
+                                                                    predict_with_prefix
+                                                                      (leak_set_reg_range_to_vars fpval' rets ++ leak_set_vars_to_reg_range fpval resvars)
+                                                                      sk_so_far''''
+                                                                      (fun sk_so_far''''' pf => f k_so_far' sk_so_far'''''))) _) 
+                                                    | nil => Some qconsume
+                                                    | _ => None
+                                                    end)
+                                           | None => None
+                                           end
+        | SInteract resvars _ argvars => fun _ =>
+                                           match next k_so_far with
+                                           | Some (qleak_list l) =>
+                                               predict_with_prefix
+                                                 (leak_set_reg_range_to_vars fpval argvars ++ [leak_list l] ++ leak_set_vars_to_reg_range fpval resvars)
+                                                 sk_so_far
+                                                 (fun sk_so_far' pf => f (k_so_far ++ [leak_list l]) sk_so_far')
+                                           | _ => None
+                                           end
+        end (eq_refl _)).
     Proof.
       Unshelve.
-      all: destruct live__sk_so_far__s__k_so_far__fpval__f as [ [ [ [ [live_ sk_so_far_] s_] k_so_far_] fpval_] f_].
-      all: subst xx live sk_so_far s k_so_far fpval f.
+      all: destruct sk_so_far__s__k_so_far__fpval__f as [ [ [ [ sk_so_far_ s_] k_so_far_] fpval_] f_].
+      all: subst xx sk_so_far s k_so_far fpval f.
       all: cbn [fst snd] in *.
       all: cbv [lt_tuple project_tuple].
       all: repeat match goal with | H: _ |- _ => rewrite H end.
-      - destruct (_ <=? _)%nat eqn:E.
-        + left. right. apply Nat.leb_le in E. simpl. blia.
-        + left. left. reflexivity.
-      - destruct (_ <? _)%nat eqn:E.
-        + left. right. Print Nat.ltb_lt. apply Nat.ltb_lt in E. cbv [trace_lt ltof]. blia.
-        + left. left. reflexivity.
+      - left. simpl. blia.
+      - rewrite <- pf. repeat rewrite app_length. left. simpl. blia.
       - right. constructor. constructor.
       - right. constructor. constructor.
+      - admit.
+      - admit.
+      - admit.
+      - admit.
+        right. constructor. constructor.
       - destruct (_ <? _)%nat eqn:E.
         + left. right. apply Nat.ltb_lt in E. cbv [trace_lt ltof]. blia.
         + left. left. reflexivity.
@@ -708,10 +716,9 @@ Compute silly (10, 0)%nat 5 5.
       := my_Fix _ _ lt_tuple_wf _ (snext_stmt'_body e next).
 
     Check snext_stmt'.
-    Opaque snext_stmt'.
     Compute (snext_stmt' map.empty (fun _ => None) (false, [], SSkip, [], word.of_Z 0, (fun _ _ => None))).
 
-    Definition E (x y : bool * trace * stmt * trace * word * (trace -> trace -> option qevent)) :=
+    Definition Equiv (x y : bool * trace * stmt * trace * word * (trace -> trace -> option qevent)) :=
       let '(x1, x2, x3, x4, x5, fx) := x in
       let '(y1, y2, y3, y4, y5, fy) := y in
       (x1, x2, x3, x4, x5) = (y1, y2, y3, y4, y5) /\
@@ -722,31 +729,27 @@ Compute silly (10, 0)%nat 5 5.
                                      (snext_stmt' e next bigtuple = snext_stmt'_body e next bigtuple (fun y _ => snext_stmt' e next y))
                                        in exact t).
     Proof.
-      cbv [snext_stmt']. Check Fix_eq. Search Fix. rewrite my_Fix_eq with (E:=E) (x1:=bigtuple) (x2:=bigtuple) (F:=snext_stmt'_body e next).
+      cbv [snext_stmt']. Check Fix_eq. Search Fix. rewrite my_Fix_eq with (E:=Equiv) (x1:=bigtuple) (x2:=bigtuple) (F:=snext_stmt'_body e next).
       1: reflexivity.
       { intros. cbv [snext_stmt'_body]. cbv beta.
         destruct x1 as [ [ [ [ [live_1 sk_so_far_1] s_1] k_so_far_1] fpval_1] f_1].
         destruct x2 as [ [ [ [ [live_2 sk_so_far_2] s_2] k_so_far_2] fpval_2] f_2].
         cbn [fst snd].
-        cbv [E] in H. destruct H as [H1 H2]. injection H1. intros. subst. clear H1.
-        repeat (Tactics.destruct_one_match; try reflexivity || apply predict_with_prefix_ext || apply H2 || intros || apply H0 || cbv [E]; intuition).
-        all: cbv [E]; intuition.
-        all: repeat (Tactics.destruct_one_match; try reflexivity || apply predict_with_prefix_ext || apply H2 || intros || apply H0 || cbv [E]; intuition).
-        all: cbv [E]; intuition.
-        all: repeat (Tactics.destruct_one_match; try reflexivity || apply predict_with_prefix_ext || apply H2 || intros || apply H0 || cbv [E]; intuition).
-        all: cbv [E]; intuition.
-        all: repeat (Tactics.destruct_one_match; try reflexivity || apply predict_with_prefix_ext || apply H2 || intros || apply H0 || cbv [E]; intuition).
+        cbv [Equiv] in H. destruct H as [H1 H2]. injection H1. intros. subst. clear H1.
+        repeat (Tactics.destruct_one_match; try reflexivity || apply predict_with_prefix_ext || apply H2 || intros || apply H0 || cbv [Equiiv]; intuition).
+        all: cbv [Equiv]; intuition.
+        all: repeat (Tactics.destruct_one_match; try reflexivity || apply predict_with_prefix_ext || apply H2 || intros || apply H0 || cbv [Equiv]; intuition).
+        all: cbv [Equiv]; intuition.
+        all: repeat (Tactics.destruct_one_match; try reflexivity || apply predict_with_prefix_ext || apply H2 || intros || apply H0 || cbv [Equiv]; intuition).
+        all: cbv [Equiv]; intuition.
+        all: repeat (Tactics.destruct_one_match; try reflexivity || apply predict_with_prefix_ext || apply H2 || intros || apply H0 || cbv [Equiv]; intuition).
         apply predict_with_prefix_ext. intros. apply H2. }
       { destruct bigtuple as [ [ [ [ [live_ sk_so_far_] s_] k_so_far_] fpval_] f_].
-        cbv [E]. intuition. }
+        cbv [Equiv]. intuition. }
     Qed.
-    Opaque silly.
     
-  Obligations.
-
   Definition snext_stmt {env : map.map string (list Z * list Z * stmt)} e next fpval s sk_so_far :=
-    snext_stmt' e next [] fpval s sk_so_far true
-      (fun next' k_so_far => Some qend).
+    snext_stmt' e next (true, [], s, sk_so_far, fpval, (fun _ _ => Some qend)).
    
   Fixpoint spill_stmt(s: stmt): stmt :=
     match s with
@@ -920,12 +923,12 @@ Compute silly (10, 0)%nat 5 5.
     | consume_word fpval :: sk_so_far' =>
         predict_with_prefix
           (leak_set_vars_to_reg_range fpval argnames)
-          (fun sk_so_far'' => snext_stmt' e next k_so_far fpval body sk_so_far'' true
-                                (fun k_so_far' sk_so_far''' =>
-                                   predict_with_prefix
-                                     (leak_set_reg_range_to_vars fpval resnames)
-                                     (fun sk_so_far'''' => match sk_so_far'''' with |nil => Some qend |_ => None end)
-                                     sk_so_far'''))
+          (fun sk_so_far'' => snext_stmt' e next (true, k_so_far, body, sk_so_far'', fpval,
+                                  (fun k_so_far' sk_so_far''' =>
+                                     predict_with_prefix
+                                       (leak_set_reg_range_to_vars fpval resnames)
+                                       (fun sk_so_far'''' => match sk_so_far'''' with |nil => Some qend |_ => None end)
+                                       sk_so_far''')))
           sk_so_far'
     | _ => None
     end.
@@ -1815,7 +1818,7 @@ Compute silly (10, 0)%nat 5 5.
       unfold a0, a7 in H.
       blia.
   Qed.
-
+  Check snext_stmt'.
   Definition spilling_correct_for(e1 e2 : env)(s1 : stmt) : Prop :=
     forall (k1 : Semantics.trace) (t1 : Semantics.io_trace) (m1 : mem) (l1 : locals) (mc1 : MetricLog)
            (post : Semantics.trace -> Semantics.io_trace -> mem -> locals -> MetricLog -> Prop),
@@ -1834,7 +1837,7 @@ Compute silly (10, 0)%nat 5 5.
                    forall next k10 k1''' k2''' f,
                      predicts next (k10 ++ rev k1'' ++ k1''') ->
                      predicts (fun k => f (k10 ++ rev k1'') k) k2''' ->
-                     predicts (fun k => snext_stmt' e1 next k10 fpval s1 k true f) (rev k2'' ++ k2''')).
+                     predicts (fun k => snext_stmt' e1 next (true, k10, s1, k, fpval, f)) (rev k2'' ++ k2''')).
 
   Definition call_spec(e: env) '(argnames, retnames, fbody)
     (k: Semantics.trace)(t: Semantics.io_trace)(m: mem)(argvals: list word)
@@ -2039,6 +2042,38 @@ Compute silly (10, 0)%nat 5 5.
      Unshelve.
     all: try assumption.
   Qed.
+
+  Lemma predict_with_prefix_works_weirdly'
+     : forall (prefix : trace) (predict_rest : trace -> trace -> option qevent) (rest : trace),
+       (forall t1 t2, rest = t1 ++ t2 -> predicts (predict_rest (prefix ++ t1)) rest) ->
+       predicts (fun t => predict_with_prefix prefix (predict_rest t) t) (prefix ++ rest).
+  Proof.
+    clear. intros. Admitted. (*induction prefix.
+    - simpl in *. admit.
+    - simpl. econstructor; [reflexivity|reflexivity|]. apply IHprefix.
+
+   induction rest. a
+      + sprewrite app_nil_r in *. simpl. specialize (H nil nil eq_refl). rewrite app_nil_r in H.
+      Check predict_with_prefix_works.
+      admit.
+    - Print Semantics.predicts.
+      induction prefix.
+      + simpl. constructor. inversion H. assumption.
+      + simpl. econstructor; [reflexivity|reflexivity|]. simpl. simpl in H.
+  Admitted. Check Semantics.predict_with_prefix_works_eq.*)
+
+  Lemma predict_with_prefix_works_weirdly
+     : forall (prefix : trace) (predict_rest : trace -> trace -> option qevent) (rest : trace),
+       (forall t, (length prefix <= length t)%nat -> predicts (predict_rest t) rest) ->
+       predicts (fun t => predict_with_prefix prefix (predict_rest t) t) (prefix ++ rest).
+  Proof. Admitted. Check Semantics.predict_with_prefix_works_eq.
+
+  Lemma predict_with_prefix_works_weirdly_eq
+    : forall stuff prefix rest predict_rest,
+      stuff = prefix ++ rest ->
+      (forall t, (length prefix <= length t)%nat -> predicts (predict_rest t) rest) ->
+      predicts (fun t => predict_with_prefix prefix (predict_rest t) t) stuff.
+  Proof. Admitted.
   
   Lemma spilling_correct : forall
       (e1 e2 : env)
@@ -2065,7 +2100,7 @@ Compute silly (10, 0)%nat 5 5.
                    forall next k10 k1''' k2''' f,
                      predicts next (k10 ++ rev k1'' ++ k1''') ->
                      predicts (fun k => f (k10 ++ rev k1'') k) k2''' ->
-                     predicts (fun k => snext_stmt' e1 next k10 fpval s1 k true f) (rev k2'' ++ k2''')).
+                     predicts (fun k => snext_stmt' e1 next (true, k, s1, k10, fpval, f)) (rev k2'' ++ k2''')).
   Proof.
     intros e1 e2 Ev. intros s1 k1 t1 m1 l1 mc1 post.
     induction 1; intros; cbn [spill_stmt valid_vars_src Forall_vars_stmt] in *; fwd.
@@ -2128,7 +2163,10 @@ Compute silly (10, 0)%nat 5 5.
           (*begin ct stuff for interact*)
           intros.
           repeat (rewrite rev_app_distr || rewrite rev_involutive || cbn [rev List.app]).
-          unfold snext_stmt', snext_stmt'_func. simpl. fold snext_stmt'_func. fold snext_stmt'. Search Wf.Fix_sub. Search snext_stmt'. Search snext_stmt'_func. rewrite Wf.fix_sub_eq. cbv [snext_stmt']. apply Semantics.predict_cons in H5. rewrite H5. simpl.
+          eapply Semantics.predicts_ext.
+          2: { intros k0. Check snext_stmt'_step. symmetry. rewrite snext_stmt'_step.
+               simpl. reflexivity. }
+          apply Semantics.predict_cons in H5. rewrite H5. simpl.
           apply predict_with_prefix_works. apply H6.
           (*end ct stuff for interact*)
         }
@@ -2262,7 +2300,7 @@ Compute silly (10, 0)%nat 5 5.
         }
         cbv beta. subst maxvar'. blia.
       }
-      cbv beta. intros kL5 tL5 mL5 lFL5 mcL5 (kH5 & tH5 & mH5 & lFH5 & mcH5 & kH5' & tH5' & tL5' & R5 & OC & EkL5 & F & CT).
+      cbv beta. intros kL5 tL5 mL5 lFL5 mcL5 (kH5 & tH5 & mH5 & lFH5 & mcH5 & kH5' & tH5' & tL5' & R5 & OC & EkL5 & CT).
       match goal with
       | H: context[outcome], A: context[outcome] |- _ =>
         specialize H with (1 := A); move H at bottom; rename H into Q
@@ -2354,17 +2392,24 @@ Compute silly (10, 0)%nat 5 5.
         { subst k22. subst kL6. subst kL5. subst kL4. subst k2'.
           rewrite app_one_cons. rewrite (app_one_cons leak_unit). repeat rewrite app_assoc.
           reflexivity. }
-        intros. exists (S F). intros. destruct fuel' as [|fuel']; [blia|].
+        intros.
         repeat (rewrite rev_app_distr || rewrite rev_involutive || cbn [rev List.app]).
-        simpl. rewrite H. 
+        eapply Semantics.predicts_ext.
+        2: { intros. symmetry. rewrite snext_stmt'_step. simpl. reflexivity. }
+        rewrite H. 
         rewrite rev_app_distr in H3. repeat rewrite <- app_assoc in H3. assert (H3' := H3).
-        rewrite (app_one_cons leak_unit (consume_word _ :: _)).
-        repeat rewrite <- app_assoc. rewrite app_assoc.
-        apply predict_with_prefix_works.
+        Print Semantics.predict_with_prefix.
+        pop_k_elts 
+        eapply predict_with_prefix_works_weirdly_eq.
+        { repeat rewrite <- app_assoc. simpl. reflexivity. }
+        intros.
         simpl. econstructor.
         { reflexivity. }
         { eauto. }
-        { (*should copy what I did in flattoriscv so i don't have to deal with this associativity 
+        { eapply predict_with_prefix_works_weirdly_eq.
+          { repeat rewrite <- app_assoc. simpl. reflexivity. }
+          intros. Check predict_with_prefix_works_weirdly.
+          (*should copy what I did in flattoriscv so i don't have to deal with this associativity 
             nonsense.*)
           repeat rewrite <- app_assoc. apply predict_with_prefix_works.
           eapply CT.

@@ -176,25 +176,46 @@ Section WithIOEvent.
     predicts (predictor a) t.
   Proof. intros H. induction H; intros; econstructor; simpl; eauto. Qed.
 
-  Fixpoint predict_with_prefix (prefix : trace) (predict_rest : trace -> option qevent) (t : trace) : option qevent :=
-    match prefix, t with
-    | _ :: prefix', _ :: t' => predict_with_prefix prefix' predict_rest t'
-    | e :: start', nil => Some (quot e)
-    | nil, _ => predict_rest t
-    end.
+  Require Import coqutil.Z.Lia.
 
-  Lemma predict_with_prefix_works prefix predict_rest rest :
-    predicts predict_rest rest ->
-    predicts (predict_with_prefix prefix predict_rest) (prefix ++ rest).
+  Definition predict_with_prefix_body (prefix : trace) (t : trace)
+    (predict_rest : forall (rest : trace), (length prefix + length rest = length t) -> option qevent)
+    (predict_with_prefix : forall (prefix' t' : trace), (forall rest':trace, length prefix' + length rest' = length t' -> option qevent) -> option qevent)
+    : option qevent.
+    refine (
+        match prefix as x, t as y return prefix = x -> t = y -> _ with
+        | _ :: prefix', _ :: t' => fun _ _ => predict_with_prefix prefix' t' (fun rest pf => predict_rest rest _)
+        | e :: start', nil => fun _ _ => Some (quot e)
+        | nil, _ => fun _ _ => predict_rest t _
+        end (eq_refl _) (eq_refl _)).
+    Proof.
+      - subst. simpl. blia.
+      - subst. simpl. blia.
+    Defined.
+
+    Fixpoint predict_with_prefix prefix t predict_rest :=
+      predict_with_prefix_body prefix t predict_rest predict_with_prefix.
+      
+    Lemma predict_with_prefix_works prefix predict_rest rest :
+      (forall H, predicts (fun t => predict_rest (prefix ++ t) t (H t)) rest) ->
+      predicts (fun t => predict_with_prefix prefix t (predict_rest t)) (prefix ++ rest).
+    Proof.
+      intros H. induction prefix.
+      - simpl in H. simpl. apply H.
+      - simpl. econstructor; [reflexivity|reflexivity|]. apply IHprefix. intros. apply H.
+    Qed.
+
+  Lemma predict_with_prefix_works_eq stuff prefix rest predict_rest :
+    stuff = prefix ++ rest ->
+    (forall H, predicts (fun t => predict_rest (prefix ++ t) t (H t)) rest) ->
+    predicts (fun t => predict_with_prefix prefix t (predict_rest t)) stuff.
   Proof.
-    intros H. induction prefix.
-    - simpl. apply H.
-    - simpl. econstructor; auto.
+    intros H. subst. apply predict_with_prefix_works.
   Qed.
 
   Lemma predict_with_prefix_works_end prefix predict_rest :
-    predicts predict_rest [] ->
-    predicts (predict_with_prefix prefix predict_rest) prefix.
+    (forall H, predicts (fun t => predict_rest (prefix ++ t) t (H t)) []) ->
+    predicts (fun t => predict_with_prefix prefix t (predict_rest t)) prefix.
   Proof.
     intros H. eapply predict_with_prefix_works in H. rewrite app_nil_r in H. eassumption.
   Qed.
