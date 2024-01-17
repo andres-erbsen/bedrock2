@@ -114,120 +114,114 @@ Section WithIOEvent.
     generates (generator t) t.
   Proof. induction t; try constructor. destruct a; cbn [generator]; constructor; assumption. Qed.
 
-  Print abstract_trace.
-  Definition head (a : abstract_trace) : qevent :=
-    match a with
-    | empty => qend
-    | aleak_unit _ => qleak_unit
-    | aleak_bool b _ => qleak_bool b
-    | aleak_word w _ => qleak_word w
-    | aleak_list l _ => qleak_list l
-    | aconsume_word _ => qconsume
-    end.
-
-  Fixpoint predictor (a(*the whole thing*) : abstract_trace) (t(*so far*) : trace) : option qevent :=
+  Section predictors.
+    Context {Event QEvent : Type} (qend : QEvent) (q : Event -> QEvent).
+    Context (Trace := list Event).
+    
+    Inductive predicts : (Trace -> QEvent) -> Trace -> Prop :=
+    | predicts_cons :
+      forall f g e t,
+        f [] = q e ->
+        (forall t', f (e :: t') = g t') ->
+        predicts g t ->
+        predicts f (e :: t)
+    | predicts_nil :
+      forall f,
+        f [] = qend ->
+        predicts f [].
+    
+    Lemma predicts_ext f g t :
+      predicts f t ->
+      (forall x, f x = g x) ->
+      predicts g t.
+    Proof.
+      intros. generalize dependent g. induction H.
+      - econstructor.
+        + rewrite <- H. rewrite H2. reflexivity.
+        + intros t'. rewrite <- H2. apply H0.
+        + eapply IHpredicts. reflexivity.
+      - intros. constructor. rewrite <- H0. apply H.
+    Qed.
+    
+    Require Import coqutil.Z.Lia.
+    
+    Definition predict_with_prefix_body (prefix : list Event) (t : list Event)
+      (predict_rest : forall (rest : list Event), (length prefix + length rest = length t) -> QEvent)
+      (predict_with_prefix : forall (prefix' t' : list Event), (forall rest':list Event, length prefix' + length rest' = length t' -> QEvent) -> QEvent)
+      : QEvent.
+      refine (
+          match prefix as x, t as y return prefix = x -> t = y -> _ with
+          | _ :: prefix', _ :: t' => fun _ _ => predict_with_prefix prefix' t' (fun rest pf => predict_rest rest _)
+          | e :: start', nil => fun _ _ => q e
+          | nil, _ => fun _ _ => predict_rest t _
+          end (eq_refl _) (eq_refl _)).
+      Proof.
+        - subst. simpl. blia.
+        - subst. simpl. blia.
+      Defined.
+      
+      Fixpoint predict_with_prefix prefix t predict_rest :=
+        predict_with_prefix_body prefix t predict_rest predict_with_prefix.
+      
+      Lemma predict_with_prefix_works prefix predict_rest rest :
+        (forall H, predicts (fun t => predict_rest (prefix ++ t) t (H t)) rest) ->
+        predicts (fun t => predict_with_prefix prefix t (predict_rest t)) (prefix ++ rest).
+      Proof.
+        intros H. induction prefix.
+        - simpl in H. simpl. apply H.
+        - simpl. econstructor; [reflexivity|reflexivity|]. apply IHprefix. intros. apply H.
+      Qed.
+      
+      Lemma predict_with_prefix_works_eq stuff prefix rest predict_rest :
+        stuff = prefix ++ rest ->
+        (forall H, predicts (fun t => predict_rest (prefix ++ t) t (H t)) rest) ->
+        predicts (fun t => predict_with_prefix prefix t (predict_rest t)) stuff.
+      Proof.
+        intros H. subst. apply predict_with_prefix_works.
+      Qed.
+      
+      Lemma predict_with_prefix_works_end prefix predict_rest :
+        (forall H, predicts (fun t => predict_rest (prefix ++ t) t (H t)) []) ->
+        predicts (fun t => predict_with_prefix prefix t (predict_rest t)) prefix.
+      Proof.
+        intros H. eapply predict_with_prefix_works in H. rewrite app_nil_r in H. eassumption.
+      Qed.
+      
+      Lemma predict_cons e f t1 t2 :
+        predicts f (t1 ++ e :: t2) ->
+        f t1 = q e.
+      Proof.
+        clear. intros H. generalize dependent f. induction t1.
+        - intros. simpl in H. inversion H. subst. assumption.
+        - intros. simpl in H. inversion H. subst. rewrite H4. apply IHt1. assumption.
+      Qed.
+  End predictors.
+  Print predicts.
+  Definition s_predicts := predicts qend quot.
+  
+  Fixpoint predictor (a(*the whole thing*) : abstract_trace) (t(*so far*) : trace) : qevent :=
     match a, t with
-    | _, nil => Some (head a)
+    | _, nil =>
+        match a with
+        | empty => qend
+        | aleak_unit _ => qleak_unit
+        | aleak_bool b _ => qleak_bool b
+        | aleak_word w _ => qleak_word w
+        | aleak_list l _ => qleak_list l
+        | aconsume_word _ => qconsume
+        end
     | aleak_unit a', cons leak_unit t' => predictor a' t'
     | aleak_bool _ a', cons (leak_bool _) t' => predictor a' t'
     | aleak_word _ a', cons (leak_word _) t' => predictor a' t'
     | aleak_list _ a', cons (leak_list _) t' => predictor a' t'
     | aconsume_word f, cons (consume_word w) t' => predictor (f w) t'
-    | _, _ => None (*failure*)
+    | _, _ => qend (*failure*)
     end.
-  Search (list ?A -> ?A).
-  (*Definition nextq (l : list event) : qevent :=
-    match l with
-    | a :: _ => quot a
-    | nil => qend
-    end.*)
-  (*Definition predicts (f : trace -> option qevent) (t : trace) :=
-    forall t1 t2,
-      t = t1 ++ t2 ->
-      f t1 = Some (nextq t2).*)
   
-  Inductive predicts : (trace -> option qevent) -> trace -> Prop :=
-  | predicts_cons :
-    forall f g e t,
-      f [] = Some (quot e) ->
-      (forall t', f (e :: t') = g t') ->
-      predicts g t ->
-      predicts f (e :: t)
-  | predicts_nil :
-    forall f,
-      f [] = Some qend ->
-      predicts f [].
-
-  Lemma predicts_ext f g t :
-    predicts f t ->
-    (forall x, f x = g x) ->
-    predicts g t.
-  Proof.
-    intros. generalize dependent g. induction H.
-    - econstructor.
-      + rewrite <- H. rewrite H2. reflexivity.
-      + intros t'. rewrite <- H2. apply H0.
-      + eapply IHpredicts. reflexivity.
-    - intros. constructor. rewrite <- H0. apply H.
-  Qed.
-
   Lemma predictor_works a t :
     generates a t ->
-    predicts (predictor a) t.
+    s_predicts (predictor a) t.
   Proof. intros H. induction H; intros; econstructor; simpl; eauto. Qed.
-
-  Require Import coqutil.Z.Lia.
-
-  Definition predict_with_prefix_body (prefix : trace) (t : trace)
-    (predict_rest : forall (rest : trace), (length prefix + length rest = length t) -> option qevent)
-    (predict_with_prefix : forall (prefix' t' : trace), (forall rest':trace, length prefix' + length rest' = length t' -> option qevent) -> option qevent)
-    : option qevent.
-    refine (
-        match prefix as x, t as y return prefix = x -> t = y -> _ with
-        | _ :: prefix', _ :: t' => fun _ _ => predict_with_prefix prefix' t' (fun rest pf => predict_rest rest _)
-        | e :: start', nil => fun _ _ => Some (quot e)
-        | nil, _ => fun _ _ => predict_rest t _
-        end (eq_refl _) (eq_refl _)).
-    Proof.
-      - subst. simpl. blia.
-      - subst. simpl. blia.
-    Defined.
-
-    Fixpoint predict_with_prefix prefix t predict_rest :=
-      predict_with_prefix_body prefix t predict_rest predict_with_prefix.
-      
-    Lemma predict_with_prefix_works prefix predict_rest rest :
-      (forall H, predicts (fun t => predict_rest (prefix ++ t) t (H t)) rest) ->
-      predicts (fun t => predict_with_prefix prefix t (predict_rest t)) (prefix ++ rest).
-    Proof.
-      intros H. induction prefix.
-      - simpl in H. simpl. apply H.
-      - simpl. econstructor; [reflexivity|reflexivity|]. apply IHprefix. intros. apply H.
-    Qed.
-
-  Lemma predict_with_prefix_works_eq stuff prefix rest predict_rest :
-    stuff = prefix ++ rest ->
-    (forall H, predicts (fun t => predict_rest (prefix ++ t) t (H t)) rest) ->
-    predicts (fun t => predict_with_prefix prefix t (predict_rest t)) stuff.
-  Proof.
-    intros H. subst. apply predict_with_prefix_works.
-  Qed.
-
-  Lemma predict_with_prefix_works_end prefix predict_rest :
-    (forall H, predicts (fun t => predict_rest (prefix ++ t) t (H t)) []) ->
-    predicts (fun t => predict_with_prefix prefix t (predict_rest t)) prefix.
-  Proof.
-    intros H. eapply predict_with_prefix_works in H. rewrite app_nil_r in H. eassumption.
-  Qed.
-
-  Lemma predict_cons e f t1 t2 :
-    predicts f (t1 ++ e :: t2) ->
-    f t1 = Some (quot e).
-  Proof.
-    clear. intros H. generalize dependent f. induction t1.
-    - intros. simpl in H. inversion H. subst. assumption.
-    - intros. simpl in H. inversion H. subst. rewrite H4. apply IHt1. assumption.
-  Qed.
 End WithIOEvent. (*maybe extend this to the end?*)
                             
   Definition ExtSpec{width: Z}{BW: Bitwidth width}{word: word.word width}{mem: map.map word byte} :=
