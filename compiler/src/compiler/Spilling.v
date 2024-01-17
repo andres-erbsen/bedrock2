@@ -383,7 +383,7 @@ Notation qevent := Semantics.qevent. Search qevent.
 
   (* because idk how to do dependent tuple nicely *)
   Inductive bigtuple :=
-  | bt (sk_so_far : trace) (s : stmt) (k_so_far : trace) (fpval : word) (f : forall (k_so_far' sk_so_far' : trace), (length sk_so_far' <= length sk_so_far)%nat -> option qevent).
+  | bt (sk_so_far : trace) (s : stmt) (k_so_far : trace) (fpval : word) (f : forall (k_so_far' : trace) (sk_so_far'_diff : nat), option qevent).
   
   Definition project_tuple (tup : bigtuple) : nat * stmt :=
     match tup with
@@ -463,105 +463,18 @@ Notation qevent := Semantics.qevent. Search qevent.
   Check ({x:nat & 3 = 3}).
   Locate "{ : }".
 
-  
-  
+  Definition pop_n_elts (n : nat) (x : trace) : {t : trace & (length x - n = length t)%nat}.
+  Admitted.
+
+  (* is there a good alternative to my continuation style of writing this function?  it's convenient,
+     and it makes stating correctness theorems very easy.  But it seems to be a bit of the pain with
+     the termination proofs. *)
   Definition snext_stmt'_body
     {env: map.map String.string (list Z * list Z * stmt)}
-    (pf1 : forall (x : word) (x0 x1 : Z) (x2 : word) (x3 x4 : trace),
-        (Datatypes.length
-           (leak_load_iarg_reg x x1 ++ [leak_word x2] ++ leak_save_ires_reg x x0) +
-           Datatypes.length x3)%nat = Datatypes.length x4 ->
-        (Datatypes.length x3 <= Datatypes.length x4)%nat)
-    (pf2 : forall (x : word) (x0 x1 : Z) (x2 : word) (x3 x4 : trace),
-        (Datatypes.length
-           (leak_load_iarg_reg x x0 ++ leak_load_iarg_reg x x1 ++ [leak_word x2]) +
-           Datatypes.length x3)%nat = Datatypes.length x4 ->
-        (Datatypes.length x3 <= Datatypes.length x4)%nat)
-    (pf3 : forall (x : trace) (x0 : word) (x1 : list Z) (x2 : list word) 
-                  (x3 : list Z) (x4 : trace),
-        (Datatypes.length
-           (leak_set_reg_range_to_vars x0 x1 ++
-              [leak_list x2] ++ leak_set_vars_to_reg_range x0 x3) + 
-           Datatypes.length x)%nat = Datatypes.length x4 ->
-        (Datatypes.length x <= Datatypes.length x4)%nat)
-    (pf4 : forall (x : word) (x0 : Z) (x1 : word) (x2 : Z) (x3 x4 : trace),
-        (Datatypes.length
-           (leak_load_iarg_reg x x0 ++ [leak_word x1] ++ leak_save_ires_reg x x2) +
-           Datatypes.length x3)%nat = Datatypes.length x4 ->
-        (Datatypes.length x3 <= Datatypes.length x4)%nat)
-    (pf5 : forall (x : trace) (x0 : word) (x1 : Z) (x2 : list event) 
-                  (x3 x4 : trace) (x5 : stmt) (x6 : Z) (x7 : stmt) 
-                  (x8 : word),
-        x5 = SStackalloc x1 x6 x7 ->
-        x = consume_word x8 :: x2 ->
-        (Datatypes.length (leak_save_ires_reg x0 x1) + Datatypes.length x3)%nat =
-          Datatypes.length x2 ->
-        (Datatypes.length x4 <= Datatypes.length x3)%nat ->
-        (Datatypes.length x3 <= Datatypes.length x)%nat)
-    (pf6 : forall (x : word) (x0 : Z) (x1 x2 : trace),
-        (Datatypes.length (leak_save_ires_reg x x0) + Datatypes.length x1)%nat =
-          Datatypes.length x2 -> (Datatypes.length x1 <= Datatypes.length x2)%nat)
-    (pf7 : forall (x : word) (x0 : Z) (x1 : operand) (x2 : list event) 
-                  (x3 : Z) (x4 x5 : trace),
-        (Datatypes.length
-           (leak_load_iarg_reg x x0 ++
-              match x1 with
-              | Var z => leak_load_iarg_reg x z
-              | Const _ => []
-              end ++ x2 ++ leak_save_ires_reg x x3) + Datatypes.length x4)%nat =
-          Datatypes.length x5 -> (Datatypes.length x4 <= Datatypes.length x5)%nat)
-    (pf8 : forall (x : word) (x0 x1 : Z) (x2 x3 : trace),
-        (Datatypes.length (leak_load_iarg_reg x x0 ++ leak_save_ires_reg x x1) +
-           Datatypes.length x2)%nat = Datatypes.length x3 ->
-        (Datatypes.length x2 <= Datatypes.length x3)%nat)
-    (pf9 : forall (x : word) (x0 : bcond Z) (x1 : bool) (x2 x3 x4 : trace),
-        (Datatypes.length
-           (leak_prepare_bcond x x0 ++ leak_spill_bcond ++ [leak_bool x1]) +
-           Datatypes.length x2)%nat = Datatypes.length x3 ->
-        (Datatypes.length x4 <= Datatypes.length x2)%nat ->
-        (Datatypes.length x4 <= Datatypes.length x3)%nat)
-    (pf10 : forall x x0 : trace,
-        (Datatypes.length x <= Datatypes.length x0)%nat ->
-        forall (x2 : word) (x3 : bcond Z) (x4 : trace),
-          (Datatypes.length
-             (leak_prepare_bcond x2 x3 ++ leak_spill_bcond ++ [leak_bool true]) +
-             Datatypes.length x4)%nat = Datatypes.length x ->
-          forall x6 : trace,
-            (Datatypes.length x6 <= Datatypes.length x4)%nat ->
-            forall x8 : trace,
-              (Datatypes.length x8 <= Datatypes.length x6)%nat ->
-              (Datatypes.length x8 <= Datatypes.length x0)%nat)
-    (pf11 : forall x x0 : trace,
-        (Datatypes.length x <= Datatypes.length x0)%nat ->
-        forall (x2 : word) (x3 : bcond Z) (x4 : trace),
-          (Datatypes.length
-             (leak_prepare_bcond x2 x3 ++ leak_spill_bcond ++ [leak_bool false]) +
-             Datatypes.length x4)%nat = Datatypes.length x ->
-          (Datatypes.length x4 <= Datatypes.length x0)%nat)
-    (pf12 : forall x : trace, (Datatypes.length x <= Datatypes.length x)%nat)
-    (pf13 : forall (x : word) (x0 : list Z) (x1 x2 : trace),
-        (Datatypes.length (leak_set_reg_range_to_vars x x0 ++ [leak_unit]) +
-           Datatypes.length x1)%nat = Datatypes.length x2 ->
-        forall (x4 : word) (x5 : list Z) (x6 : trace) (x7 : list event),
-          (Datatypes.length (leak_set_vars_to_reg_range x4 x5) + Datatypes.length x6)%nat =
-            Datatypes.length x7 ->
-          forall x9 : trace,
-            (Datatypes.length x9 <= Datatypes.length x6)%nat ->
-            forall (x11 x12 : list Z) (x13 : trace),
-              (Datatypes.length
-                 (leak_set_reg_range_to_vars x4 x11 ++ leak_set_vars_to_reg_range x x12) +
-                 Datatypes.length x13)%nat = Datatypes.length x9 ->
-              x1 = consume_word x4 :: x7 ->
-              (Datatypes.length x13 <= Datatypes.length x2)%nat)
-    (pf14 : forall x x0 : trace,
-        (Datatypes.length x <= Datatypes.length x0)%nat ->
-        forall x2 : trace,
-          (Datatypes.length x2 <= Datatypes.length x)%nat ->
-          (Datatypes.length x2 <= Datatypes.length x0)%nat)
     (e: env) (next : trace -> option qevent)
     (tup : bigtuple)
     (snext_stmt' : forall othertuple, lt_tuple othertuple tup -> option qevent)
-        : option qevent.
+    : option qevent.
     refine (
        match tup as x return tup = x -> _ with
        | bt sk_so_far s k_so_far fpval f =>
@@ -573,8 +486,7 @@ Notation qevent := Semantics.qevent. Search qevent.
                                        predict_with_prefix
                                          (leak_load_iarg_reg fpval y ++ [leak_word a] ++ leak_save_ires_reg fpval x)
                                          sk_so_far
-                                         (fun sk_so_far' pf => f (k_so_far ++ [leak_word a]) sk_so_far'
-                                                                 (pf1 fpval x y a sk_so_far' sk_so_far pf))
+                                         (fun sk_so_far' pf => f (k_so_far ++ [leak_word a]) (length sk_so_far - length sk_so_far'))
                                    | _ => None
                                    end
              | SStore sz x y o => fun _ =>
@@ -583,8 +495,7 @@ Notation qevent := Semantics.qevent. Search qevent.
                                         predict_with_prefix
                                           (leak_load_iarg_reg fpval x ++ leak_load_iarg_reg fpval y ++ [leak_word a])
                                           sk_so_far
-                                          (fun sk_so_far' pf => f (k_so_far ++ [leak_word a]) sk_so_far'
-                                                                  (pf2 fpval x y a sk_so_far' sk_so_far pf))
+                                          (fun sk_so_far' pf => f (k_so_far ++ [leak_word a]) (length sk_so_far - length sk_so_far'))
                                     | _ => None
                                     end
              | SInlinetable _ x _ i => fun _ =>
@@ -593,8 +504,7 @@ Notation qevent := Semantics.qevent. Search qevent.
                                              predict_with_prefix
                                                (leak_load_iarg_reg fpval i ++ [leak_word i'] ++ leak_save_ires_reg fpval x)
                                                sk_so_far
-                                               (fun sk_so_far' pf => f (k_so_far ++ [leak_word i']) sk_so_far'
-                                                                       (pf4 fpval i i' x sk_so_far' sk_so_far pf))
+                                               (fun sk_so_far' pf => f (k_so_far ++ [leak_word i']) (length sk_so_far - length sk_so_far'))
                                          | _ => None
                                          end
              | SStackalloc x z body => fun pf00 =>
@@ -606,8 +516,7 @@ Notation qevent := Semantics.qevent. Search qevent.
                                                                                (fun sk_so_far'' pf02 =>
                                                                                   snext_stmt'
                                                                                     (bt sk_so_far'' body (k_so_far ++ [consume_word a]) fpval
-                                                                                       (fun k_so_far''' sk_so_far''' pf03 => f k_so_far''' sk_so_far''
-                                                                                                                               (pf5 sk_so_far fpval x sk_so_far' sk_so_far'' sk_so_far''' s z body a pf00 pf01 pf02 pf03))) _)
+                                                                                       (fun k_so_far''' sk_so_far''' => f k_so_far''' (sk_so_far''' + length sk_so_far - length sk_so_far''))) _)
                                          | nil => fun _ => Some qconsume
                                          | _ => fun _ => None
                                          end (eq_refl sk_so_far)
@@ -615,8 +524,7 @@ Notation qevent := Semantics.qevent. Search qevent.
                              predict_with_prefix
                                (leak_save_ires_reg fpval x)
                                sk_so_far
-                               (fun sk_so_far' pf => f k_so_far sk_so_far'
-                                                       (pf6 fpval x sk_so_far' sk_so_far pf))
+                               (fun sk_so_far' pf => f k_so_far (length sk_so_far - length sk_so_far'))
              | SOp x op y oz => fun _ =>
                                   let newt :=
                                     match op with
@@ -651,16 +559,14 @@ Notation qevent := Semantics.qevent. Search qevent.
                                            ++ newt
                                            ++ leak_save_ires_reg fpval x)
                                         sk_so_far
-                                        (fun sk_so_far' pf => f (k_so_far ++ newt) sk_so_far'
-                                                                (pf7 fpval y oz newt x sk_so_far' sk_so_far pf))
+                                        (fun sk_so_far' pf => f (k_so_far ++ newt) (length sk_so_far - length sk_so_far'))
                                   | None => None
                                   end
              | SSet x y => fun _ =>
                              predict_with_prefix
                                (leak_load_iarg_reg fpval y ++ leak_save_ires_reg fpval x)
                                sk_so_far
-                               (fun sk_so_far' pf => f k_so_far sk_so_far'
-                                                       (pf8 fpval y x sk_so_far' sk_so_far pf))
+                               (fun sk_so_far' pf => f k_so_far (length sk_so_far - length sk_so_far'))
              | SIf c thn els => fun _ =>
                                   match next k_so_far with
                                   | Some (qleak_bool b) =>
@@ -670,14 +576,14 @@ Notation qevent := Semantics.qevent. Search qevent.
                                         (fun sk_so_far' pf00 =>
                                            snext_stmt'
                                              (bt sk_so_far' (if b then thn else els) (k_so_far ++ [leak_bool b]) fpval
-                                                (fun k_so_far'' sk_so_far'' pf01 => f k_so_far'' sk_so_far''
-                                                                                      (pf9 fpval c b sk_so_far' sk_so_far sk_so_far'' pf00 pf01))) _)
+                                                (fun k_so_far'' sk_so_far'' => f k_so_far'' (sk_so_far'' + length sk_so_far' - length sk_so_far))) _)
                                   | _ => None
                                   end
              | SLoop s1 c s2 => fun _ =>
                                   snext_stmt'
                                     (bt sk_so_far s1 k_so_far fpval
-                                       (fun k_so_far' sk_so_far' pf00 =>
+                                       (fun k_so_far' sk_so_far'_len =>
+                                          let (sk_so_far', _) := pop_n_elts sk_so_far'_len sk_so_far in
                                           match next k_so_far' with
                                           | Some (qleak_bool true) =>
                                               predict_with_prefix
@@ -686,24 +592,26 @@ Notation qevent := Semantics.qevent. Search qevent.
                                                 (fun sk_so_far'' pf01 =>
                                                    snext_stmt'
                                                      (bt sk_so_far'' s2 (k_so_far' ++ [leak_bool true]) fpval
-                                                        (fun k_so_far'' sk_so_far''' pf02 =>
+                                                        (fun k_so_far'' sk_so_far'''_len =>
+                                                           let (sk_so_far''', _) := pop_n_elts sk_so_far'''_len sk_so_far'' in
                                                            snext_stmt'
                                                              (bt sk_so_far''' s k_so_far'' fpval
-                                                                (fun k_so_far''' sk_so_far'''' pf03 => f k_so_far''' sk_so_far'''' (pf10 sk_so_far' sk_so_far pf00 fpval c sk_so_far'' pf01 sk_so_far''' pf02 sk_so_far'''' pf03))) _)) _)
+                                                                (fun k_so_far''' sk_so_far''''_len => f k_so_far''' (sk_so_far''''_len + sk_so_far'''_len + (length sk_so_far - length sk_so_far'')))) _)) _)
                                           | Some (qleak_bool false) =>
                                               predict_with_prefix
                                                 (leak_prepare_bcond fpval c ++ leak_spill_bcond ++ [leak_bool false])
                                                 sk_so_far'
-                                                (fun sk_so_far'' pf01 => f (k_so_far' ++ [leak_bool false]) sk_so_far'' (pf11 sk_so_far' sk_so_far pf00 fpval c sk_so_far'' pf01))
+                                                (fun sk_so_far'' pf01 => f (k_so_far' ++ [leak_bool false]) (length sk_so_far - length sk_so_far'') )
                                           | _ => None
                                           end)) _
              | SSeq s1 s2 => fun _ =>
                                snext_stmt'
                                  (bt sk_so_far s1 k_so_far fpval
-                                    (fun k_so_far' sk_so_far' pf00 =>
+                                    (fun k_so_far' sk_so_far'_len =>
+                                       let (sk_so_far', _) := pop_n_elts sk_so_far'_len sk_so_far in
                                        snext_stmt'
-                                         (bt sk_so_far' s2 k_so_far' fpval (fun k_so_far'' sk_so_far'' pf01 => f k_so_far'' sk_so_far'' (pf14 sk_so_far' sk_so_far pf00 sk_so_far'' pf01))) _)) _
-             | SSkip => fun _ => f k_so_far sk_so_far (pf12 sk_so_far)
+                                         (bt sk_so_far' s2 k_so_far' fpval (fun k_so_far'' sk_so_far''_len => f k_so_far'' (sk_so_far''_len + sk_so_far'_len))) _)) _
+             | SSkip => fun _ => f k_so_far 0
              | SCall resvars fname argvars => fun _ =>
                                                 match @map.get _ _ env e fname with
                                                 | Some (params, rets, fbody) =>
@@ -719,12 +627,12 @@ Notation qevent := Semantics.qevent. Search qevent.
                                                                                                      (fun sk_so_far''' pf01 =>
                                                                                                         snext_stmt'
                                                                                                           (bt sk_so_far''' fbody (k_so_far ++ [leak_unit]) fpval'
-                                                                                                             (fun k_so_far' sk_so_far'''' pf02 =>
+                                                                                                             (fun k_so_far' sk_so_far''''_len =>
+                                                                                                                let (sk_so_far'''', _) := pop_n_elts sk_so_far''''_len sk_so_far''' in
                                                                                                                 predict_with_prefix
                                                                                                                   (leak_set_reg_range_to_vars fpval' rets ++ leak_set_vars_to_reg_range fpval resvars)
                                                                                                                   sk_so_far''''
-                                                                                                                  (fun sk_so_far''''' pf03 => f k_so_far' sk_so_far'''''
-                                                                                                                                                (pf13 fpval argvars sk_so_far' sk_so_far pf00 fpval' params sk_so_far''' sk_so_far'' pf01 sk_so_far'''' pf02 rets resvars sk_so_far''''' pf03 pf04)))) _) 
+                                                                                                                  (fun sk_so_far''''' pf03 => f k_so_far' (length sk_so_far - length sk_so_far''''')))) _) 
                                                          | nil => fun _ => Some qconsume
                                                          | _ => fun _ => None
                                                          end (eq_refl _))
@@ -736,11 +644,11 @@ Notation qevent := Semantics.qevent. Search qevent.
                                                     predict_with_prefix
                                                       (leak_set_reg_range_to_vars fpval argvars ++ [leak_list l] ++ leak_set_vars_to_reg_range fpval resvars)
                                                       sk_so_far
-                                                      (fun sk_so_far' pf => f (k_so_far ++ [leak_list l]) sk_so_far' (pf3 sk_so_far' fpval argvars l resvars sk_so_far pf))
+                                                      (fun sk_so_far' pf => f (k_so_far ++ [leak_list l]) (length sk_so_far - length sk_so_far'))
                                                 | _ => None
                                                 end
              end (eq_refl _)
-       end (eq_refl _)).
+       end (eq_refl _))%nat.
     Proof.
       Unshelve.
       all: intros.
@@ -757,92 +665,19 @@ Notation qevent := Semantics.qevent. Search qevent.
 
     Compute (ltac:(let T := match type of @snext_stmt'_body with | ?X -> _ => X end in exact T)).
 
-    Lemma pf1 {env: map.map String.string (list Z * list Z * stmt)} : 
-      ltac:(let T := match type of snext_stmt'_body with
-                     | ?X -> _ => X
-                     end in exact T).
-    Proof. blia. Qed.
-    Lemma pf2 {env: map.map String.string (list Z * list Z * stmt)} : 
-      ltac:(let T := match type of (snext_stmt'_body pf1) with
-                     | ?X -> _ => X
-                     end in exact T).
-    Proof. blia. Qed.
-    Lemma pf3 {env: map.map String.string (list Z * list Z * stmt)} : 
-      ltac:(let T := match type of (snext_stmt'_body pf1 pf2) with
-                     | ?X -> _ => X
-                     end in exact T).
-    Proof. blia. Qed.
-    Lemma pf4 {env: map.map String.string (list Z * list Z * stmt)} : 
-      ltac:(let T := match type of (snext_stmt'_body pf1 pf2 pf3) with
-                     | ?X -> _ => X
-                     end in exact T).
-    Proof. blia. Qed.
-    Lemma pf5 {env: map.map String.string (list Z * list Z * stmt)} : 
-      ltac:(let T := match type of (snext_stmt'_body pf1 pf2 pf3 pf4) with
-                     | ?X -> _ => X
-                     end in exact T).
-    Proof. intros. subst. simpl in *. blia. Qed.
-    Lemma pf6 {env: map.map String.string (list Z * list Z * stmt)} : 
-      ltac:(let T := match type of (snext_stmt'_body pf1 pf2 pf3 pf4 pf5) with
-                     | ?X -> _ => X
-                     end in exact T).
-    Proof. intros. subst. simpl in *. blia. Qed.
-    Lemma pf7 {env: map.map String.string (list Z * list Z * stmt)} : 
-      ltac:(let T := match type of (snext_stmt'_body pf1 pf2 pf3 pf4 pf5 pf6) with
-                     | ?X -> _ => X
-                     end in exact T).
-    Proof. intros. subst. simpl in *. blia. Qed.
-    Lemma pf8 {env: map.map String.string (list Z * list Z * stmt)} : 
-      ltac:(let T := match type of (snext_stmt'_body pf1 pf2 pf3 pf4 pf5 pf6 pf7) with
-                     | ?X -> _ => X
-                     end in exact T).
-    Proof. intros. subst. simpl in *. blia. Qed.
-    Lemma pf9 {env: map.map String.string (list Z * list Z * stmt)} : 
-      ltac:(let T := match type of (snext_stmt'_body pf1 pf2 pf3 pf4 pf5 pf6 pf7 pf8) with
-                     | ?X -> _ => X
-                     end in exact T).
-    Proof. intros. subst. simpl in *. blia. Qed.
-    Lemma pf10 {env: map.map String.string (list Z * list Z * stmt)} : 
-      ltac:(let T := match type of (snext_stmt'_body pf1 pf2 pf3 pf4 pf5 pf6 pf7 pf8 pf9) with
-                     | ?X -> _ => X
-                     end in exact T).
-    Proof. intros. subst. simpl in *. blia. Qed.
-    Lemma pf11 {env: map.map String.string (list Z * list Z * stmt)} : 
-      ltac:(let T := match type of (snext_stmt'_body pf1 pf2 pf3 pf4 pf5 pf6 pf7 pf8 pf9 pf10) with
-                     | ?X -> _ => X
-                     end in exact T).
-    Proof. intros. subst. simpl in *. blia. Qed.
-    Lemma pf12 {env: map.map String.string (list Z * list Z * stmt)} : 
-      ltac:(let T := match type of (snext_stmt'_body pf1 pf2 pf3 pf4 pf5 pf6 pf7 pf8 pf9 pf10 pf11) with
-                     | ?X -> _ => X
-                     end in exact T).
-    Proof. intros. subst. simpl in *. blia. Qed.
-    Lemma pf13 {env: map.map String.string (list Z * list Z * stmt)} : 
-      ltac:(let T := match type of (snext_stmt'_body pf1 pf2 pf3 pf4 pf5 pf6 pf7 pf8 pf9 pf10 pf11 pf12) with
-                     | ?X -> _ => X
-                     end in exact T).
-    Proof. intros. subst. simpl in *. blia. Qed.
-    Lemma pf14 {env: map.map String.string (list Z * list Z * stmt)} : 
-      ltac:(let T := match type of (snext_stmt'_body pf1 pf2 pf3 pf4 pf5 pf6 pf7 pf8 pf9 pf10 pf11 pf12 pf13) with
-                     | ?X -> _ => X
-                     end in exact T).
-    Proof. intros. subst. simpl in *. blia. Qed.
-
-    Definition snext_stmt'_body_with_proofs {env: map.map String.string (list Z * list Z * stmt)}
-      := snext_stmt'_body pf1 pf2 pf3 pf4 pf5 pf6 pf7 pf8 pf9 pf10 pf11 pf12 pf13 pf14.
-    
     Definition snext_stmt'
       {env: map.map String.string (list Z * list Z * stmt)} e next
-      := my_Fix _ _ lt_tuple_wf _ (snext_stmt'_body_with_proofs e next).
+      := my_Fix _ _ lt_tuple_wf _ (snext_stmt'_body e next).
 
     Check snext_stmt'.
     (*Compute (snext_stmt' map.empty (fun _ => None) (bt [] SSkip [] (word.of_Z 0) (fun _ _ _ => None))).*)
 
     Definition Equiv (x y : bigtuple) :=
-      exists z1 z2 z3 z4 fz fz',
-        x = bt z1 z2 z3 z4 fz /\ y = bt z1 z2 z3 z4 fz' /\
-          forall a1 a2 a3,
-            fz a1 a2 a3 = fz' a1 a2 a3.
+      let (x1, x2, x3, x4, fx) := x in
+      let (y1, y2, y3, y4, fy) := y in
+      (x1, x2, x3, x4) = (y1, y2, y3, y4) /\
+        forall a1 a2,
+          fx a1 a2 = fy a1 a2.
 
     (*from https://github.com/coq/coq/issues/9039*)
     Notation "'subst!' y 'for' x 'in' f" := (match y with x => f end) (at level 10, f at level 200).
@@ -856,43 +691,30 @@ Notation qevent := Semantics.qevent. Search qevent.
 
     Lemma snext_stmt'_step {env: map.map String.string (list Z * list Z * stmt)} e next bigtuple : ltac:(
                                      let t := eval cbv beta delta [snext_stmt'_body] in
-                                     (snext_stmt' e next bigtuple = snext_stmt'_body_with_proofs e next bigtuple (fun y _ => snext_stmt' e next y))
+                                     (snext_stmt' e next bigtuple = snext_stmt'_body e next bigtuple (fun y _ => snext_stmt' e next y))
                                        in exact t).
     Proof.
-      cbv [snext_stmt']. Check Fix_eq. Search Fix. rewrite my_Fix_eq with (E:=Equiv) (x1:=bigtuple) (x2:=bigtuple) (F:=snext_stmt'_body_with_proofs e next).
+      cbv [snext_stmt']. Check Fix_eq. Search Fix. rewrite my_Fix_eq with (E:=Equiv) (x1:=bigtuple) (x2:=bigtuple) (F:=snext_stmt'_body e next).
       1: reflexivity.
-      { intros. cbv [snext_stmt'_body_with_proofs snext_stmt'_body]. cbv beta.
-        cbv [Equiv] in H. destruct H as (z1&z2&z3&z4&fz&fz'&H1&H2&H3). subst.
+      { intros. cbv [snext_stmt'_body]. cbv beta. Print bigtuple.
+        destruct x1 as [ sk_so_far_1 s_1 k_so_far_1 fpval_1 f_1 ].
+        destruct x2 as [ sk_so_far_2 s_2 k_so_far_2 fpval_2 f_2 ].
+        cbv [Equiv] in H. destruct H as [H1 H2]. injection H1. intros. subst. clear H1.
         repeat (Tactics.destruct_one_match; try reflexivity || apply predict_with_prefix_ext || apply H3 || intros || apply H0 || cbv [Equiv]; intuition).
         all: try apply H0.
-        { cbv [Equiv]. do 6 eexists. split; [reflexivity|]. split; [f_equal|].
-          1: reflexivity. intros. apply H3. }
-        { cbv [Equiv]. do 6 eexists. split; [reflexivity|]. split; [f_equal|].
-          1: reflexivity. intros. apply H3. }
-        { cbv [Equiv]. do 6 eexists. split; [reflexivity|]. split; [f_equal|].
-          1: reflexivity. intros. apply H3. }
-        { cbv [Equiv]. do 6 eexists. split; [reflexivity|]. split; [f_equal|].
-          1: reflexivity. intros. simpl.
-          repeat (Tactics.destruct_one_match; try reflexivity).
-          { apply predict_with_prefix_ext. intros. apply H0.
-            cbv [Equiv]. do 6 eexists. split; [reflexivity|]. split; [f_equal|].
-            1: reflexivity. intros. simpl. apply H0.
-            cbv [Equiv]. do 6 eexists. split; [reflexivity|]. split; [f_equal|].
-            1: reflexivity. intros. simpl. apply H3. }
-          { apply predict_with_prefix_ext. intros. apply H3. } }
-        { cbv [Equiv]. do 6 eexists. split; [reflexivity|]. split; [f_equal|].
-          1: reflexivity. intros. simpl. apply H0.
-          cbv [Equiv]. do 6 eexists. split; [reflexivity|]. split; [f_equal|].
-          1: reflexivity. intros. apply H3. }
-        { cbv [Equiv]. do 6 eexists. split; [reflexivity|]. split; [f_equal|].
-          1: reflexivity. intros.
-          apply predict_with_prefix_ext. intros. apply H3. } }
-      { cbv [Equiv]. destruct bigtuple as [z1 z2 z3 z4 fz].
-        exists z1, z2, z3, z4, fz, fz. auto. }
+        all: cbv [Equiv]; intuition.
+        all: repeat (Tactics.destruct_one_match; try reflexivity).
+        all: try apply predict_with_prefix_ext; intros.
+        all: try apply H0.
+        all: cbv [Equiv]; intuition.
+        all: repeat (Tactics.destruct_one_match; try reflexivity).
+        all: try apply H0.
+        all: cbv [Equiv]; intuition. }
+      { cbv [Equiv]. destruct bigtuple as [z1 z2 z3 z4 fz]. auto. }
     Qed.
     
   Definition snext_stmt {env : map.map string (list Z * list Z * stmt)} e next fpval s sk_so_far :=
-    snext_stmt' e next (bt [] s sk_so_far fpval (fun _ _ _ => Some qend)).
+    snext_stmt' e next (bt [] s sk_so_far fpval (fun _ _ => Some qend)).
    
   Fixpoint spill_stmt(s: stmt): stmt :=
     match s with
