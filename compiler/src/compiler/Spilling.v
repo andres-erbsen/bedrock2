@@ -183,15 +183,6 @@ Section Spilling.
   (* *)
   Notation event := Semantics.event.
   Notation io_trace := Semantics.io_trace.
-  
-  Fixpoint pop_elts (start : trace) (t : trace) : event(*first elt of start not exhausted*) + trace(*remaining part of trace after start exhausted*) :=
-    match start, t with
-    | _ :: start', _ :: t' => pop_elts start' t'
-    | e :: start', nil => inl e
-    | nil, _ => inr t
-    end.
-
-  Check Fix.
 
   Require Import Coq.Init.Wf Relation_Operators Wellfounded PeanoNat Lia.
   
@@ -255,77 +246,6 @@ Notation qevent := Semantics.qevent. Search qevent.
   
   Require Import Coq.Wellfounded.Lexicographic_Product.
   Require Import Relation_Operators.
-
-  
-  Definition predictor_of_end (prefix : trace) (t : trace) : option qevent :=
-    match pop_elts prefix t with
-    | inl e => Some (quot e)
-    | inr t' => Some qend
-    end.
-
-    
-
-  (*Inductive subexpression : stmt -> stmt -> Prop :=
-  | SStackalloc_subexp : forall x1 x2 s, subexpression s (SStackalloc x1 x2 s).
-
-  Lemma wf_subexpression : well_founded subexpression.
-  Proof.
-    cbv [well_founded]. intros a. induction a.
-    all: try solve [constructor; intros ? H; inversion H].
-    constructor. intros y H. inversion H. subst. assumption.
-  Defined.      
-
-  Definition stmt_lt :=
-    clos_trans _ subexpression.
-
-  Lemma wf_stmt_lt : well_founded stmt_lt.
-  Proof.
-    cbv [stmt_lt]. Search (well_founded (clos_trans _ _)).
-    apply Transitive_Closure.wf_clos_trans.
-    apply wf_subexpression.
-  Defined. Check ltof.
-
-  Definition list_lt : list nat -> list nat -> Prop := ltof _ (@length _).
-  
-  Lemma wf_list_lt : well_founded list_lt.
-  Proof.
-    cbv [list_lt]. Search well_founded. apply well_founded_ltof.
-  Defined.
-  
-  Definition lt_tuple := slexprod _ _ list_lt stmt_lt.
-
-  Lemma lt_tuple_wf : well_founded lt_tuple.
-  Proof.
-    apply wf_slexprod.
-    - apply wf_list_lt.
-    - apply wf_stmt_lt.
-  Defined.
-  
-  Program Fixpoint make_stmt_or_list_smaller (l : list nat) (s : stmt) {measure (l, s) lt_tuple} :=
-    match s with
-    | SStackalloc _ _ body =>
-        make_stmt_or_list_smaller l body
-    | _ =>
-        match l with
-        | _ :: l' => make_stmt_or_list_smaller l' s
-        | _ => 5
-        end
-    end.
-
-  Next Obligation.
-    right. cbv [stmt_lt]. apply t_step. constructor.
-  Defined.
-  Next Obligation.
-    left. cbv [list_lt ltof]. simpl. blia.
-  Defined.
-  Next Obligation.
-    apply Wf.measure_wf. apply lt_tuple_wf.
-  Defined.
-
-  Compute (make_stmt_or_list_smaller [] SSkip).
-
-  Print make_stmt_or_list_smaller_func.
-  Check @make_stmt_or_list_smaller.*)
 
   Lemma predict_with_prefix_ext x1 x2 f1 f2  :
     (forall y1 y2, f1 y1 y2 = f2 y1 y2) ->
@@ -404,8 +324,6 @@ Notation qevent := Semantics.qevent. Search qevent.
     cbv [lt_tuple]. apply wf_inverse_image. apply lt_tuple'_wf.
   Defined.
   
-
-  
   Section FixPoint.
     Variable A : Type.
     Variable R : A -> A -> Prop.
@@ -463,8 +381,25 @@ Notation qevent := Semantics.qevent. Search qevent.
   Check ({x:nat & 3 = 3}).
   Locate "{ : }".
 
-  Definition pop_n_elts (n : nat) (x : trace) : {t : trace & (length x - n = length t)%nat}.
-  Admitted.
+  Fixpoint pop_elts (n : nat) (x : trace) : trace :=
+    match n, x with
+    | S n', _ :: x' => pop_elts n' x'
+    | _, _ => x
+    end.
+  
+  Lemma pop_elts_len n x : (length (pop_elts n x) = length x - n)%nat.
+  Proof.
+    revert n. induction x; intros.
+    - simpl. destruct n; reflexivity.
+    - simpl. destruct n; try reflexivity. cbn [pop_elts]. apply IHx.
+  Qed.
+  
+  Lemma pop_elts_correct t1 t2 : pop_elts (length t1) (t1 ++ t2) = t2.
+  Proof.
+    induction t1.
+    - reflexivity.
+    - simpl. assumption.
+  Qed.
 
   (* is there a good alternative to my continuation style of writing this function?  it's convenient,
      and it makes stating correctness theorems very easy.  But it seems to be a bit of the pain with
@@ -576,14 +511,14 @@ Notation qevent := Semantics.qevent. Search qevent.
                                         (fun sk_so_far' pf00 =>
                                            snext_stmt'
                                              (bt sk_so_far' (if b then thn else els) (k_so_far ++ [leak_bool b]) fpval
-                                                (fun k_so_far'' sk_so_far'' => f k_so_far'' (sk_so_far'' + length sk_so_far' - length sk_so_far))) _)
+                                                (fun k_so_far'' sk_so_far''_diff => f k_so_far'' (sk_so_far''_diff + length sk_so_far - length sk_so_far'))) _)
                                   | _ => None
                                   end
              | SLoop s1 c s2 => fun _ =>
                                   snext_stmt'
                                     (bt sk_so_far s1 k_so_far fpval
                                        (fun k_so_far' sk_so_far'_len =>
-                                          let (sk_so_far', _) := pop_n_elts sk_so_far'_len sk_so_far in
+                                          let sk_so_far':= pop_elts sk_so_far'_len sk_so_far in
                                           match next k_so_far' with
                                           | Some (qleak_bool true) =>
                                               predict_with_prefix
@@ -593,7 +528,7 @@ Notation qevent := Semantics.qevent. Search qevent.
                                                    snext_stmt'
                                                      (bt sk_so_far'' s2 (k_so_far' ++ [leak_bool true]) fpval
                                                         (fun k_so_far'' sk_so_far'''_len =>
-                                                           let (sk_so_far''', _) := pop_n_elts sk_so_far'''_len sk_so_far'' in
+                                                           let sk_so_far''':= pop_elts sk_so_far'''_len sk_so_far'' in
                                                            snext_stmt'
                                                              (bt sk_so_far''' s k_so_far'' fpval
                                                                 (fun k_so_far''' sk_so_far''''_len => f k_so_far''' (sk_so_far''''_len + sk_so_far'''_len + (length sk_so_far - length sk_so_far'')))) _)) _)
@@ -608,7 +543,7 @@ Notation qevent := Semantics.qevent. Search qevent.
                                snext_stmt'
                                  (bt sk_so_far s1 k_so_far fpval
                                     (fun k_so_far' sk_so_far'_len =>
-                                       let (sk_so_far', _) := pop_n_elts sk_so_far'_len sk_so_far in
+                                       let sk_so_far' := pop_elts sk_so_far'_len sk_so_far in
                                        snext_stmt'
                                          (bt sk_so_far' s2 k_so_far' fpval (fun k_so_far'' sk_so_far''_len => f k_so_far'' (sk_so_far''_len + sk_so_far'_len))) _)) _
              | SSkip => fun _ => f k_so_far 0
@@ -628,7 +563,7 @@ Notation qevent := Semantics.qevent. Search qevent.
                                                                                                         snext_stmt'
                                                                                                           (bt sk_so_far''' fbody (k_so_far ++ [leak_unit]) fpval'
                                                                                                              (fun k_so_far' sk_so_far''''_len =>
-                                                                                                                let (sk_so_far'''', _) := pop_n_elts sk_so_far''''_len sk_so_far''' in
+                                                                                                                let sk_so_far'''' := pop_elts sk_so_far''''_len sk_so_far''' in
                                                                                                                 predict_with_prefix
                                                                                                                   (leak_set_reg_range_to_vars fpval' rets ++ leak_set_vars_to_reg_range fpval resvars)
                                                                                                                   sk_so_far''''
@@ -655,10 +590,14 @@ Notation qevent := Semantics.qevent. Search qevent.
       all: cbv [lt_tuple project_tuple].
       all: subst.
       all: repeat rewrite app_length in *; cbn [length] in *.
+      all: repeat match goal with
+             | t := pop_elts ?n ?x |- _ =>
+                      let H := fresh "H" in
+                      assert (H := pop_elts_len n x); subst t end.
       all: try blia.
       all: try (left; simpl; blia).
       all: try (right; constructor; constructor). 
-      destruct (Datatypes.length sk_so_far' =? Datatypes.length sk_so_far)%nat eqn:E.
+      destruct (Datatypes.length (pop_elts sk_so_far'_len sk_so_far) =? Datatypes.length sk_so_far)%nat eqn:E.
       + apply Nat.eqb_eq in E. rewrite E. right. constructor. constructor.
       + apply Nat.eqb_neq in E. left. blia.
     Defined.
@@ -889,9 +828,11 @@ Notation qevent := Semantics.qevent. Search qevent.
         predict_with_prefix
           (leak_set_vars_to_reg_range fpval argnames)
           sk_so_far'
-          (fun sk_so_far'' pf => snext_stmt' e next (bt sk_so_far'' body k_so_far fpval
-                                     (fun k_so_far' sk_so_far''' pf =>
-                                        predict_with_prefix
+          (fun sk_so_far'' pf => snext_stmt' e next
+                                   (bt sk_so_far'' body k_so_far fpval
+                                      (fun k_so_far' sk_so_far'''_diff =>
+                                         let sk_so_far''' := pop_elts sk_so_far'''_diff sk_so_far'' in
+                                         predict_with_prefix
                                           (leak_set_reg_range_to_vars fpval resnames)
                                           sk_so_far'''
                                           (fun sk_so_far'''' pf => match sk_so_far'''' with |nil => Some qend |_ => None end))))
@@ -1783,7 +1724,7 @@ Notation qevent := Semantics.qevent. Search qevent.
       unfold a0, a7 in H.
       blia.
   Qed.
-  Check snext_stmt'. Print bigtuple. Check predict_with_prefix_works.
+  Check snext_stmt'. Print bt. Check predict_with_prefix_works.
   Definition spilling_correct_for(e1 e2 : env)(s1 : stmt) : Prop :=
     forall (k1 : Semantics.trace) (t1 : Semantics.io_trace) (m1 : mem) (l1 : locals) (mc1 : MetricLog)
            (post : Semantics.trace -> Semantics.io_trace -> mem -> locals -> MetricLog -> Prop),
@@ -1801,7 +1742,7 @@ Notation qevent := Semantics.qevent. Search qevent.
                    k2' = k2'' ++ k2 /\
                    forall next k10 k1''' k2''' f,
                      predicts next (k10 ++ rev k1'' ++ k1''') ->
-                     (forall H, predicts (fun k => f (rev k2'' ++ k) (k10 ++ rev k1'') k (H k)) k2''') ->
+                     predicts (fun k => f (rev k2'' ++ k) (k10 ++ rev k1'') (length (rev k2''))) k2''' ->
                      predicts (fun k => snext_stmt' e1 next (bt k s1 k10 fpval (f k))) (rev k2'' ++ k2''')).
 
   Definition call_spec(e: env) '(argnames, retnames, fbody)
@@ -1843,7 +1784,7 @@ Notation qevent := Semantics.qevent. Search qevent.
 
   Lemma app_one_cons {A} (x : A) (l : list A) :
     x :: l = [x] ++ l.
-  Proof. reflexivity. Qed.
+  Proof. reflexivity. Qed. Print snext_fun.
   
   Lemma spill_fun_correct_aux: forall e1 e2 argnames1 retnames1 body1 argnames2 retnames2 body2,
       spill_fun (argnames1, retnames1, body1) = Success (argnames2, retnames2, body2) ->
@@ -2003,7 +1944,9 @@ Notation qevent := Semantics.qevent. Search qevent.
       apply predict_with_prefix_works. intros.
       eapply CT.
       { simpl. instantiate (1 := nil). rewrite app_nil_r. assumption. }
-      { intros. apply predict_with_prefix_works_end. constructor. reflexivity. } }
+      { eapply Semantics.predicts_ext; cycle 1.
+        { intros. rewrite pop_elts_correct. reflexivity. }
+        apply predict_with_prefix_works_end. constructor. reflexivity. } }
      Unshelve.
     all: try assumption.
   Qed.
@@ -2032,7 +1975,7 @@ Notation qevent := Semantics.qevent. Search qevent.
                    k2' = k2'' ++ k2 /\
                    forall next k10 k1''' k2''' f,
                      predicts next (k10 ++ rev k1'' ++ k1''') ->
-                     (forall H, predicts (fun k => f (rev k2'' ++ k) (k10 ++ rev k1'') k (H k)) k2''') ->
+                     predicts (fun k => f (rev k2'' ++ k) (k10 ++ rev k1'') (length (rev k2''))) k2''' ->
                      predicts (fun k => snext_stmt' e1 next (bt k s1 k10 fpval (f k))) (rev k2'' ++ k2''')).
   Proof.
     intros e1 e2 Ev. intros s1 k1 t1 m1 l1 mc1 post.
@@ -2100,7 +2043,10 @@ Notation qevent := Semantics.qevent. Search qevent.
           2: { intros k0. symmetry. rewrite snext_stmt'_step.
                simpl. reflexivity. }
           apply Semantics.predict_cons in H5. rewrite H5. simpl.
-          apply predict_with_prefix_works. intros. apply H6.
+          apply predict_with_prefix_works. intros.
+          eapply Semantics.predicts_ext. 1: eapply H6.
+          intros. simpl. f_equal.
+          repeat (rewrite app_length || cbn [app length]). blia.
           (*end ct stuff for interact*)
         }
         (* related for set_vars_to_reg_range_correct: *)
@@ -2341,25 +2287,18 @@ Notation qevent := Semantics.qevent. Search qevent.
         { repeat rewrite <- app_assoc. simpl. reflexivity. }
         intros. eapply CT.
         { repeat rewrite <- app_assoc. simpl. eassumption. }
-        { intros. eapply Semantics.predict_with_prefix_works_eq.
+        { intros. eapply Semantics.predicts_ext.
+          2: { intros. rewrite pop_elts_correct. reflexivity. }
+          eapply Semantics.predict_with_prefix_works_eq.
           { rewrite <- app_assoc. reflexivity. }
           intros. simpl. repeat rewrite <- app_assoc.
           eapply Semantics.predicts_ext. 1: apply H8.
-          intros. simpl. repeat rewrite <- app_assoc.
-          remember (pf13 _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _) as garbage. Search f. Print Equiv.
-          dependent rewrite app_assoc. 
-j          clear Heqgarbage. clear H9 H10 H11. Check f_equal2.
-          instantiate (1 := 
-          assert (forall f x1 x2 y1 y2, x1 = x2 -> y1 = y2 -> f x1 y1 = f x2 y2). apply f_equal2. rewrite <- (app_assoc _ [leak_unit]). Check f_equal.
-          remember (eq_ind_r _ _ _) as ick eqn:clearMe1. remember (ick _) as ick' eqn:clearMe2.
-          clear clearMe1 clearMe2 ick.
-          rewrite <- (List.app_assoc _ [leak_unit]).
-          reflexivity.
-          2: rewrite <- app_assoc in H8. apply H8. }
-          { blia. }
+          intros. simpl. f_equal.
+          { repeat rewrite <- app_assoc. simpl. repeat rewrite <- app_assoc. reflexivity. }
+          { repeat (rewrite app_length || cbn [length app]). blia. }
         (* end ct stuff for call*)
       } }
-
+                 
     - (* exec.load *)
       eapply exec.seq_cps.
       eapply load_iarg_reg_correct; (blia || eassumption || idtac).
@@ -2383,12 +2322,17 @@ j          clear Heqgarbage. clear H9 H10 H11. Check f_equal2.
         split.
         { subst k2'0. subst k2'. rewrite app_one_cons. repeat rewrite app_assoc.
           reflexivity. }
-        intros. exists (S O). intros.
-        repeat (rewrite rev_app_distr || rewrite rev_involutive || cbn [rev List.app]).
-        destruct fuel' as [|fuel']; [blia|]. simpl. 
+        intros. 
+        repeat (rewrite rev_app_distr in * ||
+                                           rewrite rev_involutive in * ||
+                                                                       cbn [rev List.app] in *).
+        eapply Semantics.predicts_ext.
+        2: { intros. symmetry. rewrite snext_stmt'_step. reflexivity. }
         simpl in H3. apply Semantics.predict_cons in H3. rewrite H3. simpl.
-        apply predict_with_prefix_works. assumption.
-    (*end ct stuff for load*)
+        apply predict_with_prefix_works. intros _. eapply Semantics.predicts_ext.
+        1: eapply H4. intros. simpl. f_equal.
+        repeat (rewrite app_length || cbn [app length]). blia.
+        (*end ct stuff for load*)
         
     - (* exec.store *)
       eapply exec.seq_cps. eapply load_iarg_reg_correct; (blia || eassumption || idtac).
@@ -2416,15 +2360,20 @@ j          clear Heqgarbage. clear H9 H10 H11. Check f_equal2.
         all: ecancel_assumption. }
       (*begin ct stuff for store*)
       split.
+      { rewrite app_one_cons. reflexivity. }
+      split.
       { subst k2'0. subst k2'. rewrite app_one_cons. repeat rewrite app_assoc.
         reflexivity. }
-      split.
-      { subst k2'0. subst k2'. rewrite app_one_cons. repeat rewrite app_assoc. reflexivity. }
-      intros. exists (S O). intros.
-      repeat (rewrite rev_app_distr || rewrite rev_involutive || cbn [rev List.app]).
-      destruct fuel' as [|fuel']; [blia|]. simpl. 
+      intros. 
+      repeat (rewrite rev_app_distr in * ||
+                                         rewrite rev_involutive in * ||
+                                                                     cbn [rev List.app] in *).
+      eapply Semantics.predicts_ext.
+      2: { intros. symmetry. rewrite snext_stmt'_step. reflexivity. }
       simpl in H1. apply Semantics.predict_cons in H1. rewrite H1. simpl.
-      apply predict_with_prefix_works. assumption.
+      apply predict_with_prefix_works. intros _. eapply Semantics.predicts_ext.
+      1: eapply H5. intros. simpl. f_equal.
+      repeat (rewrite app_length || cbn [app length]). blia.
       (*end ct stuff for store*)
     - (* exec.inlinetable *)
       eapply exec.seq_cps. eapply load_iarg_reg_correct; (blia || eassumption || idtac).
@@ -2441,11 +2390,12 @@ j          clear Heqgarbage. clear H9 H10 H11. Check f_equal2.
         2: eassumption. 1: assumption. split.
         { instantiate (1 := [_]). reflexivity. } split.
         { subst k2'0 k2'. rewrite app_one_cons. repeat rewrite app_assoc. reflexivity. }
-        intros. exists (S O). intros.
-        repeat (rewrite rev_app_distr || rewrite rev_involutive || cbn [rev List.app]).
-        destruct fuel' as [|fuel']; [blia|]. simpl.
+        intros. eapply Semantics.predicts_ext.
+        2: { intros. symmetry. rewrite snext_stmt'_step. reflexivity. }
+        repeat (rewrite rev_app_distr in * || rewrite rev_involutive in * || cbn [rev List.app] in *).
         apply Semantics.predict_cons in H5. rewrite H5.
-        apply predict_with_prefix_works. assumption.
+        apply predict_with_prefix_works. intros _. eapply Semantics.predicts_ext. 1: eapply H6.
+        intros. simpl. f_equal. repeat (rewrite app_length || cbn [app length]). blia.
     - (* exec.stackalloc *)
       rename H1 into IH.
       eapply exec.stackalloc. 1: assumption.
@@ -2466,16 +2416,17 @@ j          clear Heqgarbage. clear H9 H10 H11. Check f_equal2.
       { rewrite app_one_cons. rewrite app_assoc. reflexivity. }
       { subst k2'. rewrite app_one_cons. repeat rewrite app_assoc. reflexivity. }
       intros. rename H7p4 into CT. intros.
-      repeat (rewrite rev_app_distr || rewrite rev_involutive || cbn [rev List.app]).
-      Unshelve. 2: apply (S F').
-      destruct fuel' as [|fuel']; [blia|]. simpl. econstructor; auto.
-      rewrite <- app_assoc. apply predict_with_prefix_works.
-      rewrite rev_app_distr in H9, H10. simpl in H9, H10.
+      repeat (rewrite rev_app_distr in * || rewrite rev_involutive in * || cbn [rev List.app] in *).
+      eapply Semantics.predicts_ext.
+      2: { intros. symmetry. rewrite snext_stmt'_step. reflexivity. }
+      econstructor; [reflexivity|reflexivity|].
+      rewrite <- app_assoc. apply predict_with_prefix_works. intros _.
       eapply CT.
       { intros. rewrite <- app_assoc. simpl. eassumption. }
-      { rewrite <- app_assoc. simpl. eassumption. }
-      { blia. }
-    (*end ct stuff for stackalloc*) 
+      { rewrite <- app_assoc. simpl. eapply Semantics.predicts_ext. 1: eapply H10.
+        intros. simpl. f_equal.
+        { rewrite <- app_assoc. reflexivity. }
+        repeat (rewrite app_length || cbn [app length]). blia. }
     - (* exec.lit *)
       eapply exec.seq_cps. eapply exec.lit.
       eapply save_ires_reg_correct''.
@@ -2484,11 +2435,12 @@ j          clear Heqgarbage. clear H9 H10 H11. Check f_equal2.
       intros. do 7 eexists. split; [eassumption|]. split; [eassumption|]. split.
       { instantiate (1 := nil). reflexivity. } split.
       { subst k2'. reflexivity. }
-      intros. exists (S O). intros.
-      repeat (rewrite rev_app_distr || rewrite rev_involutive || cbn [rev List.app]).
-      destruct fuel' as [|fuel']; [blia|]. simpl. 
-      apply predict_with_prefix_works. rewrite app_nil_r in H3. assumption.
-      (*end ct stuff for lit*)
+      intros.
+      repeat (rewrite rev_app_distr in * || rewrite rev_involutive in * || cbn [rev List.app] in *).
+      eapply Semantics.predicts_ext.
+      2: { intros. symmetry. rewrite snext_stmt'_step. reflexivity. }
+      apply predict_with_prefix_works. intros _. rewrite app_nil_r in H3. eapply Semantics.predicts_ext.
+      1: eapply H3. intros. simpl. f_equal. repeat (rewrite app_length || cbn [app length]). blia.
     - (* exec.op *)
       unfold exec.lookup_op_locals in *.
       eapply exec.seq_cps. eapply load_iarg_reg_correct; (blia || eassumption || idtac).
@@ -2504,21 +2456,25 @@ j          clear Heqgarbage. clear H9 H10 H11. Check f_equal2.
         intros. do 7 eexists. split; [eassumption|]. split; [eassumption|]. split.
         { reflexivity. } split.
         { subst k2'1 k2'0 k2'. repeat rewrite app_assoc. reflexivity. }
-        intros. exists (S O). intros.
-        repeat (rewrite rev_app_distr || rewrite rev_involutive || cbn [rev List.app]).
-        destruct fuel' as [|fuel']; [blia|]. simpl.
+        intros.
+        repeat (rewrite rev_app_distr in * || rewrite rev_involutive in * || cbn [rev List.app] in *).
+        eapply Semantics.predicts_ext.
+        2: { intros. symmetry. rewrite snext_stmt'_step. reflexivity. }
+        assert (H4' := H4).
         destruct op.
-        all: try (apply predict_with_prefix_works; assumption).
-        all: try (apply Semantics.predict_cons in H4; rewrite H4; simpl;
-                  apply predict_with_prefix_works; assumption).
-        { assert (H4' := H4). apply Semantics.predict_cons in H4. rewrite H4. simpl.
-          simpl in H4'. rewrite app_one_cons, app_assoc in H4'.
+        all: try (apply Semantics.predict_cons in H4; rewrite H4; simpl).
+        all: try (
+        apply predict_with_prefix_works; intros _;
+          eapply Semantics.predicts_ext; [eassumption|]; intros; simpl; f_equal;
+            repeat (rewrite app_length || cbn [app length]); blia).
+        { simpl in H4'. rewrite app_one_cons, app_assoc in H4'.
           apply Semantics.predict_cons in H4'. rewrite H4'. simpl.
-          apply predict_with_prefix_works; assumption. }
-        { assert (H4' := H4). apply Semantics.predict_cons in H4. rewrite H4. simpl.
-          simpl in H4'. rewrite app_one_cons, app_assoc in H4'.
+          apply predict_with_prefix_works. intros _. eapply Semantics.predicts_ext; [eassumption|].
+          intros. simpl. f_equal. repeat (rewrite app_length || cbn [app length]). blia. }
+        { simpl in H4'. rewrite app_one_cons, app_assoc in H4'.
           apply Semantics.predict_cons in H4'. rewrite H4'. simpl.
-          apply predict_with_prefix_works; assumption. }
+          apply predict_with_prefix_works. intros _. eapply Semantics.predicts_ext; [eassumption|].
+          intros. simpl. f_equal. repeat (rewrite app_length || cbn [app length]). blia. }
       (*end ct stuff for op*)
       }
       {
@@ -2530,21 +2486,25 @@ j          clear Heqgarbage. clear H9 H10 H11. Check f_equal2.
         intros. do 7 eexists. split; [eassumption|]. split; [eassumption|]. split.
         { reflexivity. } split.
         { subst k2'0 k2'. repeat rewrite app_assoc. reflexivity. }
-        intros. exists (S O). intros.
-        repeat (rewrite rev_app_distr || rewrite rev_involutive || cbn [rev List.app]).
-        destruct fuel' as [|fuel']; [blia|]. simpl.
+        intros.
+        repeat (rewrite rev_app_distr in * || rewrite rev_involutive in * || cbn [rev List.app] in *).
+        eapply Semantics.predicts_ext.
+        2: { intros. symmetry. rewrite snext_stmt'_step. reflexivity. }
+        assert (H3' := H3).
         destruct op.
-        all: try (apply predict_with_prefix_works; assumption).
-        all: try (apply Semantics.predict_cons in H3; rewrite H3; simpl;
-                  apply predict_with_prefix_works; assumption).
-        { assert (H3' := H3). apply Semantics.predict_cons in H3. rewrite H3. simpl.
-          simpl in H3'. rewrite app_one_cons, app_assoc in H3'.
+        all: try (apply Semantics.predict_cons in H3; rewrite H3; simpl).
+        all: try (
+        apply predict_with_prefix_works; intros _;
+          eapply Semantics.predicts_ext; [eassumption|]; intros; simpl; f_equal;
+            repeat (rewrite app_length || cbn [app length]); blia).
+        { simpl in H3'. rewrite app_one_cons, app_assoc in H3'.
           apply Semantics.predict_cons in H3'. rewrite H3'. simpl.
-          apply predict_with_prefix_works; assumption. }
-        { assert (H3' := H3). apply Semantics.predict_cons in H3. rewrite H3. simpl.
-          simpl in H3'. rewrite app_one_cons, app_assoc in H3'.
+          apply predict_with_prefix_works. intros _. eapply Semantics.predicts_ext; [eassumption|].
+          intros. simpl. f_equal. repeat (rewrite app_length || cbn [app length]). blia. }
+        { simpl in H3'. rewrite app_one_cons, app_assoc in H3'.
           apply Semantics.predict_cons in H3'. rewrite H3'. simpl.
-          apply predict_with_prefix_works; assumption. }
+          apply predict_with_prefix_works. intros _. eapply Semantics.predicts_ext; [eassumption|].
+          intros. simpl. f_equal. repeat (rewrite app_length || cbn [app length]). blia. }
       (*end ct stuff for op*)
       }
     - (* exec.set *)
@@ -2556,10 +2516,13 @@ j          clear Heqgarbage. clear H9 H10 H11. Check f_equal2.
       intros. do 7 eexists. split; [eassumption|]. split; [eassumption|]. split.
       { instantiate (1 := nil). reflexivity. } split.
       { subst k2'0 k2'. repeat rewrite app_assoc. reflexivity. }
-      intros. exists (S O). intros.
-      repeat (rewrite rev_app_distr || rewrite rev_involutive || cbn [rev List.app]).
-      destruct fuel' as [|fuel']; [blia|]. simpl. 
-      apply predict_with_prefix_works. rewrite app_nil_r in H4. assumption.
+      intros.
+      repeat (rewrite rev_app_distr in * || rewrite rev_involutive in * || cbn [rev List.app] in *).
+      eapply Semantics.predicts_ext.
+      2: { intros. symmetry. rewrite snext_stmt'_step. reflexivity. }
+      apply predict_with_prefix_works. rewrite app_nil_r in H4. intros _.
+      eapply Semantics.predicts_ext. 1: eapply H4. intros. simpl. f_equal.
+      repeat (rewrite app_length || cbn [app length]). blia.
     - (* exec.if_true *)
       unfold prepare_bcond. destr cond; cbn [ForallVars_bcond eval_bcond spill_bcond] in *; fwd.
       + eapply exec.seq_assoc.
@@ -2577,18 +2540,18 @@ j          clear Heqgarbage. clear H9 H10 H11. Check f_equal2.
         split; [eassumption|]. split; [eassumption|]. split.
         { rewrite app_one_cons. rewrite app_assoc. reflexivity. } split.
         { subst k2'0 k2'. rewrite app_one_cons. repeat rewrite app_assoc. reflexivity. }
-        destruct CT as [F' CT]. exists (S F'). intros.
-        repeat (rewrite rev_app_distr || rewrite rev_involutive || cbn [rev List.app]).
-        destruct fuel' as [|fuel']; [blia|]. simpl. 
-        rewrite rev_app_distr in H3, H4. simpl in H3.
+        intros.
+        repeat (rewrite rev_app_distr in * || rewrite rev_involutive in * || cbn [rev List.app] in *).
+        eapply Semantics.predicts_ext.
+        2: { intros. symmetry. rewrite snext_stmt'_step. reflexivity. }
         assert (H3' := Semantics.predict_cons _ _ _ _ H3). rewrite H3'. simpl.
         rewrite (app_one_cons _ (rev k2'')).
         repeat rewrite app_assoc. rewrite <- (app_assoc _ _ k2''').
-        apply predict_with_prefix_works. clear IHexec.
+        apply predict_with_prefix_works. clear IHexec. intros _.
         eapply CT.
         { rewrite <- app_assoc. simpl. eassumption. }
-        { rewrite <- app_assoc. simpl. eassumption. }
-        { blia. }
+        { rewrite <- app_assoc. eapply Semantics.predicts_ext. 1: eassumption. intros. simpl.
+          repeat rewrite <- app_assoc. f_equal. repeat (rewrite app_length || cbn [app length]). blia. }
       + eapply exec.seq_cps. eapply load_iarg_reg_correct; (blia || eassumption || idtac).
         clear mc2 H2. intros.
         eapply exec.if_true. {
@@ -2601,19 +2564,20 @@ j          clear Heqgarbage. clear H9 H10 H11. Check f_equal2.
         split; [eassumption|]. split; [eassumption|]. split.
         { rewrite app_one_cons. rewrite app_assoc. reflexivity. } split.
         { subst k2'. rewrite app_one_cons. repeat rewrite app_assoc. reflexivity. }
-        destruct CT as [F' CT]. exists (S F'). intros.
-        repeat (rewrite rev_app_distr || rewrite rev_involutive || cbn [rev List.app]).
-        destruct fuel' as [|fuel']; [blia|]. simpl. 
-        rewrite rev_app_distr in H2, H3. simpl in H2.
+        intros.
+        repeat (rewrite rev_app_distr in * || rewrite rev_involutive in * || cbn [rev List.app] in *).
+        eapply Semantics.predicts_ext.
+        2: { intros. symmetry. rewrite snext_stmt'_step. reflexivity. }
         assert (H2' := Semantics.predict_cons _ _ _ _ H2). rewrite H2'. simpl.
         rewrite (app_one_cons _ (rev t2'')).
         repeat rewrite app_assoc. rewrite <- (app_assoc _ _ k2''').
-        apply predict_with_prefix_works. clear IHexec. Search snext_stmt'. Search t2''.
+        apply predict_with_prefix_works. clear IHexec. intros _.
         eapply CT.
         { rewrite <- app_assoc. simpl. eassumption. }
-        { rewrite <- app_assoc. simpl. eassumption. }
-        { blia. }
-    - unfold prepare_bcond. destr cond; cbn [ForallVars_bcond eval_bcond spill_bcond] in *; fwd.
+        { rewrite <- app_assoc. simpl. eapply Semantics.predicts_ext. 1: eassumption. intros. simpl.
+          repeat rewrite <- app_assoc. f_equal. repeat (rewrite app_length || cbn [app length]). blia. }
+    - (* exec.if_false *)
+      unfold prepare_bcond. destr cond; cbn [ForallVars_bcond eval_bcond spill_bcond] in *; fwd.
       + eapply exec.seq_assoc.
         eapply exec.seq_cps. eapply load_iarg_reg_correct; (blia || eassumption || idtac).
         clear mc2 H2. intros.
@@ -2629,18 +2593,18 @@ j          clear Heqgarbage. clear H9 H10 H11. Check f_equal2.
         split; [eassumption|]. split; [eassumption|]. split.
         { rewrite app_one_cons. rewrite app_assoc. reflexivity. } split.
         { subst k2'0 k2'. rewrite app_one_cons. repeat rewrite app_assoc. reflexivity. }
-        destruct CT as [F' CT]. exists (S F'). intros.
-        repeat (rewrite rev_app_distr || rewrite rev_involutive || cbn [rev List.app]).
-        destruct fuel' as [|fuel']; [blia|]. simpl. 
-        rewrite rev_app_distr in H3, H4. simpl in H3.
+        intros.
+        repeat (rewrite rev_app_distr in * || rewrite rev_involutive in * || cbn [rev List.app] in *).
+        eapply Semantics.predicts_ext.
+        2: { intros. symmetry. rewrite snext_stmt'_step. reflexivity. }
         assert (H3' := Semantics.predict_cons _ _ _ _ H3). rewrite H3'. simpl.
         rewrite (app_one_cons _ (rev k2'')).
         repeat rewrite app_assoc. rewrite <- (app_assoc _ _ k2''').
-        apply predict_with_prefix_works. clear IHexec.
+        apply predict_with_prefix_works. clear IHexec. intros _.
         eapply CT.
         { rewrite <- app_assoc. simpl. eassumption. }
-        { rewrite <- app_assoc. simpl. eassumption. }
-        { blia. }
+        { rewrite <- app_assoc. simpl. eapply Semantics.predicts_ext. 1: eassumption. intros. simpl.
+          repeat rewrite <- app_assoc. f_equal. repeat (rewrite app_length || cbn [app length]). blia. }
         
       + eapply exec.seq_cps. eapply load_iarg_reg_correct; (blia || eassumption || idtac).
         clear mc2 H2. intros.
@@ -2654,18 +2618,17 @@ j          clear Heqgarbage. clear H9 H10 H11. Check f_equal2.
         split; [eassumption|]. split; [eassumption|]. split.
         { rewrite app_one_cons. rewrite app_assoc. reflexivity. } split.
         { subst k2'. rewrite app_one_cons. repeat rewrite app_assoc. reflexivity. }
-        destruct CT as [F' CT]. exists (S F'). intros.
-        repeat (rewrite rev_app_distr || rewrite rev_involutive || cbn [rev List.app]).
-        destruct fuel' as [|fuel']; [blia|]. simpl. 
-        rewrite rev_app_distr in H1, H2. simpl in H1.
+        intros.
+        repeat (rewrite rev_app_distr in * || rewrite rev_involutive in * || cbn [rev List.app] in *).
+        eapply Semantics.predicts_ext; [|intros; symmetry; rewrite snext_stmt'_step; reflexivity].
         assert (H1' := Semantics.predict_cons _ _ _ _ H1). rewrite H1'. simpl.
         rewrite (app_one_cons _ (rev t2'')).
         repeat rewrite app_assoc. rewrite <- (app_assoc _ _ k2''').
-        apply predict_with_prefix_works. clear IHexec. Search snext_stmt'. Search t2''.
+        apply predict_with_prefix_works. clear IHexec. intros _.
         eapply CT.
         { rewrite <- app_assoc. simpl. eassumption. }
-        { rewrite <- app_assoc. simpl. eassumption. }
-        { blia. }
+        { rewrite <- app_assoc. simpl. eapply Semantics.predicts_ext. 1: eassumption. intros. simpl.
+          repeat rewrite <- app_assoc. f_equal. repeat (rewrite app_length || cbn [app length]). blia. }
     - (* exec.loop *)
       rename IHexec into IH1, H3 into IH2, H5 into IH12.
       eapply exec.loop_cps.
@@ -2690,14 +2653,20 @@ j          clear Heqgarbage. clear H9 H10 H11. Check f_equal2.
           { eassumption. } split.
           { rewrite app_one_cons. rewrite app_assoc. reflexivity. } split.
           { rewrite app_one_cons. repeat rewrite app_assoc. reflexivity. }
-          exists (S F'). intros. destruct fuel' as [|fuel']; [blia|]. simpl.
-          repeat (rewrite rev_involutive || rewrite rev_app_distr || rewrite <- app_assoc).
-          simpl in H5, H6. rewrite <- app_assoc in H5. eapply H3p4. 
+          intros.
+          repeat (rewrite rev_involutive in * || rewrite rev_app_distr in * || rewrite <- app_assoc in *).
+          eapply Semantics.predicts_ext; [|intros; symmetry; rewrite snext_stmt'_step; reflexivity].
+          eapply H3p4. 
           { apply H5. }
           { rewrite (app_assoc k10) in H5. apply Semantics.predict_cons in H5. rewrite H5. simpl.
             rewrite (app_one_cons _ k2'''). repeat rewrite (app_assoc _ _ k2''').
-            apply predict_with_prefix_works. rewrite <- app_assoc. assumption. }
-          { blia. }
+            eapply Semantics.predicts_ext.
+            2: { intros. rewrite pop_elts_correct. reflexivity. }
+            eapply Semantics.predict_with_prefix_works_eq.
+            { repeat rewrite <- app_assoc. reflexivity. }
+            intros _. eapply Semantics.predicts_ext. 1: eassumption.
+            intros. simpl. repeat rewrite <- app_assoc. f_equal.
+            repeat (rewrite app_length || cbn [app length]). blia. }
         * Check exec.loop_cps. eapply exec.weaken. 1: eapply IH2.
           -- eassumption.
           -- cbn. rewrite E, E0. Search r0. congruence.
@@ -2706,30 +2675,33 @@ j          clear Heqgarbage. clear H9 H10 H11. Check f_equal2.
           -- cbv beta. intros. fwd. eapply exec.weaken.
              ++ eapply IH12; eauto 10.
              ++ cbv beta. intros.
-                destruct H5 as [k1' [t1'1 [m1'1 [l1'1 [mc1'1 [t1''1 [t2''1 [R [Hpost [E1 [E2 [F'1 CT]]]]]]]]]]]].
+                destruct H5 as [k1' [t1'1 [m1'1 [l1'1 [mc1'1 [t1''1 [t2''1 [R [Hpost [E1 [E2 CT]]]]]]]]]]].
                 subst. do 7 eexists.
                 split; [eassumption|]. split; [eassumption|]. split.
                 { rewrite app_one_cons. repeat rewrite app_assoc. reflexivity. } split. 
                 { rewrite app_one_cons. repeat rewrite app_assoc. reflexivity. }
-                exists (S (plus F'0 (plus F' F'1))). intros.
-                repeat (rewrite rev_involutive || rewrite rev_app_distr || rewrite <- app_assoc).
-                destruct fuel' as [|fuel']; [blia|]. simpl.
-                repeat (rewrite rev_involutive in H5 || rewrite rev_app_distr in H5 || rewrite <- app_assoc in H5). Search body1.
+                intros.
+                repeat (rewrite rev_involutive in * || rewrite rev_app_distr in * || rewrite <- app_assoc in *).
+                eapply Semantics.predicts_ext; [|intros; symmetry; rewrite snext_stmt'_step; reflexivity].
                 eapply H3p4.
                 { eassumption. }
                 { rewrite (app_assoc k10) in H5.
                   assert (H5' := Semantics.predict_cons _ _ _ _ H5). rewrite H5'. simpl.
                   rewrite (app_one_cons _ (_ ++ _)).
                   repeat rewrite app_assoc. repeat rewrite <- (app_assoc ((_ ++ _) ++ _)).
-                  apply predict_with_prefix_works. Search body2. eapply H5p4.
+                  eapply Semantics.predicts_ext.
+                  2: { intros. rewrite pop_elts_correct. reflexivity. }
+                  apply predict_with_prefix_works. intros _. eapply H5p4.
                   { repeat rewrite <- app_assoc. repeat rewrite <- app_assoc in H5. eassumption. }
-                  { repeat (rewrite rev_involutive in * || rewrite rev_app_distr in * || rewrite <- app_assoc in * ).
+                  { eapply Semantics.predicts_ext.
+                    2: { intros. symmetry. rewrite pop_elts_correct. reflexivity. }
+                    repeat (rewrite rev_involutive in * || rewrite rev_app_distr in * || rewrite <- app_assoc in *).
                     eapply CT.
                     { repeat rewrite <- app_assoc. eassumption. }
-                    { repeat rewrite <- app_assoc. eassumption. }
-                    blia. }
-                  blia. }
-                blia.
+                    { repeat rewrite <- app_assoc. eapply Semantics.predicts_ext. 1: eassumption.
+                      intros. simpl. repeat rewrite <- app_assoc. simpl. repeat rewrite <- app_assoc. f_equal.
+                      repeat (rewrite app_length || cbn [app length]). blia. } } }
+
       + specialize H0 with (1 := H3p1). cbn in H0. fwd.
         eapply exec.weaken. {
           eapply load_iarg_reg_correct''; (blia || eassumption || idtac).
@@ -2742,17 +2714,19 @@ j          clear Heqgarbage. clear H9 H10 H11. Check f_equal2.
           { simpl. eassumption. } split.
           { rewrite app_one_cons. rewrite app_assoc. reflexivity. } split.
           { rewrite app_one_cons. repeat rewrite app_assoc. reflexivity. }
-          exists (S F'). intros. destruct fuel' as [|fuel']; [blia|]. simpl.
-          repeat (rewrite rev_involutive || rewrite rev_app_distr || rewrite <- app_assoc).
-          Search body1. eapply H3p4.
-          { rewrite rev_app_distr in H5. repeat rewrite <- app_assoc in H5. eassumption. }
-          { rewrite rev_app_distr in H5. repeat rewrite <- app_assoc in H5. simpl in H5.
-            rewrite app_assoc in H5.
+          intros.
+          repeat (rewrite rev_involutive in * || rewrite rev_app_distr in * || rewrite <- app_assoc in *).
+          eapply Semantics.predicts_ext; [|intros; symmetry; rewrite snext_stmt'_step; reflexivity].
+          eapply H3p4.
+          { eassumption. }
+          { simpl in H5. rewrite app_assoc in H5.
             assert (H5' := Semantics.predict_cons _ _ _ _ H5). rewrite H5'. simpl.
             rewrite (app_one_cons _ k2'''). rewrite (app_assoc _ _ k2''').
-            apply predict_with_prefix_works. simpl in H6. repeat rewrite <- app_assoc.
-            eassumption. }
-          blia.
+            eapply Semantics.predicts_ext.
+            2: { intros. rewrite pop_elts_correct. reflexivity. }
+            apply predict_with_prefix_works. simpl in H6. repeat rewrite <- app_assoc. intros _.
+            eapply Semantics.predicts_ext. 1: eassumption. intros. simpl. repeat rewrite <- app_assoc.
+            f_equal. repeat (rewrite app_length || cbn [app length]). blia. }
         * eapply exec.weaken. 1: eapply IH2.
           -- eassumption.
           -- cbn. rewrite E. congruence.
@@ -2761,30 +2735,32 @@ j          clear Heqgarbage. clear H9 H10 H11. Check f_equal2.
           -- cbv beta. intros. fwd. eapply exec.weaken.
              ++ eapply IH12; eauto 10.
              ++ cbv beta. intros.
-                destruct H5 as [k1' [t1'1 [m1'1 [l1'1 [mc1'1 [t1''1 [t2''1 [R [Hpost [E1 [E2 [F'1 CT]]]]]]]]]]]].
+                destruct H5 as [k1' [t1'1 [m1'1 [l1'1 [mc1'1 [t1''1 [t2''1 [R [Hpost [E1 [E2 CT]]]]]]]]]]].
                 subst. do 7 eexists.
                 split; [eassumption|]. split; [eassumption|]. split.
                 { rewrite app_one_cons. repeat rewrite app_assoc. reflexivity. } split. 
                 { rewrite app_one_cons. repeat rewrite app_assoc. reflexivity. }
-                exists (S (plus F'0 (plus F' F'1))). intros.
-                repeat (rewrite rev_involutive || rewrite rev_app_distr || rewrite <- app_assoc).
-                destruct fuel' as [|fuel']; [blia|]. simpl.
-                repeat (rewrite rev_involutive in H5 || rewrite rev_app_distr in H5 || rewrite <- app_assoc in H5). Search body1.
+                intros.
+                repeat (rewrite rev_involutive in * || rewrite rev_app_distr in * || rewrite <- app_assoc in *).
+                eapply Semantics.predicts_ext; [|intros; symmetry; rewrite snext_stmt'_step; reflexivity].
                 eapply H3p4.
                 { eassumption. }
                 { rewrite (app_assoc k10) in H5.
                   assert (H5' := Semantics.predict_cons _ _ _ _ H5). rewrite H5'. simpl.
                   rewrite (app_one_cons _ (_ ++ _)).
                   repeat rewrite app_assoc. rewrite <- (app_assoc ((_ ++ _) ++ _)). rewrite <- (app_assoc ((_ ++ _))).
-                  apply predict_with_prefix_works. Search body2. eapply H5p4.
+                  eapply Semantics.predicts_ext.
+                  2: { intros. rewrite pop_elts_correct. reflexivity. }
+                  apply predict_with_prefix_works. intros _. Search body2. eapply H5p4.
                   { repeat rewrite <- app_assoc. repeat rewrite <- app_assoc in H5. eassumption. }
                   { repeat (rewrite rev_involutive in * || rewrite rev_app_distr in * || rewrite <- app_assoc in * ).
+                    eapply Semantics.predicts_ext.
+                    2: { intros. rewrite pop_elts_correct. reflexivity. }
                     eapply CT.
                     { repeat rewrite <- app_assoc. eassumption. }
-                    { repeat rewrite <- app_assoc. eassumption. }
-                    blia. }
-                  blia. }
-                blia.        
+                    { repeat rewrite <- app_assoc. eapply Semantics.predicts_ext. 1: eassumption.
+                      intros. simpl. repeat rewrite <- app_assoc. simpl. repeat rewrite <- app_assoc. f_equal.
+                      repeat (rewrite app_length || cbn [app length]). blia. } } }
     - (* exec.seq *)
       cbn in *. fwd.
       rename H1 into IH2, IHexec into IH1.
@@ -2792,24 +2768,26 @@ j          clear Heqgarbage. clear H9 H10 H11. Check f_equal2.
       + eapply IH1. 1: eassumption. eauto 15.
       + cbn. intros. fwd. eapply exec.weaken.
         -- eapply IH2; eauto.
-        -- cbv beta. intros. destruct H1 as [k1' [t1'1 [m1'1 [l1'1 [mc1'1 [t1''1 [t2''1 [R [Hpost [E1 [E2 [F'1 CT]]]]]]]]]]]]. subst.
+        -- cbv beta. intros. destruct H1 as [k1' [t1'1 [m1'1 [l1'1 [mc1'1 [t1''1 [t2''1 [R [Hpost [E1 [E2 CT]]]]]]]]]]]. subst.
            do 7 eexists. split; [eassumption|]. split; [eassumption|]. split.
            { rewrite app_assoc. reflexivity. } split.
            { rewrite app_assoc. reflexivity. }
-           exists (S (plus F' F'1)).
-           intros. destruct fuel' as [|fuel']; [blia|].
-           simpl. rewrite rev_app_distr. rewrite <- app_assoc. eapply H1p4.
-           { rewrite rev_app_distr in H1. repeat rewrite <- app_assoc in H1. eassumption. }
-           { eapply CT.
-             { rewrite rev_app_distr in H1. repeat rewrite <- app_assoc in *. eassumption. }
-             { repeat rewrite <- app_assoc. rewrite rev_app_distr in H2. eassumption. }
-             blia. }
-           blia.
+           intros.
+           repeat (rewrite rev_involutive in * || rewrite rev_app_distr in * || rewrite <- app_assoc in *).
+           eapply Semantics.predicts_ext; [|intros; symmetry; rewrite snext_stmt'_step; reflexivity].
+           eapply H1p4.
+           { eassumption. }
+           { eapply Semantics.predicts_ext.
+             2: { intros. rewrite pop_elts_correct. reflexivity. }
+             eapply CT.
+             { rewrite <- app_assoc. eassumption. }
+             { eapply Semantics.predicts_ext. 1: eapply H2.
+               intros. simpl. repeat rewrite <- app_assoc. f_equal.
+               repeat (rewrite app_length || cbn [app length]). blia. } }
     - (* exec.skip *)
       eapply exec.skip. do 7 eexists. repeat (split; [eauto|]). 1: instantiate (1 := nil).
-      2: instantiate (1 := nil). all: eauto. exists (S O). intros.
-      destruct fuel' as [|fuel']; [blia|]. simpl. simpl in H2.
-      rewrite app_nil_r in H2. eassumption.
+      2: instantiate (1 := nil). all: eauto. intros. simpl. simpl in H2. rewrite app_nil_r in H2.
+      eapply Semantics.predicts_ext. 1: eassumption. intros. rewrite snext_stmt'_step. reflexivity.
   Qed.
 
   Lemma spill_fun_correct: forall e1 e2 argnames1 retnames1 body1 argnames2 retnames2 body2,
@@ -2822,12 +2800,9 @@ j          clear Heqgarbage. clear H9 H10 H11. Check f_equal2.
              exists k1'' k2'',
                post (k1'' ++ k) t' m' retvals /\
                  k2' = k2'' ++ k /\
-                 exists F,
-                 forall fuel,
-                   (F <= fuel)%nat ->
                    forall next,                   
                      predicts next (rev k1'') ->
-                     predicts (snext_fun e1 fuel next [] (argnames1, retnames1, body1)) (rev k2'')).
+                     predicts (snext_fun e1 next [] (argnames1, retnames1, body1)) (rev k2'')).
   Proof.
     intros. eapply spill_fun_correct_aux; try eassumption.
     unfold spilling_correct_for.
