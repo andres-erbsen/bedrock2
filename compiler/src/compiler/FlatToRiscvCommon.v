@@ -1,5 +1,6 @@
 Require Import riscv.Utility.Monads. Require Import riscv.Utility.MonadNotations.
 Require Import coqutil.Macros.unique.
+Require Import bedrock2.Semantics.
 Require Import compiler.FlatImp.
 Require Import Coq.Lists.List.
 Import ListNotations.
@@ -89,46 +90,6 @@ Section WithParameters.
   Context {PRParams: PrimitivesParams M MetricRiscvMachine}.
   Context {ext_spec: Semantics.ExtSpec}.
   Context {leak_ext: Semantics.LeakExt}.
-
-  Inductive predictsLE : (list LeakageEvent -> option qLeakageEvent) -> list LeakageEvent -> Prop :=
-  | predictsLE_cons :
-    forall f g e t,
-      f [] = Some (quotLE e) ->
-      (forall t', f (e :: t') = g t') ->
-      predictsLE g t ->
-      predictsLE f (e :: t)
-  | predictsLE_nil :
-    forall f,
-      f [] = Some qendLE ->
-      predictsLE f [].
-
-  Notation predicts := Semantics.predicts.
-  Check map.put. Check SCall. Print rnext_fun'. Print rnext_stmt.
-
-  Lemma predictLE_with_prefix_works prefix predict_rest rest :
-    predictsLE predict_rest rest ->
-    predictsLE (predictLE_with_prefix prefix predict_rest) (prefix ++ rest).
-  Proof.
-    intros H. induction prefix.
-    - simpl. apply H.
-    - simpl. econstructor; auto.
-  Qed.
-
-  Lemma predictLE_with_prefix_works_eq stuff prefix rest predict_rest :
-    stuff = prefix ++ rest ->
-    predictsLE predict_rest rest ->
-    predictsLE (predictLE_with_prefix prefix predict_rest) stuff.
-  Proof.
-    intros H. subst. apply predictLE_with_prefix_works.
-  Qed.
-  
-  Lemma predictLE_with_prefix_works_end prefix predict_rest :
-    predictsLE predict_rest [] ->
-    predictsLE (predictLE_with_prefix prefix predict_rest) prefix.
-  Proof.
-    intros H. eapply predictLE_with_prefix_works in H. rewrite app_nil_r in H. eassumption.
-  Qed.
-
 
   Definition runsTo{BWM: bitwidth_iset width iset}: (* BWM is unused, but makes iset inferrable *)
     MetricRiscvMachine -> (MetricRiscvMachine -> Prop) -> Prop :=
@@ -335,7 +296,7 @@ Section WithParameters.
   (* note: [e_impl_reduced] and [funnames] will shrink one function at a time each time
      we enter a new function body, to make sure functions cannot call themselves, while
      [e_impl] and [e_pos] remain the same throughout because that's mandated by
-     [FlatImp.exec] and [compile_stmt], respectively *) Print rnext_stmt.
+     [FlatImp.exec] and [compile_stmt], respectively *) Print rnext_stmt. Print bigtuple. (*(trace * Z * word * Z * stmt * list LeakageEvent * (trace -> nat -> qLeakageEvent))*)
   Definition compiles_FlatToRiscv_correctly{BWM: bitwidth_iset width iset}
     (f: pos_map -> Z -> Z -> stmt -> list Instruction)
     (s: stmt): Prop :=
@@ -368,12 +329,10 @@ Section WithParameters.
            exists t' rt',
              finalTrace = t' ++ initialTrace /\
                getTrace finalL = rt' ++ getTrace initialL /\
-               exists F,
-               forall next t0 t'' rt'' fuel f,
-                 predicts next (t0 ++ rev t' ++ t'') ->
-                 predictsLE (fun t => f (t0 ++ rev t') t) rt'' ->
-                 Nat.le F fuel ->
-                 predictsLE (fun t => rnext_stmt iset compile_ext_call leak_ext_call e_pos program_base e_impl_full fuel next t0 pos g.(p_sp) (bytes_per_word * rem_framewords g) s t f) (rev rt' ++ rt'')).
+               forall next t0 t'' rt'' f,
+                 s_predicts next (t0 ++ rev t' ++ t'') ->
+                 r_predicts (fun t => f (rev rt' ++ t) (t0 ++ rev t') (length (rev rt'))) rt'' ->
+                 r_predicts (fun t => rnext_stmt iset compile_ext_call leak_ext_call e_pos program_base e_impl_full next (t0, pos, g.(p_sp), (bytes_per_word * rem_framewords g), s, t, (f t))) (rev rt' ++ rt'')).
 End WithParameters.
 
 Ltac simpl_g_get :=

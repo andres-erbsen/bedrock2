@@ -14,6 +14,7 @@ Require Import compiler.util.Common.
 Require Import coqutil.Datatypes.ListSet.
 Require Import coqutil.Datatypes.List.
 Require Import coqutil.Tactics.fwd.
+Require Import bedrock2.Semantics.
 Require Import compiler.SeparationLogic.
 Require Export coqutil.Word.SimplWordExpr.
 Require Import compiler.GoFlatToRiscv.
@@ -426,8 +427,6 @@ Section Proofs.
   Qed.
 
   Search LeakageEvent. Print qLeakageEvent.
-  Notation predicts := Semantics.predicts.
-  Check FlatToRiscvCommon.predictsLE. Print rnext_stmt. Print rnext_fun.
 
   Lemma compile_function_body_correct: forall (e_impl_full : env) m l mc (argvs : list word)
     (st0 : locals) (post outcome : Semantics.trace -> Semantics.io_trace -> mem -> locals -> MetricLog -> Prop)
@@ -458,12 +457,10 @@ Section Proofs.
               exists k' rk',
                 finalTrace = k' ++ k /\
                   getTrace finalL = rk' ++ getTrace initialL /\
-                  exists F,
-                  forall next k0 k'' rk'' fuel f,
-                    predicts next (k0 ++ rev k' ++ k'') ->
-                    predictsLE (fun t => f (k0 ++ rev k') t) rk'' ->
-                    Nat.le F fuel ->
-                    predictsLE (fun t => rnext_stmt iset compile_ext_call leak_ext_call e_pos program_base e_impl_full fuel next k0 pos0 g0.(p_sp) (bytes_per_word * rem_framewords g0) body t f) (rev rk' ++ rk'')))
+                  forall next k0 k'' rk'' f,
+                    s_predicts next (k0 ++ rev k' ++ k'') ->
+                    r_predicts (fun t => f (rev rk' ++ t) (k0 ++ rev k') (length (rev rk'))) rk'' ->
+                    r_predicts (fun t => rnext_stmt iset compile_ext_call leak_ext_call e_pos program_base e_impl_full next (k0, pos0, g0.(p_sp), (bytes_per_word * rem_framewords g0)%Z, body, t, (f t))) (rev rk' ++ rk'')))
     (HOutcome: forall (k' : Semantics.trace) (t' : Semantics.io_trace) (m' : mem) (mc' : MetricLog) (st1 : locals),
         outcome k' t' m' st1 mc' ->
         exists (retvs : list word) (l' : locals),
@@ -510,12 +507,10 @@ Section Proofs.
             exists k' rk',
               finalTrace = k' ++ k /\
                 getTrace finalL = rk' ++ getTrace mach /\
-                exists F,
-                forall next k0 k'' rk'' fuel f,
-                  predicts next (k0 ++ rev k' ++ k'') ->
-                  predictsLE (fun k => f (k0 ++ rev k') k) rk'' ->
-                  Nat.le F fuel ->
-                  predictsLE (fun k => rnext_fun iset compile_ext_call leak_ext_call e_pos program_base e_impl_full fuel next k0 pos g.(p_sp) argnames retnames body k f) (rev rk' ++ rk'')
+                forall next k0 k'' rk'' f,
+                  s_predicts next (k0 ++ rev k' ++ k'') ->
+                  r_predicts (fun k => f (rev rk' ++ k) (k0 ++ rev k') (length (rev rk'))) rk'' ->
+                  r_predicts (fun k => rnext_fun iset compile_ext_call leak_ext_call e_pos program_base e_impl_full next k0 pos g.(p_sp) argnames retnames body k (f k)) (rev rk' ++ rk'')
         ).
   Proof.
     intros * IHexec OC BC OL Exb GetMany Ext GE FS C V Mo Mo' Gra RaM GPC A GM.
@@ -775,7 +770,7 @@ Section Proofs.
       specialize H with (1 := HO);
       move H at bottom;
       destruct H as (retvs & finalRegsH' & ? & ? & ?)
-    end. Check F.
+    end.
 
     (* load back the modified vars *) Check getTrace0.
     eapply runsTo_trans. {
@@ -1364,21 +1359,25 @@ Section Proofs.
         do 1 (instantiate (1 := _ :: _); simpl; f_equal).
         do 1 (instantiate (1 := _ :: _); simpl; f_equal).
         instantiate (1 := nil). reflexivity. }
-      exists F. intros. Search predictsLE. simpl.
-      repeat (rewrite rev_app_distr || rewrite rev_involutive || cbn [rev List.app]).
-      eapply predictLE_with_prefix_works_eq.
-      { simpl. rewrite BPW. f_equal. f_equal.
-        repeat (rewrite rev_app_distr || rewrite rev_involutive || cbn [rev List.app]).
+      intros. simpl.
+      repeat (rewrite rev_app_distr in * || rewrite rev_involutive in * || cbn [rev List.app] in *).
+      eapply predict_with_prefix_works_eq.
+      { simpl. rewrite BPW in *. f_equal. f_equal.
+        repeat (rewrite rev_app_distr in * || rewrite rev_involutive in * || cbn [rev List.app] in *).
         repeat rewrite <- app_assoc. reflexivity. }
-      rewrite BPW.
-      Search predictsLE. Check H2p10p2.
+      rewrite BPW in *.
       remember (p_sp + _) as new_sp. Check H2p10p2. eassert (Esp: new_sp = _).
-      2: { rewrite Esp. eapply H2p10p2.
+      2: { rewrite Esp. intros _. eapply H2p10p2.
            { eapply H6. }
-           { eapply predictLE_with_prefix_works_eq.
+           { eapply predicts_ext.
+             2: { intros. rewrite skipn_correct. reflexivity. }
+             eapply predict_with_prefix_works_eq.
              { simpl. rewrite <- app_assoc. reflexivity. }
-             { eapply H7. } }
-           { blia. } }
+             { intros _. eapply predicts_ext. 1: eassumption.
+               intros.
+               repeat (rewrite rev_app_distr in * || rewrite rev_involutive in * || cbn [rev List.app] in *).
+               repeat rewrite <- app_assoc. rewrite Esp. f_equal.
+               repeat (rewrite app_length || cbn [app length]). blia. } } }
       subst. solve_word_eq word_ok.
   Qed.
 

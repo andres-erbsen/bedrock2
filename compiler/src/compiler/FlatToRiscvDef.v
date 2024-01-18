@@ -517,6 +517,8 @@ Section FlatToRiscv1.
     | qLE (le : LeakageEvent)
     | qendLE.
 
+    Definition r_predicts := Semantics.predicts qendLE qLE.
+
     Definition quotLE (e : LeakageEvent) : qLeakageEvent := qLE e.
     
     Print Semantics.predict_with_prefix.
