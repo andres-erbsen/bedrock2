@@ -1,4 +1,5 @@
 Require Import compiler.util.Common.
+Require Import bedrock2.Semantics.
 Require Import bedrock2.Map.SeparationLogic.
 Require Import compiler.FlatImp.
 Require Import Coq.Lists.List. Import ListNotations.
@@ -15,13 +16,6 @@ Require Import compiler.FlatImpConstraints.
 Require Import coqutil.Tactics.autoforward.
 Require Import coqutil.Tactics.fwd.
 Require bedrock2.ProgramLogic.
-
-Notation trace := Semantics.trace.
-Notation leak_unit := Semantics.leak_unit.
-Notation leak_bool := Semantics.leak_bool.
-Notation leak_word := Semantics.leak_word.
-Notation leak_list := Semantics.leak_list.
-Notation consume_word := Semantics.consume_word.
 
 Open Scope Z_scope.
 
@@ -48,6 +42,7 @@ Section Spilling.
 
   Context {width} {BW: Bitwidth width} {word: word.word width} {word_ok: word.ok word}.
   Context {mem: map.map word byte} {mem_ok: map.ok mem}.
+  Notation bytes_per_word := SeparationLogic.bytes_per_word.
   
   Definition stack_loc(r: Z): option Z :=
     if Z.leb 32 r then Some ((r - 32) * bytes_per_word) else None.
@@ -179,129 +174,12 @@ Section Spilling.
 
    (* for a constant-time program, we should have a function which, given all compiler decisions that have
       happened so far, returns the next element of the trace.*)
-  Print Semantics.event.
-  (* *)
-  Notation event := Semantics.event.
-  Notation io_trace := Semantics.io_trace.
 
   Require Import Coq.Init.Wf Relation_Operators Wellfounded PeanoNat Lia.
   
-  Definition silly_body ab (silly : forall cd, slexprod _ _ lt lt cd ab -> nat -> nat -> nat) (x y : nat) : nat.
-    refine (
-        let a := fst ab in (* using match here would require the convoy pattern *)
-        let b := snd ab in (* to make sure the value is available in the lt proof *)
-        if Nat.eq_dec b 0%nat (* except for values whose type fully specifies them *)
-        then if Nat.eq_dec a 0%nat then 0%nat
-             else S (S (silly (pred a, 42%nat) _ 5 6)%nat)
-        else S (S (silly (a, pred b) _ 6 7)%nat)
-      ).
-    Proof.
-      all : abstract (clear silly;
-                      subst a; subst b; case ab as [a b]; cbv [fst snd] in *; (right||left); lia).
-    Defined.
+  Definition lt_tuple' : nat * stmt -> nat * stmt -> Prop := slexprod _ _ lt stmt_lt.
 
-Definition silly_wf : well_founded _ :=
-  Acc_intro_generator 128 (wf_slexprod _ _ _ _ Nat.lt_wf_0 Nat.lt_wf_0).
-
-Definition silly : nat * nat -> nat -> nat -> nat := Fix silly_wf _ silly_body.
- Check silly.
-Lemma silly_step x a b : ltac:(
-  let t := eval cbv beta delta [silly_body] in
-    (silly x a b = silly_body x (fun y _ => silly y) a b)
-  in exact t).
-Proof.
-  cbv [silly]. Check Fix_eq. Search Fix. rewrite Fix_eq with (F:=silly_body); cbv [silly_body]; intros.
-  1: repeat (case Nat.eq_dec; try congruence).
-  1: repeat (case Nat.eq_dec; try congruence).
-  1,2: intros; rewrite H; reflexivity.
-Qed.
-Opaque silly.
-
-Lemma even_silly : forall ab x y, Nat.even (silly ab x y) = true.
-Proof.
-  induction ab as [(a&b)] using (well_founded_induction silly_wf).
-  intros. rewrite silly_step. cbv zeta beta.
-  repeat (case Nat.eq_dec as [|]); rewrite ?Nat.even_succ_succ, ?H; auto;
-    (* duplciated... *) auto using silly_body_subproof, silly_body_subproof0.
-Qed.
-
-Compute silly (10, 0)%nat 5 5.
-  
-Notation qevent := Semantics.qevent. Search qevent.
-
-  Notation quot := Semantics.quot.
-  Notation qleak_unit := Semantics.qleak_unit.
-  Notation qleak_bool := Semantics.qleak_bool.
-  Notation qleak_word := Semantics.qleak_word.
-  Notation qleak_list := Semantics.qleak_list.
-  Notation qconsume := Semantics.qconsume.
-  Notation qend := Semantics.qend.
-
-  Notation predicts := Semantics.predicts.
-  Notation predict_with_prefix := Semantics.predict_with_prefix.
-  Notation predict_with_prefix_works := Semantics.predict_with_prefix_works.
-  Notation predict_with_prefix_works_end := Semantics.predict_with_prefix_works_end.
-  Print SStackalloc.
-
-  
-  Require Import Coq.Wellfounded.Lexicographic_Product.
-  Require Import Relation_Operators.
-
-  Lemma predict_with_prefix_ext x1 x2 f1 f2  :
-    (forall y1 y2, f1 y1 y2 = f2 y1 y2) ->
-    predict_with_prefix x1 x2 f1 = predict_with_prefix x1 x2 f2.
-  Proof.
-    intros. generalize dependent x2. induction x1.
-    - intros. simpl. apply H.
-    - intros. simpl. destruct x2; try reflexivity. apply IHx1. intros. apply H.
-  Qed.
-    
-  Inductive subexpression : stmt -> stmt -> Prop :=
-  | SStackalloc_subexp : forall x1 x2 s, subexpression s (SStackalloc x1 x2 s)
-  | SIf_then_subexp : forall x1 x2 s, subexpression s (SIf x1 s x2)
-  | SIf_else_subexp : forall x1 x2 s, subexpression s (SIf x1 x2 s)
-  | SLoop_body1_subexp : forall x1 x2 s, subexpression s (SLoop s x1 x2)
-  | SLoop_body2_subexp : forall x1 x2 s, subexpression s (SLoop x1 x2 s)
-  | SSeq_body1_subexp : forall x1 s, subexpression s (SSeq s x1)
-  | SSeq_body2_subexp : forall x1 s, subexpression s (SSeq x1 s).
-  
-  Lemma wf_subexpression : well_founded subexpression.
-  Proof.
-    cbv [well_founded]. intros a. induction a.
-    all: constructor; intros ? H; inversion H; subst; assumption.
-  Defined.
-
-  Definition stmt_lt :=
-    clos_trans _ subexpression.
-
-  Lemma wf_stmt_lt : well_founded stmt_lt.
-  Proof.
-    cbv [stmt_lt].
-    apply Transitive_Closure.wf_clos_trans.
-    apply wf_subexpression.
-  Defined.
-
-  Definition trace_lt : trace -> trace -> Prop := ltof _ (@length _).
-  
-  Lemma wf_trace_lt : well_founded trace_lt.
-  Proof.
-    cbv [trace_lt]. apply well_founded_ltof.
-  Defined.
-  Check wf_inverse_image.
-  Lemma wf_bool_lt : well_founded Bool.lt.
-  Proof.
-    cbv [well_founded]. intros a. destruct a.
-    - constructor. intros b H. destruct b; simpl in H; try solve [destruct H].
-      constructor. intros c H'. Print Bool.lt. destruct c; simpl in H'; try solve [destruct H'].
-      congruence.
-    - constructor. intros b H. destruct b; simpl in H; try solve [destruct H]. congruence.
-  Defined.
-
-  Search (bool -> bool -> Prop).
-  Print slexprod. Search well_founded.
-  Definition lt_tuple' := slexprod _ _ lt stmt_lt.
-
-  Definition bigtuple : Type := trace * stmt * trace * word * (trace -> nat -> option qevent).
+  Definition bigtuple : Type := trace * stmt * trace * word * (trace -> nat -> qevent).
   
   Definition project_tuple (tup : bigtuple) : nat * stmt :=
     let '(sk_so_far, s, k_so_far, fpval, f) := tup in (length sk_so_far, s).
@@ -392,15 +270,17 @@ Notation qevent := Semantics.qevent. Search qevent.
     - simpl. assumption.
   Qed.
 
+  Definition s_predict_with_prefix := predict_with_prefix quot.
+
   (* is there a good alternative to my continuation style of writing this function?  it's convenient,
      and it makes stating correctness theorems very easy.  But it seems to be a bit of the pain with
      the termination proofs. *)
   Definition snext_stmt'_body
     {env: map.map String.string (list Z * list Z * stmt)}
-    (e: env) (next : trace -> option qevent)
+    (e: env) (next : trace -> qevent)
     (tup : bigtuple)
-    (snext_stmt' : forall othertuple, lt_tuple othertuple tup -> option qevent)
-    : option qevent.
+    (snext_stmt' : forall othertuple, lt_tuple othertuple tup -> qevent)
+    : qevent.
     refine (
         match tup as x return tup = x -> _ with
         | (sk_so_far, s, k_so_far, fpval, f) =>
@@ -408,46 +288,46 @@ Notation qevent := Semantics.qevent. Search qevent.
              match s as x return s = x -> _ with
              | SLoad sz x y o => fun _ => 
                                    match next k_so_far with
-                                   | Some (qleak_word a) =>
-                                       predict_with_prefix
+                                   | qleak_word a =>
+                                       s_predict_with_prefix
                                          (leak_load_iarg_reg fpval y ++ [leak_word a] ++ leak_save_ires_reg fpval x)
                                          sk_so_far
                                          (fun sk_so_far' pf => f (k_so_far ++ [leak_word a]) (length sk_so_far - length sk_so_far'))
-                                   | _ => None
+                                   | _ => qend
                                    end
              | SStore sz x y o => fun _ =>
                                     match next k_so_far with
-                                    | Some (qleak_word a) =>
-                                        predict_with_prefix
+                                    | qleak_word a =>
+                                        s_predict_with_prefix
                                           (leak_load_iarg_reg fpval x ++ leak_load_iarg_reg fpval y ++ [leak_word a])
                                           sk_so_far
                                           (fun sk_so_far' pf => f (k_so_far ++ [leak_word a]) (length sk_so_far - length sk_so_far'))
-                                    | _ => None
+                                    | _ => qend
                                     end
              | SInlinetable _ x _ i => fun _ =>
                                          match next k_so_far with
-                                         | Some (qleak_word i') =>
-                                             predict_with_prefix
+                                         | qleak_word i' =>
+                                             s_predict_with_prefix
                                                (leak_load_iarg_reg fpval i ++ [leak_word i'] ++ leak_save_ires_reg fpval x)
                                                sk_so_far
                                                (fun sk_so_far' pf => f (k_so_far ++ [leak_word i']) (length sk_so_far - length sk_so_far'))
-                                         | _ => None
+                                         | _ => qend
                                          end
-             | SStackalloc x z body => fun pf00 =>
-                                         match sk_so_far as x return sk_so_far = x -> option qevent with
-                                         | consume_word a :: sk_so_far' => fun pf01 =>
-                                                                             predict_with_prefix
+             | SStackalloc x z body => fun _ =>
+                                         match sk_so_far as x return sk_so_far = x -> _ with
+                                         | consume_word a :: sk_so_far' => fun _ =>
+                                                                             s_predict_with_prefix
                                                                                (leak_save_ires_reg fpval x)
                                                                                sk_so_far'
-                                                                               (fun sk_so_far'' pf02 =>
+                                                                               (fun sk_so_far'' _ =>
                                                                                   snext_stmt'
                                                                                     (sk_so_far'', body, k_so_far ++ [consume_word a], fpval,
                                                                                        (fun k_so_far''' sk_so_far''' => f k_so_far''' (sk_so_far''' + length sk_so_far - length sk_so_far''))) _)
-                                         | nil => fun _ => Some qconsume
-                                         | _ => fun _ => None
+                                         | nil => fun _ => qconsume
+                                         | _ => fun _ => qend
                                          end (eq_refl sk_so_far)
              | SLit x _ => fun _ =>
-                             predict_with_prefix
+                             s_predict_with_prefix
                                (leak_save_ires_reg fpval x)
                                sk_so_far
                                (fun sk_so_far' pf => f k_so_far (length sk_so_far - length sk_so_far'))
@@ -457,9 +337,9 @@ Notation qevent := Semantics.qevent. Search qevent.
                                     | Syntax.bopname.divu
                                     | Syntax.bopname.remu =>
                                         match next k_so_far with
-                                        | Some (qleak_word x1) =>
+                                        | qleak_word x1 =>
                                             match next (k_so_far ++ [leak_word x1]) with
-                                            | Some (qleak_word x2) => Some [leak_word x1; leak_word x2]
+                                            | qleak_word x2 => Some [leak_word x1; leak_word x2]
                                             | _ => None
                                             end
                                         | _ => None
@@ -468,7 +348,7 @@ Notation qevent := Semantics.qevent. Search qevent.
                                     | Syntax.bopname.sru
                                     | Syntax.bopname.srs =>
                                         match next k_so_far with
-                                        | Some (qleak_word x2) => Some [leak_word x2]
+                                        | qleak_word x2 => Some [leak_word x2]
                                         | _ => None
                                         end
                                     | _ => Some []
@@ -476,7 +356,7 @@ Notation qevent := Semantics.qevent. Search qevent.
                                   in
                                   match newt with
                                   | Some newt =>
-                                      predict_with_prefix
+                                      s_predict_with_prefix
                                         (leak_load_iarg_reg fpval y ++
                                            match oz with 
                                            | Var z => leak_load_iarg_reg fpval z
@@ -486,24 +366,24 @@ Notation qevent := Semantics.qevent. Search qevent.
                                            ++ leak_save_ires_reg fpval x)
                                         sk_so_far
                                         (fun sk_so_far' pf => f (k_so_far ++ newt) (length sk_so_far - length sk_so_far'))
-                                  | None => None
+                                  | None => qend
                                   end
              | SSet x y => fun _ =>
-                             predict_with_prefix
+                             s_predict_with_prefix
                                (leak_load_iarg_reg fpval y ++ leak_save_ires_reg fpval x)
                                sk_so_far
                                (fun sk_so_far' pf => f k_so_far (length sk_so_far - length sk_so_far'))
              | SIf c thn els => fun _ =>
                                   match next k_so_far with
-                                  | Some (qleak_bool b) =>
-                                      predict_with_prefix
+                                  | qleak_bool b =>
+                                      s_predict_with_prefix
                                         (leak_prepare_bcond fpval c ++ leak_spill_bcond ++ [leak_bool b])
                                         sk_so_far
                                         (fun sk_so_far' pf00 =>
                                            snext_stmt'
                                              (sk_so_far', (if b then thn else els), k_so_far ++ [leak_bool b], fpval,
                                                 (fun k_so_far'' sk_so_far''_diff => f k_so_far'' (sk_so_far''_diff + length sk_so_far - length sk_so_far'))) _)
-                                  | _ => None
+                                  | _ => qend
                                   end
              | SLoop s1 c s2 => fun _ =>
                                   snext_stmt'
@@ -511,8 +391,8 @@ Notation qevent := Semantics.qevent. Search qevent.
                                        (fun k_so_far' sk_so_far'_len =>
                                           let sk_so_far':= pop_elts sk_so_far'_len sk_so_far in
                                           match next k_so_far' with
-                                          | Some (qleak_bool true) =>
-                                              predict_with_prefix
+                                          | qleak_bool true =>
+                                              s_predict_with_prefix
                                                 (leak_prepare_bcond fpval c ++ leak_spill_bcond ++ [leak_bool true])
                                                 sk_so_far'
                                                 (fun sk_so_far'' pf01 =>
@@ -523,12 +403,12 @@ Notation qevent := Semantics.qevent. Search qevent.
                                                            snext_stmt'
                                                              (sk_so_far''', s, k_so_far'', fpval,
                                                                 (fun k_so_far''' sk_so_far''''_len => f k_so_far''' (sk_so_far''''_len + sk_so_far'''_len + (length sk_so_far - length sk_so_far'')))) _)) _)
-                                          | Some (qleak_bool false) =>
-                                              predict_with_prefix
+                                          | qleak_bool false =>
+                                              s_predict_with_prefix
                                                 (leak_prepare_bcond fpval c ++ leak_spill_bcond ++ [leak_bool false])
                                                 sk_so_far'
                                                 (fun sk_so_far'' pf01 => f (k_so_far' ++ [leak_bool false]) (length sk_so_far - length sk_so_far'') )
-                                          | _ => None
+                                          | _ => qend
                                           end)) _
              | SSeq s1 s2 => fun _ =>
                                snext_stmt'
@@ -541,13 +421,13 @@ Notation qevent := Semantics.qevent. Search qevent.
              | SCall resvars fname argvars => fun _ =>
                                                 match @map.get _ _ env e fname with
                                                 | Some (params, rets, fbody) =>
-                                                    predict_with_prefix
+                                                    s_predict_with_prefix
                                                       (leak_set_reg_range_to_vars fpval argvars ++ [leak_unit])
                                                       sk_so_far
                                                       (fun sk_so_far' pf00 =>
-                                                         match sk_so_far' as x return sk_so_far' = x -> _ with (* would be nice if predict_with_prefix would do this *)
-                                                         | consume_word fpval' :: sk_so_far'' => fun pf04 => 
-                                                                                                   predict_with_prefix
+                                                         match sk_so_far' as x return sk_so_far' = x -> _ with (* would be nice if s_predict_with_prefix would do this *)
+                                                         | consume_word fpval' :: sk_so_far'' => fun _ => 
+                                                                                                   s_predict_with_prefix
                                                                                                      (leak_set_vars_to_reg_range fpval' params)
                                                                                                      sk_so_far''
                                                                                                      (fun sk_so_far''' pf01 =>
@@ -555,23 +435,23 @@ Notation qevent := Semantics.qevent. Search qevent.
                                                                                                           (sk_so_far''', fbody, k_so_far ++ [leak_unit], fpval',
                                                                                                              (fun k_so_far' sk_so_far''''_len =>
                                                                                                                 let sk_so_far'''' := pop_elts sk_so_far''''_len sk_so_far''' in
-                                                                                                                predict_with_prefix
+                                                                                                                s_predict_with_prefix
                                                                                                                   (leak_set_reg_range_to_vars fpval' rets ++ leak_set_vars_to_reg_range fpval resvars)
                                                                                                                   sk_so_far''''
                                                                                                                   (fun sk_so_far''''' pf03 => f k_so_far' (length sk_so_far - length sk_so_far''''')))) _) 
-                                                         | nil => fun _ => Some qconsume
-                                                         | _ => fun _ => None
+                                                         | nil => fun _ => qconsume
+                                                         | _ => fun _ => qend
                                                          end (eq_refl _))
-                                                | None => None
+                                                | None => qend
                                                 end
              | SInteract resvars _ argvars => fun _ =>
                                                 match next k_so_far with
-                                                | Some (qleak_list l) =>
-                                                    predict_with_prefix
+                                                | qleak_list l =>
+                                                    s_predict_with_prefix
                                                       (leak_set_reg_range_to_vars fpval argvars ++ [leak_list l] ++ leak_set_vars_to_reg_range fpval resvars)
                                                       sk_so_far
                                                       (fun sk_so_far' pf => f (k_so_far ++ [leak_list l]) (length sk_so_far - length sk_so_far'))
-                                                | _ => None
+                                                | _ => qend
                                                 end
              end (eq_refl _)
        end (eq_refl _))%nat.
@@ -597,9 +477,6 @@ Notation qevent := Semantics.qevent. Search qevent.
       {env: map.map String.string (list Z * list Z * stmt)} e next
       := my_Fix _ _ lt_tuple_wf _ (snext_stmt'_body e next).
 
-    Check snext_stmt'.
-    (*Compute (snext_stmt' map.empty (fun _ => None) (bt [] SSkip [] (word.of_Z 0) (fun _ _ _ => None))).*)
-
     Definition Equiv (x y : bigtuple) :=
       let '(x1, x2, x3, x4, fx) := x in
       let '(y1, y2, y3, y4, fy) := y in
@@ -615,7 +492,7 @@ Notation qevent := Semantics.qevent. Search qevent.
       cbv [snext_stmt'].
       rewrite my_Fix_eq with (E:=Equiv) (x1:=bigtuple) (x2:=bigtuple) (F:=snext_stmt'_body e next).
       1: reflexivity.
-      { intros. cbv [snext_stmt'_body]. cbv beta. Print bigtuple.
+      { intros. cbv [snext_stmt'_body]. cbv beta.
         destruct x1 as [ [ [ [sk_so_far_1 s_1] k_so_far_1] fpval_1] f_1 ].
         destruct x2 as [ [ [ [sk_so_far_2 s_2] k_so_far_2] fpval_2] f_2 ].
         cbv [Equiv] in H. destruct H as [H1 H2]. injection H1. intros. subst. clear H1.
@@ -633,7 +510,7 @@ Notation qevent := Semantics.qevent. Search qevent.
     Qed.
     
   Definition snext_stmt {env : map.map string (list Z * list Z * stmt)} e next fpval s sk_so_far :=
-    snext_stmt' e next ([], s, sk_so_far, fpval, (fun _ _ => Some qend)).
+    snext_stmt' e next ([], s, sk_so_far, fpval, (fun _ _ => qend)).
    
   Fixpoint spill_stmt(s: stmt): stmt :=
     match s with
@@ -800,23 +677,23 @@ Notation qevent := Semantics.qevent. Search qevent.
       else
         error:("Spilling got input program with invalid var names (please report as a bug)").
 
-  Definition snext_fun {env : map.map string (list Z * list Z * stmt)} (e : env) (next : trace -> option qevent) (k_so_far : trace) (f : list Z * list Z * stmt) (sk_so_far : Semantics.trace) : option Semantics.qevent :=
+  Definition snext_fun {env : map.map string (list Z * list Z * stmt)} (e : env) (next : trace -> qevent) (k_so_far : trace) (f : list Z * list Z * stmt) (sk_so_far : trace) : qevent :=
     let '(argnames, resnames, body) := f in
     match sk_so_far with
-    | [] => Some qconsume
+    | [] => qconsume
     | consume_word fpval :: sk_so_far' =>
-        predict_with_prefix
+        s_predict_with_prefix
           (leak_set_vars_to_reg_range fpval argnames)
           sk_so_far'
           (fun sk_so_far'' pf => snext_stmt' e next
                                    (sk_so_far'', body, k_so_far, fpval,
                                       (fun k_so_far' sk_so_far'''_diff =>
                                          let sk_so_far''' := pop_elts sk_so_far'''_diff sk_so_far'' in
-                                         predict_with_prefix
+                                         s_predict_with_prefix
                                           (leak_set_reg_range_to_vars fpval resnames)
                                           sk_so_far'''
-                                          (fun sk_so_far'''' pf => match sk_so_far'''' with |nil => Some qend |_ => None end))))
-    | _ => None
+                                          (fun sk_so_far'''' pf => match sk_so_far'''' with |nil => qend |_ => qend end))))
+    | _ => qend
     end.
 
   Lemma firstn_min_absorb_length_r{A: Type}: forall (l: list A) n,
@@ -853,8 +730,8 @@ Notation qevent := Semantics.qevent. Search qevent.
   Context {locals: map.map Z word}.
   Context {localsOk: map.ok locals}.
   Context {env: map.map String.string (list Z * list Z * stmt)} {env_ok: map.ok env}.
-  Context {ext_spec: Semantics.ExtSpec} {ext_spec_ok: Semantics.ext_spec.ok ext_spec}.
-  Context {leak_ext: Semantics.LeakExt}.
+  Context {ext_spec: ExtSpec} {ext_spec_ok: ext_spec.ok ext_spec}.
+  Context {leak_ext: LeakExt}.
 
   Definition spill_functions: env -> result env :=
     map.try_map_values spill_fun.
@@ -936,8 +813,8 @@ Notation qevent := Semantics.qevent. Search qevent.
     forall k v, map.get l k = Some v -> 10 <= k < 18.
 
   Definition related(maxvar: Z)(frame: mem -> Prop)(fpval: word)
-             (t1: Semantics.io_trace)(m1: mem)(l1: locals)
-             (t2: Semantics.io_trace)(m2: mem)(l2: locals): Prop :=
+             (t1: io_trace)(m1: mem)(l1: locals)
+             (t2: io_trace)(m2: mem)(l2: locals): Prop :=
       exists lStack lRegs stackwords,
         t1 = t2 /\
         (eq m1 * word_array fpval stackwords * frame)%sep m2 /\
@@ -949,7 +826,7 @@ Notation qevent := Semantics.qevent. Search qevent.
            nth_error stackwords (Z.to_nat (r - 32)) = Some v) /\
         length stackwords = Z.to_nat (maxvar - 31).
 
-  Implicit Types post : Semantics.trace -> Semantics.io_trace -> mem -> locals -> MetricLog -> Prop.
+  Implicit Types post : trace -> io_trace -> mem -> locals -> MetricLog -> Prop.
 
   Lemma put_arg_reg: forall l r v fpval lRegs,
       (eq lRegs * arg_regs * ptsto fp fpval)%sep l ->
@@ -1706,28 +1583,28 @@ Notation qevent := Semantics.qevent. Search qevent.
   Qed.
   
   Definition spilling_correct_for(e1 e2 : env)(s1 : stmt) : Prop :=
-    forall (k1 : Semantics.trace) (t1 : Semantics.io_trace) (m1 : mem) (l1 : locals) (mc1 : MetricLog)
-           (post : Semantics.trace -> Semantics.io_trace -> mem -> locals -> MetricLog -> Prop),
+    forall (k1 : trace) (t1 : io_trace) (m1 : mem) (l1 : locals) (mc1 : MetricLog)
+           (post : trace -> io_trace -> mem -> locals -> MetricLog -> Prop),
       exec e1 s1 k1 t1 m1 l1 mc1 post ->
       forall (frame : mem -> Prop) (maxvar : Z),
         valid_vars_src maxvar s1 ->
-        forall (k2 : Semantics.trace) (t2 : Semantics.io_trace) (m2 : mem) (l2 : locals) (mc2 : MetricLog) (fpval : word),
+        forall (k2 : trace) (t2 : io_trace) (m2 : mem) (l2 : locals) (mc2 : MetricLog) (fpval : word),
           related maxvar frame fpval t1 m1 l1 t2 m2 l2 ->
           exec e2 (spill_stmt s1) k2 t2 m2 l2 mc2
-            (fun (k2' : Semantics.trace) (t2' : Semantics.io_trace) (m2' : mem) (l2' : locals) (mc2' : MetricLog) =>
+            (fun (k2' : trace) (t2' : io_trace) (m2' : mem) (l2' : locals) (mc2' : MetricLog) =>
                exists k1' t1' m1' l1' mc1' k1'' k2'',
                  related maxvar frame fpval t1' m1' l1' t2' m2' l2' /\
                    post k1' t1' m1' l1' mc1' /\
                    k1' = k1'' ++ k1 /\
                    k2' = k2'' ++ k2 /\
                    forall next k10 k1''' k2''' f,
-                     predicts next (k10 ++ rev k1'' ++ k1''') ->
-                     predicts (fun k => f (rev k2'' ++ k) (k10 ++ rev k1'') (length (rev k2''))) k2''' ->
-                     predicts (fun k => snext_stmt' e1 next (k, s1, k10, fpval, (f k))) (rev k2'' ++ k2''')).
+                     s_predicts next (k10 ++ rev k1'' ++ k1''') ->
+                     s_predicts (fun k => f (rev k2'' ++ k) (k10 ++ rev k1'') (length (rev k2''))) k2''' ->
+                     s_predicts (fun k => snext_stmt' e1 next (k, s1, k10, fpval, (f k))) (rev k2'' ++ k2''')).
 
   Definition call_spec(e: env) '(argnames, retnames, fbody)
-    (k: Semantics.trace)(t: Semantics.io_trace)(m: mem)(argvals: list word)
-    (post: trace -> Semantics.io_trace -> mem -> list word -> Prop): Prop :=
+    (k: trace)(t: io_trace)(m: mem)(argvals: list word)
+    (post: trace -> io_trace -> mem -> list word -> Prop): Prop :=
     forall l mc,
       map.of_list_zip argnames argvals = Some l ->
       exec e fbody k t m l mc (fun k' t' m' l' mc' =>
@@ -1769,7 +1646,7 @@ Notation qevent := Semantics.qevent. Search qevent.
   Lemma spill_fun_correct_aux: forall e1 e2 argnames1 retnames1 body1 argnames2 retnames2 body2,
       spill_fun (argnames1, retnames1, body1) = Success (argnames2, retnames2, body2) ->
       spilling_correct_for e1 e2 body1 ->
-      forall argvals k t m (post: trace -> Semantics.io_trace -> mem -> list word -> Prop),
+      forall argvals k t m (post: trace -> io_trace -> mem -> list word -> Prop),
         call_spec e1 (argnames1, retnames1, body1) k t m argvals post ->
         call_spec e2 (argnames2, retnames2, body2) k t m argvals
           (fun k2' t' m' retvals =>
@@ -1777,8 +1654,8 @@ Notation qevent := Semantics.qevent. Search qevent.
                post (k1'' ++ k) t' m' retvals /\
                  k2' = k2'' ++ k /\
                  forall next,
-                   predicts next (rev k1'') ->
-                   predicts (snext_fun e1 next [] (argnames1, retnames1, body1)) (rev k2'')).
+                   s_predicts next (rev k1'') ->
+                   s_predicts (snext_fun e1 next [] (argnames1, retnames1, body1)) (rev k2'')).
   Proof.
     unfold call_spec, spilling_correct_for. intros * Sp IHexec * Ex lFL3 mc OL2.
     unfold spill_fun in Sp. fwd.
@@ -1924,7 +1801,7 @@ Notation qevent := Semantics.qevent. Search qevent.
       apply predict_with_prefix_works. intros.
       eapply CT.
       { simpl. instantiate (1 := nil). rewrite app_nil_r. assumption. }
-      { eapply Semantics.predicts_ext; cycle 1.
+      { eapply predicts_ext; cycle 1.
         { intros. rewrite pop_elts_correct. reflexivity. }
         apply predict_with_prefix_works_end. constructor. reflexivity. } }
      Unshelve.
@@ -1935,28 +1812,28 @@ Notation qevent := Semantics.qevent. Search qevent.
       (e1 e2 : env)
       (Ev : spill_functions e1 = Success e2)
       (s1 : stmt)
-      (k1 : Semantics.trace)
-      (t1 : Semantics.io_trace)
+      (k1 : trace)
+      (t1 : io_trace)
       (m1 : mem)
       (l1 : locals)
       (mc1 : MetricLog)
-      (post : Semantics.trace -> Semantics.io_trace -> mem -> locals -> MetricLog -> Prop),
+      (post : trace -> io_trace -> mem -> locals -> MetricLog -> Prop),
       exec e1 s1 k1 t1 m1 l1 mc1 post ->
       forall (frame : mem -> Prop) (maxvar : Z),
         valid_vars_src maxvar s1 ->
-        forall (k2 : Semantics.trace) (t2 : Semantics.io_trace) (m2 : mem) (l2 : locals) (mc2 : MetricLog) (fpval : word),
+        forall (k2 : trace) (t2 : io_trace) (m2 : mem) (l2 : locals) (mc2 : MetricLog) (fpval : word),
           related maxvar frame fpval t1 m1 l1 t2 m2 l2 ->
           exec e2 (spill_stmt s1) k2 t2 m2 l2 mc2
-            (fun (k2' : Semantics.trace) (t2' : Semantics.io_trace) (m2' : mem) (l2' : locals) (mc2' : MetricLog) =>
+            (fun (k2' : trace) (t2' : io_trace) (m2' : mem) (l2' : locals) (mc2' : MetricLog) =>
                exists k1' t1' m1' l1' mc1' k1'' k2'',
                  related maxvar frame fpval t1' m1' l1' t2' m2' l2' /\
                    post k1' t1' m1' l1' mc1' /\
                    k1' = k1'' ++ k1 /\
                    k2' = k2'' ++ k2 /\
                    forall next k10 k1''' k2''' f,
-                     predicts next (k10 ++ rev k1'' ++ k1''') ->
-                     predicts (fun k => f (rev k2'' ++ k) (k10 ++ rev k1'') (length (rev k2''))) k2''' ->
-                     predicts (fun k => snext_stmt' e1 next (k, s1, k10, fpval, (f k))) (rev k2'' ++ k2''')).
+                     s_predicts next (k10 ++ rev k1'' ++ k1''') ->
+                     s_predicts (fun k => f (rev k2'' ++ k) (k10 ++ rev k1'') (length (rev k2''))) k2''' ->
+                     s_predicts (fun k => snext_stmt' e1 next (k, s1, k10, fpval, (f k))) (rev k2'' ++ k2''')).
   Proof.
     intros e1 e2 Ev. intros s1 k1 t1 m1 l1 mc1 post.
     induction 1; intros; cbn [spill_stmt valid_vars_src Forall_vars_stmt] in *; fwd.
@@ -2019,12 +1896,12 @@ Notation qevent := Semantics.qevent. Search qevent.
           (*begin ct stuff for interact*)
           intros.
           repeat (rewrite rev_app_distr in * || rewrite rev_involutive in * || cbn [rev List.app] in *).
-          eapply Semantics.predicts_ext.
+          eapply predicts_ext.
           2: { intros k0. symmetry. rewrite snext_stmt'_step.
                simpl. reflexivity. }
-          apply Semantics.predict_cons in H5. rewrite H5. simpl.
+          apply predict_cons in H5. rewrite H5. simpl.
           apply predict_with_prefix_works. intros.
-          eapply Semantics.predicts_ext. 1: eapply H6.
+          eapply predicts_ext. 1: eapply H6.
           intros. simpl. f_equal.
           repeat (rewrite app_length || cbn [app length]). blia.
           (*end ct stuff for interact*)
@@ -2253,26 +2130,26 @@ Notation qevent := Semantics.qevent. Search qevent.
           reflexivity. }
         intros.
         repeat (rewrite rev_app_distr in * || rewrite rev_involutive in * || cbn [rev List.app] in *).
-        eapply Semantics.predicts_ext.
+        eapply predicts_ext.
         2: { intros. symmetry. rewrite snext_stmt'_step. simpl. reflexivity. }
         rewrite H. 
         assert (H3' := H3).
-        eapply Semantics.predict_with_prefix_works_eq.
+        eapply predict_with_prefix_works_eq.
         { repeat rewrite <- app_assoc. simpl. reflexivity. }
         intros.
         simpl. econstructor.
         { reflexivity. }
         { reflexivity. }
-        eapply Semantics.predict_with_prefix_works_eq.
+        eapply predict_with_prefix_works_eq.
         { repeat rewrite <- app_assoc. simpl. reflexivity. }
         intros. eapply CT.
         { repeat rewrite <- app_assoc. simpl. eassumption. }
-        { intros. eapply Semantics.predicts_ext.
+        { intros. eapply predicts_ext.
           2: { intros. rewrite pop_elts_correct. reflexivity. }
-          eapply Semantics.predict_with_prefix_works_eq.
+          eapply predict_with_prefix_works_eq.
           { rewrite <- app_assoc. reflexivity. }
           intros. simpl. repeat rewrite <- app_assoc.
-          eapply Semantics.predicts_ext. 1: apply H8.
+          eapply predicts_ext. 1: apply H8.
           intros. simpl. f_equal.
           { repeat rewrite <- app_assoc. simpl. repeat rewrite <- app_assoc. reflexivity. }
           { repeat (rewrite app_length || cbn [length app]). blia. }
@@ -2306,10 +2183,10 @@ Notation qevent := Semantics.qevent. Search qevent.
         repeat (rewrite rev_app_distr in * ||
                                            rewrite rev_involutive in * ||
                                                                        cbn [rev List.app] in *).
-        eapply Semantics.predicts_ext.
+        eapply predicts_ext.
         2: { intros. symmetry. rewrite snext_stmt'_step. reflexivity. }
-        simpl in H3. apply Semantics.predict_cons in H3. rewrite H3. simpl.
-        apply predict_with_prefix_works. intros _. eapply Semantics.predicts_ext.
+        simpl in H3. apply predict_cons in H3. rewrite H3. simpl.
+        apply predict_with_prefix_works. intros _. eapply predicts_ext.
         1: eapply H4. intros. simpl. f_equal.
         repeat (rewrite app_length || cbn [app length]). blia.
         (*end ct stuff for load*)
@@ -2348,10 +2225,10 @@ Notation qevent := Semantics.qevent. Search qevent.
       repeat (rewrite rev_app_distr in * ||
                                          rewrite rev_involutive in * ||
                                                                      cbn [rev List.app] in *).
-      eapply Semantics.predicts_ext.
+      eapply predicts_ext.
       2: { intros. symmetry. rewrite snext_stmt'_step. reflexivity. }
-      simpl in H1. apply Semantics.predict_cons in H1. rewrite H1. simpl.
-      apply predict_with_prefix_works. intros _. eapply Semantics.predicts_ext.
+      simpl in H1. apply predict_cons in H1. rewrite H1. simpl.
+      apply predict_with_prefix_works. intros _. eapply predicts_ext.
       1: eapply H5. intros. simpl. f_equal.
       repeat (rewrite app_length || cbn [app length]). blia.
       (*end ct stuff for store*)
@@ -2370,11 +2247,11 @@ Notation qevent := Semantics.qevent. Search qevent.
         2: eassumption. 1: assumption. split.
         { instantiate (1 := [_]). reflexivity. } split.
         { subst k2'0 k2'. rewrite app_one_cons. repeat rewrite app_assoc. reflexivity. }
-        intros. eapply Semantics.predicts_ext.
+        intros. eapply predicts_ext.
         2: { intros. symmetry. rewrite snext_stmt'_step. reflexivity. }
         repeat (rewrite rev_app_distr in * || rewrite rev_involutive in * || cbn [rev List.app] in *).
-        apply Semantics.predict_cons in H5. rewrite H5.
-        apply predict_with_prefix_works. intros _. eapply Semantics.predicts_ext. 1: eapply H6.
+        apply predict_cons in H5. rewrite H5.
+        apply predict_with_prefix_works. intros _. eapply predicts_ext. 1: eapply H6.
         intros. simpl. f_equal. repeat (rewrite app_length || cbn [app length]). blia.
     - (* exec.stackalloc *)
       rename H1 into IH.
@@ -2397,13 +2274,13 @@ Notation qevent := Semantics.qevent. Search qevent.
       { subst k2'. rewrite app_one_cons. repeat rewrite app_assoc. reflexivity. }
       intros. rename H7p4 into CT. intros.
       repeat (rewrite rev_app_distr in * || rewrite rev_involutive in * || cbn [rev List.app] in *).
-      eapply Semantics.predicts_ext.
+      eapply predicts_ext.
       2: { intros. symmetry. rewrite snext_stmt'_step. reflexivity. }
       econstructor; [reflexivity|reflexivity|].
       rewrite <- app_assoc. apply predict_with_prefix_works. intros _.
       eapply CT.
       { intros. rewrite <- app_assoc. simpl. eassumption. }
-      { rewrite <- app_assoc. simpl. eapply Semantics.predicts_ext. 1: eapply H10.
+      { rewrite <- app_assoc. simpl. eapply predicts_ext. 1: eapply H10.
         intros. simpl. f_equal.
         { rewrite <- app_assoc. reflexivity. }
         repeat (rewrite app_length || cbn [app length]). blia. }
@@ -2417,9 +2294,9 @@ Notation qevent := Semantics.qevent. Search qevent.
       { subst k2'. reflexivity. }
       intros.
       repeat (rewrite rev_app_distr in * || rewrite rev_involutive in * || cbn [rev List.app] in *).
-      eapply Semantics.predicts_ext.
+      eapply predicts_ext.
       2: { intros. symmetry. rewrite snext_stmt'_step. reflexivity. }
-      apply predict_with_prefix_works. intros _. rewrite app_nil_r in H3. eapply Semantics.predicts_ext.
+      apply predict_with_prefix_works. intros _. rewrite app_nil_r in H3. eapply predicts_ext.
       1: eapply H3. intros. simpl. f_equal. repeat (rewrite app_length || cbn [app length]). blia.
     - (* exec.op *)
       unfold exec.lookup_op_locals in *.
@@ -2438,22 +2315,22 @@ Notation qevent := Semantics.qevent. Search qevent.
         { subst k2'1 k2'0 k2'. repeat rewrite app_assoc. reflexivity. }
         intros.
         repeat (rewrite rev_app_distr in * || rewrite rev_involutive in * || cbn [rev List.app] in *).
-        eapply Semantics.predicts_ext.
+        eapply predicts_ext.
         2: { intros. symmetry. rewrite snext_stmt'_step. reflexivity. }
         assert (H4' := H4).
         destruct op.
-        all: try (apply Semantics.predict_cons in H4; rewrite H4; simpl).
+        all: try (apply predict_cons in H4; rewrite H4; simpl).
         all: try (
         apply predict_with_prefix_works; intros _;
-          eapply Semantics.predicts_ext; [eassumption|]; intros; simpl; f_equal;
+          eapply predicts_ext; [eassumption|]; intros; simpl; f_equal;
             repeat (rewrite app_length || cbn [app length]); blia).
         { simpl in H4'. rewrite app_one_cons, app_assoc in H4'.
-          apply Semantics.predict_cons in H4'. rewrite H4'. simpl.
-          apply predict_with_prefix_works. intros _. eapply Semantics.predicts_ext; [eassumption|].
+          apply predict_cons in H4'. rewrite H4'. simpl.
+          apply predict_with_prefix_works. intros _. eapply predicts_ext; [eassumption|].
           intros. simpl. f_equal. repeat (rewrite app_length || cbn [app length]). blia. }
         { simpl in H4'. rewrite app_one_cons, app_assoc in H4'.
-          apply Semantics.predict_cons in H4'. rewrite H4'. simpl.
-          apply predict_with_prefix_works. intros _. eapply Semantics.predicts_ext; [eassumption|].
+          apply predict_cons in H4'. rewrite H4'. simpl.
+          apply predict_with_prefix_works. intros _. eapply predicts_ext; [eassumption|].
           intros. simpl. f_equal. repeat (rewrite app_length || cbn [app length]). blia. }
       (*end ct stuff for op*)
       }
@@ -2468,22 +2345,22 @@ Notation qevent := Semantics.qevent. Search qevent.
         { subst k2'0 k2'. repeat rewrite app_assoc. reflexivity. }
         intros.
         repeat (rewrite rev_app_distr in * || rewrite rev_involutive in * || cbn [rev List.app] in *).
-        eapply Semantics.predicts_ext.
+        eapply predicts_ext.
         2: { intros. symmetry. rewrite snext_stmt'_step. reflexivity. }
         assert (H3' := H3).
         destruct op.
-        all: try (apply Semantics.predict_cons in H3; rewrite H3; simpl).
+        all: try (apply predict_cons in H3; rewrite H3; simpl).
         all: try (
         apply predict_with_prefix_works; intros _;
-          eapply Semantics.predicts_ext; [eassumption|]; intros; simpl; f_equal;
+          eapply predicts_ext; [eassumption|]; intros; simpl; f_equal;
             repeat (rewrite app_length || cbn [app length]); blia).
         { simpl in H3'. rewrite app_one_cons, app_assoc in H3'.
-          apply Semantics.predict_cons in H3'. rewrite H3'. simpl.
-          apply predict_with_prefix_works. intros _. eapply Semantics.predicts_ext; [eassumption|].
+          apply predict_cons in H3'. rewrite H3'. simpl.
+          apply predict_with_prefix_works. intros _. eapply predicts_ext; [eassumption|].
           intros. simpl. f_equal. repeat (rewrite app_length || cbn [app length]). blia. }
         { simpl in H3'. rewrite app_one_cons, app_assoc in H3'.
-          apply Semantics.predict_cons in H3'. rewrite H3'. simpl.
-          apply predict_with_prefix_works. intros _. eapply Semantics.predicts_ext; [eassumption|].
+          apply predict_cons in H3'. rewrite H3'. simpl.
+          apply predict_with_prefix_works. intros _. eapply predicts_ext; [eassumption|].
           intros. simpl. f_equal. repeat (rewrite app_length || cbn [app length]). blia. }
       (*end ct stuff for op*)
       }
@@ -2498,10 +2375,10 @@ Notation qevent := Semantics.qevent. Search qevent.
       { subst k2'0 k2'. repeat rewrite app_assoc. reflexivity. }
       intros.
       repeat (rewrite rev_app_distr in * || rewrite rev_involutive in * || cbn [rev List.app] in *).
-      eapply Semantics.predicts_ext.
+      eapply predicts_ext.
       2: { intros. symmetry. rewrite snext_stmt'_step. reflexivity. }
       apply predict_with_prefix_works. rewrite app_nil_r in H4. intros _.
-      eapply Semantics.predicts_ext. 1: eapply H4. intros. simpl. f_equal.
+      eapply predicts_ext. 1: eapply H4. intros. simpl. f_equal.
       repeat (rewrite app_length || cbn [app length]). blia.
     - (* exec.if_true *)
       unfold prepare_bcond. destr cond; cbn [ForallVars_bcond eval_bcond spill_bcond] in *; fwd.
@@ -2522,15 +2399,15 @@ Notation qevent := Semantics.qevent. Search qevent.
         { subst k2'0 k2'. rewrite app_one_cons. repeat rewrite app_assoc. reflexivity. }
         intros.
         repeat (rewrite rev_app_distr in * || rewrite rev_involutive in * || cbn [rev List.app] in *).
-        eapply Semantics.predicts_ext.
+        eapply predicts_ext.
         2: { intros. symmetry. rewrite snext_stmt'_step. reflexivity. }
-        assert (H3' := Semantics.predict_cons _ _ _ _ H3). rewrite H3'. simpl.
+        assert (H3' := predict_cons _ _ _ _ _ _ H3). rewrite H3'. simpl.
         rewrite (app_one_cons _ (rev k2'')).
         repeat rewrite app_assoc. rewrite <- (app_assoc _ _ k2''').
         apply predict_with_prefix_works. clear IHexec. intros _.
         eapply CT.
         { rewrite <- app_assoc. simpl. eassumption. }
-        { rewrite <- app_assoc. eapply Semantics.predicts_ext. 1: eassumption. intros. simpl.
+        { rewrite <- app_assoc. eapply predicts_ext. 1: eassumption. intros. simpl.
           repeat rewrite <- app_assoc. f_equal. repeat (rewrite app_length || cbn [app length]). blia. }
       + eapply exec.seq_cps. eapply load_iarg_reg_correct; (blia || eassumption || idtac).
         clear mc2 H2. intros.
@@ -2546,15 +2423,15 @@ Notation qevent := Semantics.qevent. Search qevent.
         { subst k2'. rewrite app_one_cons. repeat rewrite app_assoc. reflexivity. }
         intros.
         repeat (rewrite rev_app_distr in * || rewrite rev_involutive in * || cbn [rev List.app] in *).
-        eapply Semantics.predicts_ext.
+        eapply predicts_ext.
         2: { intros. symmetry. rewrite snext_stmt'_step. reflexivity. }
-        assert (H2' := Semantics.predict_cons _ _ _ _ H2). rewrite H2'. simpl.
+        assert (H2' := predict_cons _ _ _ _ _ _ H2). rewrite H2'. simpl.
         rewrite (app_one_cons _ (rev t2'')).
         repeat rewrite app_assoc. rewrite <- (app_assoc _ _ k2''').
         apply predict_with_prefix_works. clear IHexec. intros _.
         eapply CT.
         { rewrite <- app_assoc. simpl. eassumption. }
-        { rewrite <- app_assoc. simpl. eapply Semantics.predicts_ext. 1: eassumption. intros. simpl.
+        { rewrite <- app_assoc. simpl. eapply predicts_ext. 1: eassumption. intros. simpl.
           repeat rewrite <- app_assoc. f_equal. repeat (rewrite app_length || cbn [app length]). blia. }
     - (* exec.if_false *)
       unfold prepare_bcond. destr cond; cbn [ForallVars_bcond eval_bcond spill_bcond] in *; fwd.
@@ -2575,15 +2452,15 @@ Notation qevent := Semantics.qevent. Search qevent.
         { subst k2'0 k2'. rewrite app_one_cons. repeat rewrite app_assoc. reflexivity. }
         intros.
         repeat (rewrite rev_app_distr in * || rewrite rev_involutive in * || cbn [rev List.app] in *).
-        eapply Semantics.predicts_ext.
+        eapply predicts_ext.
         2: { intros. symmetry. rewrite snext_stmt'_step. reflexivity. }
-        assert (H3' := Semantics.predict_cons _ _ _ _ H3). rewrite H3'. simpl.
+        assert (H3' := predict_cons _ _ _ _ _ _ H3). rewrite H3'. simpl.
         rewrite (app_one_cons _ (rev k2'')).
         repeat rewrite app_assoc. rewrite <- (app_assoc _ _ k2''').
         apply predict_with_prefix_works. clear IHexec. intros _.
         eapply CT.
         { rewrite <- app_assoc. simpl. eassumption. }
-        { rewrite <- app_assoc. simpl. eapply Semantics.predicts_ext. 1: eassumption. intros. simpl.
+        { rewrite <- app_assoc. simpl. eapply predicts_ext. 1: eassumption. intros. simpl.
           repeat rewrite <- app_assoc. f_equal. repeat (rewrite app_length || cbn [app length]). blia. }
         
       + eapply exec.seq_cps. eapply load_iarg_reg_correct; (blia || eassumption || idtac).
@@ -2600,14 +2477,14 @@ Notation qevent := Semantics.qevent. Search qevent.
         { subst k2'. rewrite app_one_cons. repeat rewrite app_assoc. reflexivity. }
         intros.
         repeat (rewrite rev_app_distr in * || rewrite rev_involutive in * || cbn [rev List.app] in *).
-        eapply Semantics.predicts_ext; [|intros; symmetry; rewrite snext_stmt'_step; reflexivity].
-        assert (H1' := Semantics.predict_cons _ _ _ _ H1). rewrite H1'. simpl.
+        eapply predicts_ext; [|intros; symmetry; rewrite snext_stmt'_step; reflexivity].
+        assert (H1' := predict_cons _ _ _ _ _ _ H1). rewrite H1'. simpl.
         rewrite (app_one_cons _ (rev t2'')).
         repeat rewrite app_assoc. rewrite <- (app_assoc _ _ k2''').
         apply predict_with_prefix_works. clear IHexec. intros _.
         eapply CT.
         { rewrite <- app_assoc. simpl. eassumption. }
-        { rewrite <- app_assoc. simpl. eapply Semantics.predicts_ext. 1: eassumption. intros. simpl.
+        { rewrite <- app_assoc. simpl. eapply predicts_ext. 1: eassumption. intros. simpl.
           repeat rewrite <- app_assoc. f_equal. repeat (rewrite app_length || cbn [app length]). blia. }
     - (* exec.loop *)
       rename IHexec into IH1, H3 into IH2, H5 into IH12.
@@ -2635,16 +2512,16 @@ Notation qevent := Semantics.qevent. Search qevent.
           { rewrite app_one_cons. repeat rewrite app_assoc. reflexivity. }
           intros.
           repeat (rewrite rev_involutive in * || rewrite rev_app_distr in * || rewrite <- app_assoc in *).
-          eapply Semantics.predicts_ext; [|intros; symmetry; rewrite snext_stmt'_step; reflexivity].
+          eapply predicts_ext; [|intros; symmetry; rewrite snext_stmt'_step; reflexivity].
           eapply H3p4. 
           { apply H5. }
-          { rewrite (app_assoc k10) in H5. apply Semantics.predict_cons in H5. rewrite H5. simpl.
+          { rewrite (app_assoc k10) in H5. apply predict_cons in H5. rewrite H5. simpl.
             rewrite (app_one_cons _ k2'''). repeat rewrite (app_assoc _ _ k2''').
-            eapply Semantics.predicts_ext.
+            eapply predicts_ext.
             2: { intros. rewrite pop_elts_correct. reflexivity. }
-            eapply Semantics.predict_with_prefix_works_eq.
+            eapply predict_with_prefix_works_eq.
             { repeat rewrite <- app_assoc. reflexivity. }
-            intros _. eapply Semantics.predicts_ext. 1: eassumption.
+            intros _. eapply predicts_ext. 1: eassumption.
             intros. simpl. repeat rewrite <- app_assoc. f_equal.
             repeat (rewrite app_length || cbn [app length]). blia. }
         * Check exec.loop_cps. eapply exec.weaken. 1: eapply IH2.
@@ -2662,23 +2539,23 @@ Notation qevent := Semantics.qevent. Search qevent.
                 { rewrite app_one_cons. repeat rewrite app_assoc. reflexivity. }
                 intros.
                 repeat (rewrite rev_involutive in * || rewrite rev_app_distr in * || rewrite <- app_assoc in *).
-                eapply Semantics.predicts_ext; [|intros; symmetry; rewrite snext_stmt'_step; reflexivity].
+                eapply predicts_ext; [|intros; symmetry; rewrite snext_stmt'_step; reflexivity].
                 eapply H3p4.
                 { eassumption. }
                 { rewrite (app_assoc k10) in H5.
-                  assert (H5' := Semantics.predict_cons _ _ _ _ H5). rewrite H5'. simpl.
+                  assert (H5' := predict_cons _ _ _ _ _ _ H5). rewrite H5'. simpl.
                   rewrite (app_one_cons _ (_ ++ _)).
                   repeat rewrite app_assoc. repeat rewrite <- (app_assoc ((_ ++ _) ++ _)).
-                  eapply Semantics.predicts_ext.
+                  eapply predicts_ext.
                   2: { intros. rewrite pop_elts_correct. reflexivity. }
                   apply predict_with_prefix_works. intros _. eapply H5p4.
                   { repeat rewrite <- app_assoc. repeat rewrite <- app_assoc in H5. eassumption. }
-                  { eapply Semantics.predicts_ext.
+                  { eapply predicts_ext.
                     2: { intros. symmetry. rewrite pop_elts_correct. reflexivity. }
                     repeat (rewrite rev_involutive in * || rewrite rev_app_distr in * || rewrite <- app_assoc in *).
                     eapply CT.
                     { repeat rewrite <- app_assoc. eassumption. }
-                    { repeat rewrite <- app_assoc. eapply Semantics.predicts_ext. 1: eassumption.
+                    { repeat rewrite <- app_assoc. eapply predicts_ext. 1: eassumption.
                       intros. simpl. repeat rewrite <- app_assoc. simpl. repeat rewrite <- app_assoc. f_equal.
                       repeat (rewrite app_length || cbn [app length]). blia. } } }
 
@@ -2696,16 +2573,16 @@ Notation qevent := Semantics.qevent. Search qevent.
           { rewrite app_one_cons. repeat rewrite app_assoc. reflexivity. }
           intros.
           repeat (rewrite rev_involutive in * || rewrite rev_app_distr in * || rewrite <- app_assoc in *).
-          eapply Semantics.predicts_ext; [|intros; symmetry; rewrite snext_stmt'_step; reflexivity].
+          eapply predicts_ext; [|intros; symmetry; rewrite snext_stmt'_step; reflexivity].
           eapply H3p4.
           { eassumption. }
           { simpl in H5. rewrite app_assoc in H5.
-            assert (H5' := Semantics.predict_cons _ _ _ _ H5). rewrite H5'. simpl.
+            assert (H5' := predict_cons _ _ _ _ _ _ H5). rewrite H5'. simpl.
             rewrite (app_one_cons _ k2'''). rewrite (app_assoc _ _ k2''').
-            eapply Semantics.predicts_ext.
+            eapply predicts_ext.
             2: { intros. rewrite pop_elts_correct. reflexivity. }
             apply predict_with_prefix_works. simpl in H6. repeat rewrite <- app_assoc. intros _.
-            eapply Semantics.predicts_ext. 1: eassumption. intros. simpl. repeat rewrite <- app_assoc.
+            eapply predicts_ext. 1: eassumption. intros. simpl. repeat rewrite <- app_assoc.
             f_equal. repeat (rewrite app_length || cbn [app length]). blia. }
         * eapply exec.weaken. 1: eapply IH2.
           -- eassumption.
@@ -2722,23 +2599,23 @@ Notation qevent := Semantics.qevent. Search qevent.
                 { rewrite app_one_cons. repeat rewrite app_assoc. reflexivity. }
                 intros.
                 repeat (rewrite rev_involutive in * || rewrite rev_app_distr in * || rewrite <- app_assoc in *).
-                eapply Semantics.predicts_ext; [|intros; symmetry; rewrite snext_stmt'_step; reflexivity].
+                eapply predicts_ext; [|intros; symmetry; rewrite snext_stmt'_step; reflexivity].
                 eapply H3p4.
                 { eassumption. }
                 { rewrite (app_assoc k10) in H5.
-                  assert (H5' := Semantics.predict_cons _ _ _ _ H5). rewrite H5'. simpl.
+                  assert (H5' := predict_cons _ _ _ _ _ _ H5). rewrite H5'. simpl.
                   rewrite (app_one_cons _ (_ ++ _)).
                   repeat rewrite app_assoc. rewrite <- (app_assoc ((_ ++ _) ++ _)). rewrite <- (app_assoc ((_ ++ _))).
-                  eapply Semantics.predicts_ext.
+                  eapply predicts_ext.
                   2: { intros. rewrite pop_elts_correct. reflexivity. }
                   apply predict_with_prefix_works. intros _. Search body2. eapply H5p4.
                   { repeat rewrite <- app_assoc. repeat rewrite <- app_assoc in H5. eassumption. }
                   { repeat (rewrite rev_involutive in * || rewrite rev_app_distr in * || rewrite <- app_assoc in * ).
-                    eapply Semantics.predicts_ext.
+                    eapply predicts_ext.
                     2: { intros. rewrite pop_elts_correct. reflexivity. }
                     eapply CT.
                     { repeat rewrite <- app_assoc. eassumption. }
-                    { repeat rewrite <- app_assoc. eapply Semantics.predicts_ext. 1: eassumption.
+                    { repeat rewrite <- app_assoc. eapply predicts_ext. 1: eassumption.
                       intros. simpl. repeat rewrite <- app_assoc. simpl. repeat rewrite <- app_assoc. f_equal.
                       repeat (rewrite app_length || cbn [app length]). blia. } } }
     - (* exec.seq *)
@@ -2754,26 +2631,26 @@ Notation qevent := Semantics.qevent. Search qevent.
            { rewrite app_assoc. reflexivity. }
            intros.
            repeat (rewrite rev_involutive in * || rewrite rev_app_distr in * || rewrite <- app_assoc in *).
-           eapply Semantics.predicts_ext; [|intros; symmetry; rewrite snext_stmt'_step; reflexivity].
+           eapply predicts_ext; [|intros; symmetry; rewrite snext_stmt'_step; reflexivity].
            eapply H1p4.
            { eassumption. }
-           { eapply Semantics.predicts_ext.
+           { eapply predicts_ext.
              2: { intros. rewrite pop_elts_correct. reflexivity. }
              eapply CT.
              { rewrite <- app_assoc. eassumption. }
-             { eapply Semantics.predicts_ext. 1: eapply H2.
+             { eapply predicts_ext. 1: eapply H2.
                intros. simpl. repeat rewrite <- app_assoc. f_equal.
                repeat (rewrite app_length || cbn [app length]). blia. } }
     - (* exec.skip *)
       eapply exec.skip. do 7 eexists. repeat (split; [eauto|]). 1: instantiate (1 := nil).
       2: instantiate (1 := nil). all: eauto. intros. simpl. simpl in H2. rewrite app_nil_r in H2.
-      eapply Semantics.predicts_ext. 1: eassumption. intros. rewrite snext_stmt'_step. reflexivity.
+      eapply predicts_ext. 1: eassumption. intros. rewrite snext_stmt'_step. reflexivity.
   Qed.
 
   Lemma spill_fun_correct: forall e1 e2 argnames1 retnames1 body1 argnames2 retnames2 body2,
       spill_functions e1 = Success e2 ->
       spill_fun (argnames1, retnames1, body1) = Success (argnames2, retnames2, body2) ->
-      forall argvals k t m (post: Semantics.trace -> Semantics.io_trace -> mem -> list word -> Prop),
+      forall argvals k t m (post: trace -> io_trace -> mem -> list word -> Prop),
         call_spec e1 (argnames1, retnames1, body1) k t m argvals post ->
         call_spec e2 (argnames2, retnames2, body2) k t m argvals
           (fun k2' t' m' retvals =>
@@ -2781,8 +2658,8 @@ Notation qevent := Semantics.qevent. Search qevent.
                post (k1'' ++ k) t' m' retvals /\
                  k2' = k2'' ++ k /\
                    forall next,                   
-                     predicts next (rev k1'') ->
-                     predicts (snext_fun e1 next [] (argnames1, retnames1, body1)) (rev k2'')).
+                     s_predicts next (rev k1'') ->
+                     s_predicts (snext_fun e1 next [] (argnames1, retnames1, body1)) (rev k2'')).
   Proof.
     intros. eapply spill_fun_correct_aux; try eassumption.
     unfold spilling_correct_for.

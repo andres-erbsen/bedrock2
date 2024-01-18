@@ -187,6 +187,15 @@ Section WithIOEvent.
         intros H. eapply predict_with_prefix_works in H. rewrite app_nil_r in H. eassumption.
       Qed.
       
+      Lemma predict_with_prefix_ext x1 x2 f1 f2  :
+        (forall y1 y2, f1 y1 y2 = f2 y1 y2) ->
+        predict_with_prefix x1 x2 f1 = predict_with_prefix x1 x2 f2.
+      Proof.
+        intros. generalize dependent x2. induction x1.
+        - intros. simpl. apply H.
+        - intros. simpl. destruct x2; try reflexivity. apply IHx1. intros. apply H.
+      Qed.
+      
       Lemma predict_cons e f t1 t2 :
         predicts f (t1 ++ e :: t2) ->
         f t1 = q e.

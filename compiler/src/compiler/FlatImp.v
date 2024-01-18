@@ -1,4 +1,6 @@
 Require Import Coq.Bool.Bool.
+Require Import Coq.Relations.Relation_Operators.
+Require Import Coq.Wellfounded.Transitive_Closure.
 Require Import Coq.ZArith.ZArith.
 Require Import Coq.Lists.List. Import ListNotations.
 Require Import bedrock2.MetricLogging.
@@ -53,6 +55,31 @@ Section Syntax.
     | SSkip
     | SCall(binds: list varname)(f: String.string)(args: list varname)
     | SInteract(binds: list varname)(a: String.string)(args: list varname).
+
+  Inductive subexpression : stmt -> stmt -> Prop :=
+  | SStackalloc_subexp : forall x1 x2 s, subexpression s (SStackalloc x1 x2 s)
+  | SIf_then_subexp : forall x1 x2 s, subexpression s (SIf x1 s x2)
+  | SIf_else_subexp : forall x1 x2 s, subexpression s (SIf x1 x2 s)
+  | SLoop_body1_subexp : forall x1 x2 s, subexpression s (SLoop s x1 x2)
+  | SLoop_body2_subexp : forall x1 x2 s, subexpression s (SLoop x1 x2 s)
+  | SSeq_body1_subexp : forall x1 s, subexpression s (SSeq s x1)
+  | SSeq_body2_subexp : forall x1 s, subexpression s (SSeq x1 s).
+  
+  Lemma wf_subexpression : well_founded subexpression.
+  Proof.
+    cbv [well_founded]. intros a. induction a.
+    all: constructor; intros ? H; inversion H; subst; assumption.
+  Defined.
+  
+  Definition stmt_lt :=
+    clos_trans _ subexpression.
+  
+  Lemma wf_stmt_lt : well_founded stmt_lt.
+  Proof.
+    cbv [stmt_lt]. Search clos_trans.
+    apply Transitive_Closure.wf_clos_trans.
+    apply wf_subexpression.
+  Defined.
 
   Definition stmt_size_body(rec: stmt -> Z)(s: stmt): Z :=
     match s with
