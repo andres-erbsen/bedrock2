@@ -1720,10 +1720,12 @@ Section Proofs.
       do 2 eexists. split.
       { instantiate (1 := [_]). reflexivity. } split.
       { instantiate (1 := [_]). reflexivity. }
-      exists (S O). intros. destruct fuel as [|fuel']; [blia|].
-      simpl. apply Semantics.predict_cons in H0. rewrite H0.
-      simpl. econstructor; try reflexivity.
-      assumption. Print concrete_leakage_of_instr.
+      intros. eapply predicts_ext; [|intros; symmetry; rewrite rnext_stmt_step; reflexivity].
+      cbv [rnext_stmt_body]. apply Semantics.predict_cons in H0. rewrite H0.
+      cbn -[rv_predict_with_prefix]. eapply predict_with_prefix_works_eq.
+      { reflexivity. }
+      intros _. eapply predicts_ext. 1: eassumption. intros. cbv beta. f_equal.
+      repeat (rewrite app_length || cbn [app length rev]). blia.
       
     - idtac "Case compile_stmt_correct/SStore".
       inline_iff1.
@@ -1749,10 +1751,12 @@ Section Proofs.
       do 2 eexists. split.
       { instantiate (1 := [_]). reflexivity. } split.
       { instantiate (1 := [_]). reflexivity. }
-      exists (S O). intros. destruct fuel as [|fuel']; [blia|].
-      simpl. apply Semantics.predict_cons in H7. rewrite H7.
-      simpl. econstructor; try reflexivity.
-      assumption.
+      intros. eapply predicts_ext; [|intros; symmetry; rewrite rnext_stmt_step; reflexivity].
+      cbv [rnext_stmt_body]. apply Semantics.predict_cons in H7. rewrite H7.
+      cbn -[rv_predict_with_prefix]. eapply predict_with_prefix_works_eq.
+      { reflexivity. }
+      intros _. eapply predicts_ext. 1: eassumption. intros. cbv beta. f_equal.
+      repeat (rewrite app_length || cbn [app length rev]). blia.
       
     - idtac "Case compile_stmt_correct/SInlinetable".
       inline_iff1.
@@ -1777,12 +1781,12 @@ Section Proofs.
       do 2 eexists. split.
       { instantiate (1 := [_]). reflexivity. } split.
       { instantiate (1 := [_; _; _]). reflexivity. }
-      exists (S O). intros. destruct fuel as [|fuel']; [blia|].
-      cbn [rev rnext_stmt]. apply Semantics.predict_cons in H14. rewrite H14.
-      cbn [Semantics.quot]. cbn [List.app].
-      eapply predictLE_with_prefix_works_eq.
+      intros. eapply predicts_ext; [|intros; symmetry; rewrite rnext_stmt_step; reflexivity].
+      cbv [rnext_stmt_body]. apply Semantics.predict_cons in H14. rewrite H14.
+      cbn -[rv_predict_with_prefix]. eapply predict_with_prefix_works_eq.
       { reflexivity. }
-      assumption.
+      intros _. eapply predicts_ext. 1: eassumption. intros. cbv beta. f_equal.
+      repeat (rewrite app_length || cbn [app length rev]). blia.
       
     - idtac "Case compile_stmt_correct/SStackalloc".
       rename H1 into IHexec.
@@ -1939,21 +1943,22 @@ Section Proofs.
         * (*ct stuff*)
           do 2 eexists. split.
           { rewrite app_one_cons. rewrite app_assoc. reflexivity. } split.
-          { cbv [trivialBind trivialReturn]. rewrite app_one_cons, app_assoc. reflexivity. }
-          exists (S F). intros. destruct fuel as [|fuel']; [blia|].
-          cbn [rnext_stmt]. simpl_addrs. eapply predictLE_with_prefix_works_eq.
+          { cbv [trivialBind trivialReturn Mtriv]. rewrite app_one_cons, app_assoc. reflexivity. }
+          intros. eapply predicts_ext; [|intros; symmetry; rewrite rnext_stmt_step; reflexivity].
+          cbv [rnext_stmt_body]. simpl_addrs. eapply predict_with_prefix_works_eq.
           { rewrite rev_app_distr. reflexivity. }
-          simpl_addrs. eapply H7p7p2.
+          simpl_addrs. intros _. eapply H7p7p2.
           { rewrite rev_app_distr in H7. repeat rewrite <- app_assoc in H7.
             repeat rewrite <- app_assoc. simpl in H7. simpl.
             remember (p_sp + _) as new_sp. eassert (new_sp = _).
-            2: { rewrite H13 in H7. eapply H7. }
+            2: { rewrite H12 in H7. eapply H7. }
             subst. solve_word_eq word_ok. }
           { rewrite rev_app_distr in H10. repeat rewrite <- app_assoc. simpl in H10. simpl.
             remember (p_sp + _) as new_sp. eassert (new_sp = _).
-            2: { rewrite H13 in H10. eapply H10. }
+            2: { rewrite H12 in H10. eapply predicts_ext. 1: eapply H10.
+                 intros. cbv beta. rewrite rev_app_distr. simpl. f_equal.
+                 repeat (rewrite app_length || cbn [app length]). blia. }
             subst. solve_word_eq word_ok. }
-          blia.
 
     - idtac "Case compile_stmt_correct/SLit".
       inline_iff1.
@@ -1980,10 +1985,11 @@ Section Proofs.
         do 2 eexists. split.
         { instantiate (1 := []). reflexivity. } split.
         { reflexivity. }
-        exists (S O). intros. destruct fuel as [|fuel']; [blia|].
-        simpl. eapply predictLE_with_prefix_works_eq.
-        { rewrite rev_involutive. reflexivity. }
-        { rewrite app_nil_r in H8. assumption. }
+        intros. eapply predicts_ext; [|intros; symmetry; rewrite rnext_stmt_step; reflexivity].
+        cbv [rnext_stmt_body]. rewrite rev_involutive in *. eapply predict_with_prefix_works_eq.
+        { reflexivity. }
+        intros _. eapply predicts_ext. 1: eassumption. intros. cbv beta. rewrite app_nil_r in *.
+        f_equal. repeat (rewrite app_length || cbn [app length rev]). blia.
         
     - idtac "Case compile_stmt_correct/SOp".
       assert (x <> RegisterNames.sp). {
@@ -2024,79 +2030,85 @@ Section Proofs.
                  eauto 8 with map_hints
                | try fwd; try eauto 8 with map_hints ]
            end.
-      Ltac doSomething fuel H10 :=
-        do 2 eexists; split; [instantiate (1 := []); reflexivity|
-                               split; [instantiate (1 := [_]); reflexivity|
-                                        exists (S O); intros; destruct fuel as [|fuel']; [blia|]];
-                               simpl; econstructor; try reflexivity;
-                               assumption].      
-      all: try doSomething fuel H10.
+      Ltac doSomething := do 2 eexists; split; [instantiate (1 := []); reflexivity|];
+        split; [instantiate (1 := [_]); reflexivity|]; intros;
+        eapply predicts_ext; [|intros; symmetry; rewrite rnext_stmt_step; reflexivity];
+        cbv [rnext_stmt_body]; cbn -[rv_predict_with_prefix]; eapply predict_with_prefix_works_eq; [reflexivity|]; intros _; eapply predicts_ext; [eassumption|]; intros; cbv beta; f_equal; repeat (rewrite app_length || cbn [app length rev]); blia. 
+
+      all: try doSomething.
       5: {
         do 2 eexists. split.
         { instantiate (1 := [_; _]). reflexivity. } split.
         { instantiate (1 := [_]). reflexivity. }
-        exists (S O). intros. destruct fuel as [|fuel']; [blia|].
-        simpl. simpl in H7. assert (H7' := H7). Check Semantics.predict_cons.
-        apply (Semantics.predict_cons _ _ t0) in H7.
+        intros. eapply predicts_ext; [|intros; symmetry; rewrite rnext_stmt_step; reflexivity].
+        cbv [rnext_stmt_body]. cbn -[rv_predict_with_prefix]. simpl in H7. assert (H7' := H7).
+        apply (Semantics.predict_cons _ _ _ _ t0) in H7.
         rewrite app_one_cons in H7'. rewrite app_assoc in H7'.
-        apply (Semantics.predict_cons _ _ (t0 ++ _)) in H7'.
+        apply (Semantics.predict_cons _ _ _ _ (t0 ++ _)) in H7'.
         rewrite H7. simpl. rewrite H7'. simpl.
         econstructor.
         { reflexivity. }
         { intros. reflexivity. }
-        { assumption. } }
+        { eapply predicts_ext. 1: eassumption. intros. cbv beta. f_equal.
+          repeat (rewrite app_length || cbn [app length rev]). blia. } }
       6: {
         do 2 eexists. split.
         { instantiate (1 := [_; _]). reflexivity. } split.
         { instantiate (1 := [_]). reflexivity. }
-        exists (S O). intros. destruct fuel as [|fuel']; [blia|].
-        simpl. simpl in H7. assert (H7' := H7). Check Semantics.predict_cons.
-        apply (Semantics.predict_cons _ _ t0) in H7.
+        intros. eapply predicts_ext; [|intros; symmetry; rewrite rnext_stmt_step; reflexivity].
+        cbv [rnext_stmt_body]. cbn -[rv_predict_with_prefix]. simpl in H7. assert (H7' := H7).
+        apply (Semantics.predict_cons _ _ _ _ t0) in H7.
         rewrite app_one_cons in H7'. rewrite app_assoc in H7'.
-        apply (Semantics.predict_cons _ _ (t0 ++ _)) in H7'.
+        apply (Semantics.predict_cons _ _ _ _ (t0 ++ _)) in H7'.
         rewrite H7. simpl. rewrite H7'. simpl.
         econstructor.
         { reflexivity. }
         { intros. reflexivity. }
-        { assumption. } }
+        { eapply predicts_ext. 1: eassumption. intros. cbv beta. f_equal.
+          repeat (rewrite app_length || cbn [app length rev]). blia. } }
       10: {
         do 2 eexists. split.
         { instantiate (1 := [_]). reflexivity. } split.
         { instantiate (1 := [_]). reflexivity. }
-        exists (S O). intros. destruct fuel as [|fuel']; [blia|].
-        simpl. simpl in H7. apply Semantics.predict_cons in H7. rewrite H7. simpl.
-        econstructor.
+        intros. eapply predicts_ext; [|intros; symmetry; rewrite rnext_stmt_step; reflexivity].
+        cbv [rnext_stmt_body]. cbn -[rv_predict_with_prefix]. simpl in H7.
+        apply (Semantics.predict_cons _ _ _ _ t0) in H7. rewrite H7. cbn -[rv_predict_with_prefix].
+        eapply predict_with_prefix_works_eq.
         { reflexivity. }
-        { intros. reflexivity. }
-        { assumption. } }
+        { intros. eapply predicts_ext. 1: eassumption. intros. cbv beta. f_equal.
+          repeat (rewrite app_length || cbn [app length rev]). blia. } }
       11: {
         do 2 eexists. split.
         { instantiate (1 := [_]). reflexivity. } split.
         { instantiate (1 := [_]). reflexivity. }
-        exists (S O). intros. destruct fuel as [|fuel']; [blia|].
-        simpl. simpl in H7. apply Semantics.predict_cons in H7. rewrite H7. simpl.
-        econstructor.
+        intros. eapply predicts_ext; [|intros; symmetry; rewrite rnext_stmt_step; reflexivity].
+        cbv [rnext_stmt_body]. cbn -[rv_predict_with_prefix]. simpl in H7.
+        apply (Semantics.predict_cons _ _ _ _ t0) in H7. rewrite H7. cbn -[rv_predict_with_prefix].
+        eapply predict_with_prefix_works_eq.
         { reflexivity. }
-        { intros. reflexivity. }
-        { assumption. } }
+        { intros. eapply predicts_ext. 1: eassumption. intros. cbv beta. f_equal.
+          repeat (rewrite app_length || cbn [app length rev]). blia. } }
       12: {
         do 2 eexists. split.
         { instantiate (1 := [_]). reflexivity. } split.
         { instantiate (1 := [_]). reflexivity. }
-        exists (S O). intros. destruct fuel as [|fuel']; [blia|].
-        simpl. simpl in H7. apply Semantics.predict_cons in H7. rewrite H7. simpl.
-        econstructor.
+        intros. eapply predicts_ext; [|intros; symmetry; rewrite rnext_stmt_step; reflexivity].
+        cbv [rnext_stmt_body]. cbn -[rv_predict_with_prefix]. simpl in H7.
+        apply (Semantics.predict_cons _ _ _ _ t0) in H7. rewrite H7. cbn -[rv_predict_with_prefix].
+        eapply predict_with_prefix_works_eq.
         { reflexivity. }
-        { intros. reflexivity. }
-        { assumption. } }
+        { intros. eapply predicts_ext. 1: eassumption. intros. cbv beta. f_equal.
+          repeat (rewrite app_length || cbn [app length rev]). blia. } }
       15: {
         do 2 eexists. split.
         { instantiate (1 := []). reflexivity. } split.
         { instantiate (1 := [_; _]). reflexivity. }
-        exists (S O). intros. destruct fuel as [|fuel']; [blia|].
-        eapply predictLE_with_prefix_works_eq.
-        { simpl. reflexivity. }
-        { assumption. } }
+        intros. eapply predicts_ext; [|intros; symmetry; rewrite rnext_stmt_step; reflexivity].
+        cbv [rnext_stmt_body].
+        eapply predict_with_prefix_works_eq.
+        { reflexivity. }
+        { intros _. eapply predicts_ext. 1: eassumption. intros. cbv beta.
+          cbn [rev length List.app leak_op_register]. f_equal. blia. } }
       
       all: match goal with
            | y: operand, H: context[Syntax.bopname.eq] |- _ => idtac
@@ -2104,37 +2116,40 @@ Section Proofs.
                   valid_InvalidInstruction (InvalidInstruction (-1))) by (eapply invert_ptsto_instr; ecancel_assumption)
            | |- _ => run1det; run1done
            end.
-      all: try doSomething fuel H7.
+      all: try doSomething.
       6: {
         do 2 eexists. split.
         { instantiate (1 := [_]). reflexivity. } split.
         { instantiate (1 := [_]). reflexivity. }
-        exists (S O). intros. destruct fuel as [|fuel']; [blia|].
-        simpl. simpl in H6. apply Semantics.predict_cons in H6. rewrite H6. simpl.
-        econstructor.
+        intros. eapply predicts_ext; [|intros; symmetry; rewrite rnext_stmt_step; reflexivity].
+        cbv [rnext_stmt_body].
+        apply predict_cons in H6. rewrite H6. cbn -[rv_predict_with_prefix].
+        eapply predict_with_prefix_works_eq.
         { reflexivity. }
-        { intros. reflexivity. }
-        { assumption. } }
+        { intros _. eapply predicts_ext. 1: eassumption. intros. cbv beta.
+          cbn [rev length List.app leak_op_register]. f_equal. blia. } }
       6: {
         do 2 eexists. split.
         { instantiate (1 := [_]). reflexivity. } split.
         { instantiate (1 := [_]). reflexivity. }
-        exists (S O). intros. destruct fuel as [|fuel']; [blia|].
-        simpl. simpl in H6. apply Semantics.predict_cons in H6. rewrite H6. simpl.
-        econstructor.
+        intros. eapply predicts_ext; [|intros; symmetry; rewrite rnext_stmt_step; reflexivity].
+        cbv [rnext_stmt_body].
+        apply predict_cons in H6. rewrite H6. cbn -[rv_predict_with_prefix].
+        eapply predict_with_prefix_works_eq.
         { reflexivity. }
-        { intros. reflexivity. }
-        { assumption. } }
+        { intros _. eapply predicts_ext. 1: eassumption. intros. cbv beta.
+          cbn [rev length List.app leak_op_register]. f_equal. blia. } }
       6: {
         do 2 eexists. split.
         { instantiate (1 := [_]). reflexivity. } split.
         { instantiate (1 := [_]). reflexivity. }
-        exists (S O). intros. destruct fuel as [|fuel']; [blia|].
-        simpl. simpl in H6. apply Semantics.predict_cons in H6. rewrite H6. simpl.
-        econstructor.
+        intros. eapply predicts_ext; [|intros; symmetry; rewrite rnext_stmt_step; reflexivity].
+        cbv [rnext_stmt_body].
+        apply predict_cons in H6. rewrite H6. cbn -[rv_predict_with_prefix].
+        eapply predict_with_prefix_works_eq.
         { reflexivity. }
-        { intros. reflexivity. }
-        { assumption. } }
+        { intros _. eapply predicts_ext. 1: eassumption. intros. cbv beta.
+          cbn [rev length List.app leak_op_register]. f_equal. blia. } }
       all:
         match goal with
         | y: operand, H: context[Syntax.bopname.eq] |- _ => idtac
@@ -2165,10 +2180,12 @@ Section Proofs.
       do 2 eexists. split.
       { instantiate (1 := []). reflexivity. } split.
       { instantiate (1 := [_]). reflexivity. }
-      exists (S O). intros. destruct fuel as [|fuel']; [blia|].
-      eapply predictLE_with_prefix_works_eq.
+      intros. eapply predicts_ext; [|intros; symmetry; rewrite rnext_stmt_step; reflexivity].
+      cbv [rnext_stmt_body].
+      eapply predict_with_prefix_works_eq.
       { reflexivity. }
-      { rewrite app_nil_r in H9. assumption. }
+      { intros _. rewrite app_nil_r in H9. eapply predicts_ext. 1: eassumption.
+        intros. cbv beta. f_equal. cbn [length rev List.app]. blia. }
 
     - idtac "Case compile_stmt_correct/SIf/Then".
       (* execute branch instruction, which will not jump *)
@@ -2197,18 +2214,21 @@ Section Proofs.
           { rewrite app_one_cons. rewrite app_assoc. reflexivity. } split.
           { rewrite app_one_cons. rewrite (app_one_cons _ getTrace).
             repeat rewrite app_assoc. reflexivity. }
-          exists (S F). intros. destruct fuel as [|fuel']; [blia|].
-          cbn [rnext_stmt]. rewrite rev_app_distr in H4. simpl in H4.
+          intros. eapply predicts_ext; [|intros; symmetry; rewrite rnext_stmt_step; reflexivity].
+          cbn [rnext_stmt_body]. rewrite rev_app_distr in H4. simpl in H4.
           assert (H4' := H4).
           apply Semantics.predict_cons in H4. rewrite H4. cbn [Semantics.quot].
-          eapply predictLE_with_prefix_works_eq.
+          eapply predict_with_prefix_works_eq.
           { rewrite rev_app_distr. reflexivity. }
-          { rewrite rev_app_distr. rewrite <- (app_assoc _ _ rt''). eapply H4p10p2.
+          { rewrite rev_app_distr. rewrite <- (app_assoc _ _ rt''). intros _. eapply H4p10p2.
             { rewrite <- app_assoc. simpl. eassumption. }
-            { eapply predictLE_with_prefix_works_eq.
+            { eapply predicts_ext; [|intros; rewrite skipn_correct; reflexivity].
+              eapply predict_with_prefix_works_eq.
               { reflexivity. }
-              { rewrite <- app_assoc. simpl. rewrite rev_app_distr in H5. eassumption. } }
-            { blia. } }
+              { intros _. rewrite <- app_assoc. eapply predicts_ext; [eassumption|].
+                intros. cbv beta. repeat rewrite rev_app_distr. repeat rewrite <- app_assoc.
+                cbn [rev List.app length negb]. f_equal.
+                repeat (rewrite app_length || cbn [app length]). blia. } } }
 
     - idtac "Case compile_stmt_correct/SIf/Else".
       (* execute branch instruction, which will jump over then-branch *)
@@ -2238,18 +2258,21 @@ Section Proofs.
           do 2 eexists. split.
           { rewrite app_one_cons. rewrite app_assoc. reflexivity. } split.
           { rewrite app_one_cons. rewrite app_assoc. reflexivity. }
-          exists (S F). intros. destruct fuel as [|fuel']; [blia|].
-          cbn [rnext_stmt]. rewrite rev_app_distr in H4. simpl in H4.
+          intros. eapply predicts_ext; [|intros; symmetry; rewrite rnext_stmt_step; reflexivity].
+          cbn [rnext_stmt_body]. rewrite rev_app_distr in H4. simpl in H4.
           assert (H4' := H4).
           apply Semantics.predict_cons in H4. rewrite H4. cbn [Semantics.quot].
-          eapply predictLE_with_prefix_works_eq.
+          eapply predict_with_prefix_works_eq.
           { rewrite rev_app_distr. reflexivity. }
-          { eapply H4p10p2.
+          { intros _. eapply H4p10p2.
             { rewrite <- app_assoc. simpl. eassumption. }
-            { eapply predictLE_with_prefix_works_eq.
+            { eapply predicts_ext; [|intros; rewrite skipn_correct; reflexivity].
+              eapply predict_with_prefix_works_eq.
               { reflexivity. }
-              { rewrite <- app_assoc. simpl. rewrite rev_app_distr in H5. eassumption. } }
-            { blia. } }
+              { rewrite <- app_assoc. intros _.
+                eapply predicts_ext. 1: eassumption. intros. cbv beta.
+                repeat rewrite rev_app_distr. repeat rewrite <- app_assoc. f_equal.
+                repeat (rewrite app_length || cbn [length List.app rev]). blia. } } }
 
     - idtac "Case compile_stmt_correct/SLoop".
       match goal with
@@ -2327,27 +2350,26 @@ Section Proofs.
           { rewrite app_one_cons. repeat rewrite app_assoc. reflexivity. } split.
           { rewrite app_one_cons. rewrite (app_one_cons _ (rt' ++ _)).
             repeat rewrite app_assoc. reflexivity. }
-          exists (S (F + F0 + F1)). intros. destruct fuel as [|fuel']; [blia|].
-          cbn [rnext_stmt].
+          intros. eapply predicts_ext; [|intros; symmetry; rewrite rnext_stmt_step; reflexivity].
+          cbn [rnext_stmt_body].
           repeat (rewrite rev_app_distr in * || cbn [List.app] in * || rewrite <- app_assoc in *).
           eapply H3p5p2.
           { eassumption. }
-          2: blia.
           simpl in H3. assert (H3' := H3). rewrite app_assoc in H3.
           apply Semantics.predict_cons in H3. rewrite H3. clear H3.
-          cbn [Semantics.quot].
-          eapply predictLE_with_prefix_works_eq.
+          cbn [Semantics.quot]. eapply predicts_ext; [|intros; rewrite skipn_correct; reflexivity].
+          eapply predict_with_prefix_works_eq.
           { reflexivity. }
-          eapply H3p8p2.
+          intros _. eapply H3p8p2.
           { repeat rewrite <- app_assoc. simpl. eassumption. }
-          2: blia.
-          eapply predictLE_with_prefix_works_eq.
+          eapply predicts_ext; [|intros; rewrite skipn_correct; reflexivity].
+          eapply predict_with_prefix_works_eq.
           { reflexivity. } 
-          { eapply H3p12p2.
-            { repeat rewrite <- app_assoc. simpl. eassumption. }
-            2: blia.
-            repeat rewrite <- app_assoc.
-            assumption. }
+          intros _. eapply H3p12p2.
+          { repeat rewrite <- app_assoc. simpl. eassumption. }
+          eapply predicts_ext. 1: eassumption. intros. cbv beta.
+          repeat rewrite <- app_assoc. f_equal.
+          repeat (rewrite app_length || cbn [List.app length rev]). blia.
           
         * (* false: done, jump over body2 *)
           eapply runsToStep. {
@@ -2361,19 +2383,20 @@ Section Proofs.
           do 2 eexists. split.
           { rewrite app_one_cons. rewrite app_assoc. reflexivity. } split.
           { rewrite app_one_cons. rewrite app_assoc. reflexivity. }
-          exists (S F). intros. destruct fuel as [|fuel']; [blia|].
-          cbn [rnext_stmt].
-          Search body1.
+          intros. eapply predicts_ext; [|intros; symmetry; rewrite rnext_stmt_step; reflexivity].
+          cbn [rnext_stmt_body]. 
           rewrite rev_app_distr. rewrite <- app_assoc.
           eapply H3p5p2.
           { simpl in H3. rewrite <- app_assoc in H3. eassumption. }
-          2: blia.
           simpl in H3. rewrite <- app_assoc in H3. rewrite app_assoc in H3.
           simpl in H3. assert (H3' := H3). apply Semantics.predict_cons in H3.
           rewrite H3. cbn [Semantics.quot].
-          eapply predictLE_with_prefix_works_eq.
+          eapply predicts_ext; [|intros; rewrite skipn_correct; reflexivity].
+          eapply predict_with_prefix_works_eq.
           { reflexivity. }
-          rewrite <- app_assoc. simpl in H5. assumption.
+          intros _. eapply predicts_ext. 1: eassumption. intros. cbv beta.
+          repeat rewrite rev_app_distr. repeat rewrite <- app_assoc. f_equal.
+          repeat (rewrite app_length || cbn [List.app length rev]). blia.
 
     - idtac "Case compile_stmt_correct/SSeq".
       on hyp[(FlatImpConstraints.uses_standard_arg_regs s1); runsTo]
@@ -2403,26 +2426,27 @@ Section Proofs.
           do 2 eexists. split.
           { rewrite app_assoc. reflexivity. } split.
           { rewrite app_assoc. reflexivity. }
-          exists (S (F + F0)). intros. destruct fuel as [|fuel']; [blia|].
-          cbn [rnext_stmt].
+          intros. eapply predicts_ext; [|intros; symmetry; rewrite rnext_stmt_step; reflexivity].
+          cbn [rnext_stmt_body].
           rewrite rev_app_distr. rewrite <- app_assoc.
           eapply H1p5p2.
           { rewrite rev_app_distr in H1. rewrite <- app_assoc in H1. eassumption. }
-          2: blia.
+          eapply predicts_ext; [|intros; rewrite skipn_correct; reflexivity].
           eapply H1p8p2.
           { repeat rewrite <- app_assoc. rewrite rev_app_distr in H1.
             repeat rewrite <- app_assoc in H1. eassumption. }
-          2: blia.
-          repeat rewrite <- app_assoc. rewrite rev_app_distr in H5.
-          repeat rewrite <- app_assoc in H5. eassumption.
+          eapply predicts_ext. 1: eassumption. intros. cbv beta.
+          repeat rewrite rev_app_distr. repeat rewrite <- app_assoc. f_equal.
+          repeat (rewrite app_length || cbn [List.app length rev]). blia.
 
     - idtac "Case compile_stmt_correct/SSkip".
       run1done.
       do 2 eexists. split.
       { instantiate (1 := []). reflexivity. } split.
       { instantiate (1 := []). reflexivity. }
-      exists (S O). intros. destruct fuel as [|fuel']; [blia|].
-      cbn [rnext_stmt]. rewrite app_nil_r in H4. assumption.
+      intros. simpl. eapply predicts_ext. 1: eassumption. intros. cbv beta.
+      rewrite rnext_stmt_step. cbn [rnext_stmt_body]. simpl. rewrite app_nil_r.
+      reflexivity.
       
   Qed. (* <-- takes a while *)
 
