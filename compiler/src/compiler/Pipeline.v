@@ -6,6 +6,7 @@ Require        compiler.ExprImp.
 Require Export compiler.FlattenExprDef.
 Require Export compiler.FlattenExpr.
 Require        compiler.FlatImp.
+Require Import compiler.FlatToRiscvDef.
 Require Export riscv.Spec.Machine.
 Require Export riscv.Platform.Run.
 Require Export riscv.Platform.RiscvMachine.
@@ -95,12 +96,9 @@ Section WithWordAndMem.
                   exists k1'' k2'',
                     post (k1'' ++ k1) t' m' retvals /\
                       k2' = k2'' ++ k2 /\
-                      exists F,
-                      forall fuel,
-                        (F <= fuel)%nat ->
-                        forall next,
-                          L1.(Predicts) next (rev k1'') ->
-                          L2.(Predicts) (f fuel next) (rev k2''));
+                      forall next,
+                        L1.(Predicts) next (rev k1'') ->
+                        L2.(Predicts) (f next) (rev k2''));
   }.
 
   Arguments phase_correct : clear implicits.
@@ -126,7 +124,7 @@ Section WithWordAndMem.
     specialize (C23 a p2 V12 H0 L2.(SettingsInhabited) s2 fname).
     specialize (C12 p1 a H E s1 L2.(SettingsInhabited) fname).
     destruct C12 as [f12 C12]. destruct C23 as [f23 C23].
-    exists (fun n next1 => f23 n (f12 n next1)). intros.
+    exists (fun next1 => f23 (f12 next1)). intros.
     eapply L3.(WeakenCall).
     { apply C23. apply C12. apply H1. }
     simpl. intros. destruct H2 as [k2'' [k3'' [H2 H3] ] ].
@@ -134,11 +132,6 @@ Section WithWordAndMem.
     exists k1'', k3''.
     intuition eauto.
     apply app_inv_tail in H3. subst.
-    destruct H6 as [F23 H6]. destruct H7 as [F12 H7].
-    exists (plus F12 F23).
-    intros.
-    specialize (H6 fuel ltac:(blia)).
-    specialize (H7 fuel ltac:(blia)).
     eauto.
     Unshelve. exact nil.
   Qed.
@@ -231,7 +224,7 @@ Section WithWordAndMem.
                                  Valid := map.forall_values ExprImp.valid_fun;
                                  Call := locals_based_call_spec Semantics.exec;
                                  SettingsInhabited := tt;
-                                 Predicts := predicts;
+                                 Predicts := s_predicts;
                                  WeakenCall := locals_based_call_spec_weaken _ Semantics.exec.weaken;
     |}.
     (* |                 *)
@@ -242,7 +235,7 @@ Section WithWordAndMem.
                                          Valid := map.forall_values ParamsNoDup;
                                          Call := locals_based_call_spec FlatImp.exec;
                                          SettingsInhabited := tt;
-                                         Predicts := predicts;
+                                         Predicts := s_predicts;
                                          WeakenCall := locals_based_call_spec_weaken _ FlatImp.exec.weaken;
     |}.
 
@@ -259,7 +252,7 @@ Section WithWordAndMem.
                                        Valid := map.forall_values ParamsNoDup;
                                        Call := locals_based_call_spec FlatImp.exec;
                                        SettingsInhabited := tt;
-                                       Predicts := predicts;
+                                       Predicts := s_predicts;
                                        WeakenCall := locals_based_call_spec_weaken _ FlatImp.exec.weaken;
     |}.
     (* |                 *)
@@ -270,7 +263,7 @@ Section WithWordAndMem.
       Valid := map.forall_values FlatToRiscvDef.valid_FlatImp_fun;
                                       Call := locals_based_call_spec FlatImp.exec;
                                       SettingsInhabited := tt;
-                                      Predicts := predicts;
+                                      Predicts := s_predicts;
                                       WeakenCall := locals_based_call_spec_weaken _ FlatImp.exec.weaken;
     |}.
     (* |                 *)
@@ -305,7 +298,7 @@ Section WithWordAndMem.
                                    Valid '(insts, finfo, req_stack_size) := True;
                                    Call := riscv_call;
                                    SettingsInhabited := (word.of_Z 0, word.of_Z 0);
-                                   Predicts := predictsLE;
+                                   Predicts := r_predicts;
                                    WeakenCall := riscv_call_weaken;
     |}.
 
@@ -321,8 +314,6 @@ Section WithWordAndMem.
       unfold flatten_function in *. fwd.
       eapply H. eassumption.
     Qed.
-
-    Check flattenStmt_correct_aux. Check exec.
 
     Lemma flattening_correct: phase_correct SrcLang FlatWithStrVars flatten_functions.
     Proof.
@@ -365,7 +356,7 @@ Section WithWordAndMem.
           eapply ListSet.In_list_union_l. eapply ListSet.In_list_union_l. assumption.
         + eapply @freshNameGenState_disjoint_fbody.
       - simpl. intros. fwd. exists retvals. intuition eauto using map.getmany_of_list_extends.
-        exists k'', k''. intuition eauto. exists O. intros. instantiate (1 := fun n t => t).
+        exists k'', k''. intuition. instantiate (1 := fun t => t).
         simpl. assumption.
        Qed.
 
@@ -408,8 +399,8 @@ Section WithWordAndMem.
         1: eauto. Search exec.
         eapply exec.exec_to_other_trace. eauto.
       - simpl. intros. fwd. exists retvals. intuition.
-        eexists. eexists. intuition eauto. exists O. intros.
-        instantiate (1 := fun n t => t). simpl. assumption.
+        eexists. eexists. intuition eauto.
+        instantiate (1 := fun next => next). simpl. assumption.
     Qed.
 
     Lemma regalloc_functions_NoDup: forall funs funs',
@@ -467,7 +458,7 @@ Section WithWordAndMem.
       - simpl. intros. fwd. eexists. split.
         2: eexists; eexists; intuition eauto.
         1: eauto using states_compat_getmany.
-        exists O. intros. instantiate (1 := fun n next => next). simpl. assumption.
+        instantiate (1 := fun next => next). simpl. assumption.
     Qed.
 
     Ltac debool :=
@@ -524,7 +515,7 @@ Section WithWordAndMem.
       unfold locals_based_call_spec. intros.
       Check snext_fun.
       Check (match (map.get p1 fname) with | Some finfo => finfo | None => (nil, nil, SSkip) end).
-      exists (fun fuel next => (snext_fun p1 fuel next [] (match (map.get p1 fname) with | Some finfo => finfo | None => (nil, nil, SSkip) end))).
+      exists (fun next => (snext_fun p1 next [] (match (map.get p1 fname) with | Some finfo => finfo | None => (nil, nil, SSkip) end))).
       intros. fwd.
       pose proof H0 as GL.
       unfold spill_functions in GL.
@@ -551,7 +542,7 @@ Section WithWordAndMem.
                      post (k'' ++ k1) t' m' retvals).
         simpl. eexists. intuition. }
       simpl. intros. fwd. exists retvals. split; [assumption|]. eexists. eexists.
-      intuition eauto. exists F.
+      intuition eauto.
       apply app_inv_tail in H2p1p0p0. subst. auto.
     Qed.
 
@@ -573,7 +564,7 @@ Section WithWordAndMem.
           { eapply E. eexists. apply H1p0. }
           Check flat_to_riscv_correct. eapply riscv_call_weaken.
           { eapply flat_to_riscv_correct; eauto. }
-          simpl. intros. fwd. eexists. eexists. intuition eauto. exists F.
+          simpl. intros. fwd. eexists. eexists. intuition eauto.
           intros. instantiate (1 := fun _ _ => _). simpl.
           rewrite H1p0 in H1p0'. injection H1p0'. intros. subst.
           eapply H1p5; eauto.
@@ -684,12 +675,9 @@ Section WithWordAndMem.
                      final.(getPc) = ret_addr /\
                      machine_ok p_funcs stack_lo stack_hi instrs mH' Rdata Rexec final /\
                      final.(getTrace) = kL'' ++ initial.(getTrace) /\
-                     exists F,
-                     forall fuel,
-                       (F <= fuel)%nat ->
-                       forall next,
-                         predicts next (rev kH'') ->
-                         predictsLE (f fuel next) (rev kL'')).
+                     forall next,
+                       s_predicts next (rev kH'') ->
+                       r_predicts (f next) (rev kL'')).
     Proof.
       intros.
       pose proof (phase_preserves_post composed_compiler_correct) as C.
@@ -763,12 +751,9 @@ Section WithWordAndMem.
                  final.(getPc) = ret_addr /\
                  machine_ok p_funcs stack_lo stack_hi instrs mH' Rdata Rexec final /\
                  final.(getTrace) = kL'' ++ initial.(getTrace) /\
-                 exists F,
-                 forall fuel,
-                   (F <= fuel)%nat ->
-                   forall next,
-                     predicts next (rev kH'') ->
-                     predictsLE (f fuel next) (rev kL'')).
+                 forall next,
+                   s_predicts next (rev kH'') ->
+                   r_predicts (f next) (rev kL'')).
     Proof.
       intros. Check compiler_correct.
       destruct (compiler_correct fs instrs finfo req_stack_size fname p_funcs stack_hi H H0) as
@@ -798,38 +783,22 @@ Section WithWordAndMem.
           end
       end.
 
-Notation predictsLE := FlatToRiscvCommon.predictsLE.
-Print FlatToRiscvDef.qLeakageEvent.
-Lemma predictsLE_end f l :
-      predictsLE f l ->
-      f l = Some FlatToRiscvDef.qendLE.
-Proof.
-  intros H. induction H.
-  - rewrite H0. assumption.
-  - assumption.
-Qed.
-
-Lemma trace_of_predictor_works' so_far next F k :
-  (forall fuel,
-    (F <= fuel)%nat ->
-    predictsLE (next fuel) (so_far ++ k)) ->
-  exists F',
-    (forall fuel,
-        (F' <= fuel)%nat ->
-        k%list = trace_of_predictor so_far next fuel).
-Proof.
-  intros H. generalize dependent so_far. subst. induction k.
-  - intros. exists (S F). intros. destruct fuel as [|fuel']; [blia|]. simpl.
-    specialize (H (S fuel') ltac:(blia)). rewrite List.app_nil_r in H.
-    apply predictsLE_end in H. rewrite H. reflexivity.
-  - intros.
-    specialize (IHk (so_far ++ [a])%list). rewrite <- app_assoc in IHk.
-    specialize (IHk H). destruct IHk as [F' IHk]. 
-    exists (S (F + F')). intros. destruct fuel as [|fuel']; [blia|].
-    specialize (H (S fuel') ltac:(blia)). Search predictsLE.
-    apply FlatToRiscvFunctions.predictLE_cons in H. simpl. rewrite H. simpl. f_equal.
-    apply IHk. blia.
-Qed.
+    Lemma trace_of_predictor_works' so_far next F k :
+      r_predicts next (so_far ++ k) ->
+      k%list = trace_of_predictor so_far next.
+    Proof.
+      intros H. generalize dependent so_far. subst. induction k.
+      - intros. exists (S F). intros. destruct fuel as [|fuel']; [blia|]. simpl.
+        specialize (H (S fuel') ltac:(blia)). rewrite List.app_nil_r in H.
+        apply predictsLE_end in H. rewrite H. reflexivity.
+      - intros.
+        specialize (IHk (so_far ++ [a])%list). rewrite <- app_assoc in IHk.
+        specialize (IHk H). destruct IHk as [F' IHk]. 
+        exists (S (F + F')). intros. destruct fuel as [|fuel']; [blia|].
+        specialize (H (S fuel') ltac:(blia)). Search predictsLE.
+        apply FlatToRiscvFunctions.predictLE_cons in H. simpl. rewrite H. simpl. f_equal.
+        apply IHk. blia.
+    Qed.
 
 Lemma trace_of_predictor_works_other' so_far f F kH'' kL'' :
   (forall fuel,
