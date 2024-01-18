@@ -887,8 +887,6 @@ Section FlatToRiscv1.
     End WithOtherEnv.
   End WithEnv.
 
-  
-
   (* compiles all functions just to obtain their code size *)
   Definition build_fun_pos_env(e_impl: env): pos_map :=
     (* since we pass map.empty as the fun_pos_env into compile_funs, the instrs
