@@ -510,7 +510,7 @@ Section Proofs.
                 forall next k0 k'' rk'' f,
                   s_predicts next (k0 ++ rev k' ++ k'') ->
                   r_predicts (fun k => f (rev rk' ++ k) (k0 ++ rev k') (length (rev rk'))) rk'' ->
-                  r_predicts (fun k => rnext_fun iset compile_ext_call leak_ext_call e_pos program_base e_impl_full next k0 pos g.(p_sp) argnames retnames body k (f k)) (rev rk' ++ rk'')
+                  r_predicts (fun k => rnext_fun iset compile_ext_call leak_ext_call e_pos program_base e_impl_full next k0 pos g.(p_sp) retnames body k (f k)) (rev rk' ++ rk'')
         ).
   Proof.
     intros * IHexec OC BC OL Exb GetMany Ext GE FS C V Mo Mo' Gra RaM GPC A GM.
@@ -1381,15 +1381,6 @@ Section Proofs.
       subst. solve_word_eq word_ok.
   Qed.
 
-  Lemma predictLE_cons e f t1 t2 :
-    predictsLE f (t1 ++ e :: t2) ->
-    f t1 = Some (quotLE e).
-  Proof.
-    clear. intros H. generalize dependent f. induction t1.
-    - intros. simpl in H. inversion H. subst. assumption.
-    - intros. simpl in H. inversion H. subst. rewrite H4. apply IHt1. assumption.
-  Qed.
-
   Lemma compile_stmt_correct:
     (forall resvars extcall argvars,
         compiles_FlatToRiscv_correctly compile_ext_call leak_ext_call
@@ -1427,7 +1418,6 @@ Section Proofs.
       + simpl. intros finalL A. destruct_RiscvMachine finalL. unfold goodMachine in *. simpl in *.
         destruct_products. subst.
         do 5 eexists; ssplit; eauto.
-        do 2 eexists; ssplit; eauto.
 
     - idtac "Case compile_stmt_correct/SCall".
       (* We have one "map.get e fname" from exec, one from fits_stack, make them match *)
@@ -1499,23 +1489,22 @@ Section Proofs.
          (getRegs finalL) /\
        (getMetrics finalL - initialL_metrics <= lowerMetrics (finalMetricsH - mc))%metricsL /\
          goodMachine finalIOTrace finalMH finalRegsH g finalL /\
-            (exists (k' : list Semantics.event) (rk' : list LeakageEvent),
-          finalTrace = k' ++ k /\
-          RiscvMachine.getTrace finalL = rk' ++ getTrace /\
-          (exists F : nat,
-             forall (next : Semantics.trace -> option Semantics.qevent)
-               (k0 k'' : list Semantics.event) (rk'' : list LeakageEvent) 
-               (fuel : nat)
-               (f : list Semantics.event -> list LeakageEvent -> option qLeakageEvent),
-             predicts next (k0 ++ rev k' ++ k'') ->
-             predictsLE (fun k1 : list LeakageEvent => f (k0 ++ rev k') k1) rk'' ->
-             Nat.le F fuel ->
-             predictsLE
-               (fun k1 : list LeakageEvent =>
-                rnext_stmt iset compile_ext_call leak_ext_call e_pos program_base e_impl_full
-                  fuel next k0 pos p_sp
-                  (bytes_per_word * #(Datatypes.length unused_part_of_caller_frame))
-                  (SCall binds fname args) k1 f) (rev rk' ++ rk'')))))
+         (exists (t' : list event) (rt' : list LeakageEvent),
+             finalTrace = t' ++ k /\
+               RiscvMachine.getTrace finalL = rt' ++ getTrace /\
+               (forall (next : list event -> qevent) (t0 t'' : list event) 
+                       (rt'' : list LeakageEvent)
+                       (f : list LeakageEvent -> list event -> nat -> qLeakageEvent),
+                   s_predicts next (t0 ++ rev t' ++ t'') ->
+                   r_predicts
+                     (fun t : list LeakageEvent =>
+                        f (rev rt' ++ t) (t0 ++ rev t') (Datatypes.length (rev rt'))) rt'' ->
+                   r_predicts
+                     (fun t : list LeakageEvent =>
+                        rnext_stmt iset compile_ext_call leak_ext_call e_pos program_base e_impl_full next
+                          (t0, pos, p_sp,
+                            (bytes_per_word * #(Datatypes.length unused_part_of_caller_frame))%Z,
+                            SCall binds fname args, t, f t)) (rev rt' ++ rt'')))))
       end.
       2: { subst. reflexivity. }
 
@@ -1697,16 +1686,25 @@ Section Proofs.
       do 2 eexists. split.
       { rewrite app_one_cons. rewrite app_assoc. reflexivity. } split.
       { rewrite H0p5p1. simpl. rewrite app_one_cons. rewrite app_assoc. reflexivity. }
-      exists (S F). intros. destruct fuel as [|fuel']; [blia|]. cbn [rnext_stmt].
-      Search (map.get e_impl_full fname). rewrite H. Search (map.get e_pos fname).
-      rewrite GetPos.
-      Search predictsLE. eapply predictLE_with_prefix_works_eq.
+      intros. eapply predicts_ext; [|intros; symmetry; rewrite rnext_stmt_step; reflexivity].
+      cbv [rnext_stmt_body].
+      rewrite H. rewrite GetPos. eapply predict_with_prefix_works_eq.
       { rewrite rev_app_distr. simpl. reflexivity. }
-      cbv [rnext_fun] in H0p5p2. Search p_sp. subst. simpl in H0p5p2.
-      eapply H0p5p2.
-      { rewrite rev_app_distr in H0. rewrite <- app_assoc. apply H0. }
-      { rewrite <- app_assoc. rewrite rev_app_distr in H2. eassumption. }
-      { blia. } 
+      intros _. Search p_sp. subst. cbn [FlatToRiscvCommon.p_sp] in *.
+      cbv [rnext_fun] in H0p5p2.
+      eapply predicts_ext. 1: eapply H0p5p2.
+      { rewrite rev_app_distr in H0. repeat rewrite app_assoc in H0.
+        rewrite <- app_assoc in H0. eapply H0. }
+      2: { intros. cbv beta.
+           destruct (rnext_fun_helper _ _ _ _ _) as
+             [ [ [ [beforeBody afterBody] mypos'] sp_val'] stackoffset'].
+           apply predict_with_prefix_ext. intros y1 Hy1. apply rnext_stmt_ext.
+           cbv [Equiv]. intuition. apply predict_with_prefix_ext. intros y0 Hy0.
+           instantiate (1 := fun x a n => f ([leak_Jal] ++ x) a (S n)). cbv beta.
+           (* The proof term was useful for something other than proving termination!  Cool. *)
+           f_equal. rewrite skipn_len in Hy0. rewrite app_length. cbn [length]. blia. }
+      { rewrite <- app_assoc. rewrite rev_app_distr in H2. eapply predicts_ext.
+        1: eassumption. intros. simpl. rewrite rev_app_distr. reflexivity. }
 
     - idtac "Case compile_stmt_correct/SLoad".
       progress unfold Memory.load, Memory.load_Z in *. fwd.

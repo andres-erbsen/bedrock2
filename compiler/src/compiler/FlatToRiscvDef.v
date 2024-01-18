@@ -581,6 +581,26 @@ Section FlatToRiscv1.
       cbv [lt_tuple]. apply wf_inverse_image. apply lt_tuple'_wf.
     Defined.
 
+    Definition rnext_fun_helper
+        (mypos : Z) (sp_val : word) rets fbody :=
+        let need_to_save := list_diff Z.eqb (modVars_as_list Z.eqb fbody) rets in
+        let scratchwords := stackalloc_words fbody in
+        let framesize := (bytes_per_word *
+                            (Z.of_nat (length need_to_save) + 1 + scratchwords))%Z in
+        let sp_val' := word.add sp_val (word.of_Z (-framesize)) in
+        let beforeBody :=
+          [ leak_Addi ] ++ (* Addi sp sp (-framesize) *)
+            [ leak_store access_size.word
+                (word.add sp_val' (word.of_Z (bytes_per_word * (Z.of_nat (length need_to_save) + scratchwords)))) ] ++
+            leak_save_regs sp_val' need_to_save (bytes_per_word * scratchwords) in
+        let afterBody :=
+          leak_load_regs sp_val' need_to_save (bytes_per_word * scratchwords) ++
+            [ leak_load access_size.word
+                (word.add sp_val' (word.of_Z (bytes_per_word * (Z.of_nat (length need_to_save) + scratchwords)))) ] ++
+            [ leak_Addi ] ++ (* Addi sp sp framesize *)
+            [ leak_Jalr ] in
+        (beforeBody, afterBody, (mypos + 4 * (2 + Z.of_nat (length need_to_save)))%Z, sp_val', (bytes_per_word * scratchwords)%Z).
+
     Definition rnext_stmt_body
       (next : trace -> qevent)
       (tup : bigtuple)
@@ -745,35 +765,18 @@ Section FlatToRiscv1.
                 | SCall resvars fname argvars =>
                     fun _ =>
                       match map.get e_env fname, map.get e fname with
-                      | Some (params, rets, fbody), Some pos =>
+                      | Some (params, rets, fbody), Some fpos =>
                           rv_predict_with_prefix
                             [ leak_Jal ](* jump to compiled function *)
                             rt_so_far
                             (fun rt_so_far' _ =>
                                let t_so_far' := t_so_far ++ [leak_unit] in
-                               let need_to_save := list_diff Z.eqb (modVars_as_list Z.eqb fbody) rets in
-                               let scratchwords := stackalloc_words fbody in
-                               let framesize := (bytes_per_word *
-                                                   (Z.of_nat (length need_to_save) + 1 + scratchwords))%Z in
-                               let sp_val' := word.add sp_val (word.of_Z (-framesize)) in
-                               let beforeBody :=
-                                 [ leak_Addi ] ++ (* Addi sp sp (-framesize) *)
-                                   [ leak_store access_size.word
-                                       (word.add sp_val' (word.of_Z (bytes_per_word * (Z.of_nat (length need_to_save) + scratchwords)))) ] ++
-                                   leak_save_regs sp_val' need_to_save (bytes_per_word * scratchwords) in
-                               let afterBody :=
-                                 leak_load_regs sp_val' need_to_save (bytes_per_word * scratchwords) ++
-                                   [ leak_load access_size.word
-                                       (word.add sp_val' (word.of_Z (bytes_per_word * (Z.of_nat (length need_to_save) + scratchwords)))) ] ++
-                                   [ leak_Addi ] ++ (* Addi sp sp framesize *)
-                                   [ leak_Jalr ] in
+                               let '(beforeBody, afterBody, mypos', sp_val', stackoffset') := rnext_fun_helper fpos sp_val rets fbody in
                                rv_predict_with_prefix
                                  beforeBody
                                  rt_so_far'
                                  (fun rt_so_far'' _  =>
-                                    rnext_stmt (t_so_far',
-                                        (mypos + 4 * (2 + Z.of_nat (length need_to_save)))%Z, sp_val',
-                                        (bytes_per_word * scratchwords)%Z, fbody, rt_so_far'',
+                                    rnext_stmt (t_so_far', mypos', sp_val', stackoffset', fbody, rt_so_far'',
                                         (fun t_so_far'' rt_so_far''_diff =>
                                            let rt_so_far''' := skipn rt_so_far''_diff rt_so_far'' in
                                            rv_predict_with_prefix
@@ -817,75 +820,93 @@ Section FlatToRiscv1.
       Definition rnext_stmt next
         := my_Fix _ _ lt_tuple_wf _ (rnext_stmt_body next).
 
-      Print bigtuple.
       Definition Equiv (x y : bigtuple) :=
         let '(x1, x2, x3, x4, x5, x6, fx) := x in
         let '(y1, y2, y3, y4, y5, y6, fy) := y in
         (x1, x2, x3, x4, x5, x6) = (y1, y2, y3, y4, y5, y6) /\
           forall a1 a2,
-            fx a1 a2 = fy a1 a2. 
-      Check rnext_stmt_body. Check (rnext_stmt _ _). Check (rnext_stmt_body _ _).
-      Lemma rnext_stmt_step next tup : ltac:(
-                                               let t := eval cbv beta delta [rnext_stmt_body] in
-                                               (*Why is the @ necessary??*)
-                                               (rnext_stmt next tup = @rnext_stmt_body next tup (fun y _ => rnext_stmt next y))
-                                                 in exact t).
+            fx a1 a2 = fy a1 a2.
+
+      Lemma Equiv_sym (x y : bigtuple) :
+        Equiv x y -> Equiv y x.
+      Proof.
+        intros. cbv [Equiv] in *.
+        destruct x as [ [ [ [ [ [x1 x2] x3] x4] x5] x6] fx].
+        destruct y as [ [ [ [ [ [y1 y2] y3] y4] y5] y6] fy].
+        destruct H as [H1 H2]. auto.
+      Qed.
+
+      Lemma lt_tuple_resp_Equiv_left (x1 x2 y : bigtuple) :
+        Equiv x1 x2 -> lt_tuple x1 y -> lt_tuple x2 y.
+      Proof.
+        cbv [lt_tuple Equiv].
+        destruct x1 as [ [ [ [ [ [x1_1 x2_1] x3_1] x4_1] x5_1] x6_1] fx_1].
+        destruct x2 as [ [ [ [ [ [x1_2 x2_2] x3_2] x4_2] x5_2] x6_2] fx_2].
+        destruct y as [ [ [ [ [ [y1 y2] y3] y4] y5] y6] fy].
+        cbn [project_tuple].
+        intros [H1 H2] H3. injection H1. intros. subst. assumption.
+      Qed.
+
+      Lemma rnext_stmt_body_ext next :
+        forall (x1 x2 : bigtuple) (f1 : forall y : bigtuple, lt_tuple y x1 -> qLeakageEvent)
+               (f2 : forall y : bigtuple, lt_tuple y x2 -> qLeakageEvent),
+          Equiv x1 x2 ->
+          (forall (y1 y2 : bigtuple) (p1 : lt_tuple y1 x1) (p2 : lt_tuple y2 x2),
+              Equiv y1 y2 -> f1 y1 p1 = f2 y2 p2) -> @rnext_stmt_body next x1 f1 = @rnext_stmt_body next x2 f2.
+      Proof.
+        intros. cbv [rnext_stmt_body]. cbv beta. Print bigtuple. Print rnext_stmt_body.
+        destruct x1 as [ [ [ [ [ [t_so_far_1 mypos_1] sp_val_1] stackoffset_1] s_1] rt_so_far_1] f_1].
+        destruct x2 as [ [ [ [ [ [t_so_far_2 mypos_2] sp_val_2] stackoffset_2] s_2] rt_so_far_2] f_2].
+        cbv [Equiv] in H. destruct H as [H1 H2]. injection H1. intros. subst. clear H1.
+        repeat (Tactics.destruct_one_match; try reflexivity || apply Semantics.predict_with_prefix_ext || apply H3 || intros || apply H0 || cbv [Equiv]; intuition).
+        all: try apply H0.
+        all: cbv [Equiv]; intuition.
+        all: repeat (Tactics.destruct_one_match; try reflexivity).
+        all: try apply Semantics.predict_with_prefix_ext; intros.
+        all: try apply H0.
+        all: cbv [Equiv]; intuition.
+        all: try apply Semantics.predict_with_prefix_ext; intros.
+        all: try apply H0.
+        all: cbv [Equiv]; intuition.
+      Qed.
+      
+      Lemma rnext_stmt_step next tup :
+        rnext_stmt next tup = @rnext_stmt_body next tup (fun y _ => rnext_stmt next y).
       Proof.
         cbv [rnext_stmt].
         rewrite my_Fix_eq with (E:=Equiv) (x1:=tup) (x2:=tup).
         1: reflexivity.
-        { intros. cbv [rnext_stmt_body]. cbv beta. Print bigtuple. Print rnext_stmt_body.
-          destruct x1 as [ [ [ [ [ [t_so_far_1 mypos_1] sp_val_1] stackoffset_1] s_1] rt_so_far_1] f_1].
-          destruct x2 as [ [ [ [ [ [t_so_far_2 mypos_2] sp_val_2] stackoffset_2] s_2] rt_so_far_2] f_2].
-          cbv [Equiv] in H. destruct H as [H1 H2]. injection H1. intros. subst. clear H1.
-          repeat (Tactics.destruct_one_match; try reflexivity || apply Semantics.predict_with_prefix_ext || apply H3 || intros || apply H0 || cbv [Equiv]; intuition).
-          all: try apply H0.
-          all: cbv [Equiv]; intuition.
-          all: repeat (Tactics.destruct_one_match; try reflexivity).
-          all: try apply Semantics.predict_with_prefix_ext; intros.
-          all: try apply H0.
-          all: cbv [Equiv]; intuition.
-          all: try apply Semantics.predict_with_prefix_ext; intros.
-          all: try apply H0.
-          all: cbv [Equiv]; intuition. }
+        { apply rnext_stmt_body_ext. }
         { cbv [Equiv]. destruct tup as [ [ [ [ [ [x1 x2] x3] x4] x5] x6] fx]. auto. }
       Qed.
 
-      (* This is just copied and pasted from rnext_stmt.
-         Surely there's a better way to do this. *)
-      Definition rnext_fun
-        (next : trace -> qevent) (t_so_far : trace) (mypos : Z) (sp_val : word)
-        (params rets : list Z) fbody (rt_so_far : list LeakageEvent)
+      Lemma rnext_stmt_ext next :
+        forall (x1 x2 : bigtuple), Equiv x1 x2 -> rnext_stmt next x1 = rnext_stmt next x2.
+      Proof.
+        intros x1. induction x1 using (well_founded_induction lt_tuple_wf). intros.
+        rewrite rnext_stmt_step. symmetry. rewrite rnext_stmt_step. apply rnext_stmt_body_ext.
+        - apply Equiv_sym. assumption.
+        - intros. apply H.
+          + eapply lt_tuple_resp_Equiv_left; eauto using Equiv_sym.
+          + assumption.
+      Qed.
+      
+      Definition rnext_fun 
+        (next : trace -> qevent) (t_so_far : trace) (fpos : Z) (sp_val : word)
+        (rets : list Z) fbody (rt_so_far : list LeakageEvent)
         (f : forall (t_so_far' : trace) (rt_so_far'_diff : nat), qLeakageEvent) :=
-      let need_to_save := list_diff Z.eqb (modVars_as_list Z.eqb fbody) rets in
-      let scratchwords := stackalloc_words fbody in
-      let framesize := (bytes_per_word *
-                          (Z.of_nat (length need_to_save) + 1 + scratchwords))%Z in
-      let sp_val' := word.add sp_val (word.of_Z (-framesize)) in
-      let beforeBody :=
-        [ leak_Addi ] ++ (* Addi sp sp (-framesize) *)
-          [ leak_store access_size.word
-              (word.add sp_val' (word.of_Z (bytes_per_word * (Z.of_nat (length need_to_save) + scratchwords)))) ] ++
-          leak_save_regs sp_val' need_to_save (bytes_per_word * scratchwords) in
-      let afterBody :=
-        leak_load_regs sp_val' need_to_save (bytes_per_word * scratchwords) ++
-          [ leak_load access_size.word
-              (word.add sp_val' (word.of_Z (bytes_per_word * (Z.of_nat (length need_to_save) + scratchwords)))) ] ++
-          [ leak_Addi ] ++ (* Addi sp sp framesize *)
-          [ leak_Jalr ] in
-      rv_predict_with_prefix
-        beforeBody
-        rt_so_far
-        (fun rt_so_far'' _  =>
-           rnext_stmt next (t_so_far,
-               (mypos + 4 * (2 + Z.of_nat (length need_to_save)))%Z, sp_val',
-               (bytes_per_word * scratchwords)%Z, fbody, rt_so_far'',
-               (fun t_so_far'' rt_so_far''_diff =>
-                  let rt_so_far''' := skipn rt_so_far''_diff rt_so_far'' in
-                  rv_predict_with_prefix
-                    afterBody
-                    rt_so_far'''
-                    (fun rt_so_far'''' _ => f t_so_far'' (length rt_so_far - length rt_so_far''''))%nat))).
+        let '(beforeBody, afterBody, mypos', sp_val', stackoffset') := rnext_fun_helper fpos sp_val rets fbody in
+        rv_predict_with_prefix
+          beforeBody
+          rt_so_far
+          (fun rt_so_far' _  =>
+             rnext_stmt next (t_so_far, mypos', sp_val', stackoffset', fbody, rt_so_far',
+                 (fun t_so_far' rt_so_far''_diff =>
+                    let rt_so_far'' := skipn rt_so_far''_diff rt_so_far' in
+                    rv_predict_with_prefix
+                      afterBody
+                      rt_so_far''
+                      (fun rt_so_far''' _ => f t_so_far' (length rt_so_far - length rt_so_far'''))%nat))).
     End WithOtherEnv.
   End WithEnv.
 
