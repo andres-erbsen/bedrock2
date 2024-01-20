@@ -116,6 +116,7 @@ Section WithIOEvent.
 
   Section predictors.
     Context {Event QEvent : Type} (qend : QEvent) (q : Event -> QEvent).
+    Context (Hend : forall e, q e <> qend).
     Context (Trace := list Event).
     
     Inductive predicts : (Trace -> QEvent) -> Trace -> Prop :=
@@ -129,6 +130,22 @@ Section WithIOEvent.
       forall f,
         f [] = qend ->
         predicts f [].
+
+    Inductive predicts_partly : (Trace -> QEvent) -> Trace -> Type :=
+    | predicts_partly_nil : forall f, predicts_partly f []
+    | predicts_partly_cons : forall f g e t,
+        f [] = q e ->
+        (forall t', f (e :: t') = g t') ->
+        predicts_partly g t ->
+        predicts_partly f (e :: t).
+
+    Inductive predictor_valid : (Trace -> QEvent) -> Type :=
+    | valid_nil :
+      forall f, f [] = qend ->
+                predictor_valid f
+    | valid_cons :
+      forall f, (forall e, f [] = q e -> predictor_valid (fun k' => f (e :: k'))) ->
+                predictor_valid f.
     
     Lemma predicts_ext f g t :
       predicts f t ->
@@ -141,6 +158,59 @@ Section WithIOEvent.
         + intros t'. rewrite <- H2. apply H0.
         + eapply IHpredicts. reflexivity.
       - intros. constructor. rewrite <- H0. apply H.
+    Qed.
+
+    Lemma predicts_partly_ext f g t :
+      (forall t', f t' = g t') ->
+      predicts_partly f t ->
+      predicts_partly g t.
+    Proof.
+      intros H1 H2. generalize dependent g. induction H2.
+      - constructor.
+      - econstructor.
+        + rewrite <- H1. assumption.
+        + reflexivity.
+        + apply IHpredicts_partly. intros. rewrite <- H1. rewrite e1. reflexivity.
+    Qed.
+
+    Lemma predictor_valid_ext f g :
+      predictor_valid f ->
+      (forall x, f x = g x) ->
+      predictor_valid g.
+    Proof.
+      intros H. revert g. induction H; intros g Hfg.
+      - apply valid_nil. rewrite <- Hfg. assumption.
+      - apply valid_cons. intros. eapply X.
+        + rewrite Hfg. apply H.
+        + intros. apply Hfg.
+    Qed.
+
+    Lemma predicts_partly_app k1 k2 next :
+      predicts_partly next k1 ->
+      predicts_partly (fun k => next (k1 ++ k)) k2 ->
+      predicts_partly next (k1 ++ k2).
+    Proof.
+      revert k2. revert next. induction k1.
+      - intros next k2 H1 H2. apply H2.
+      - intros next k2 H1 H2. inversion H1. subst. econstructor; try eassumption. fold (app k1 k2).
+        apply IHk1.
+        + assumption.
+        + eapply predicts_partly_ext; [|eassumption]. intros. simpl. apply H5.
+    Qed.
+
+    Lemma bigger_thing_valid f k :
+      predictor_valid f ->
+      predicts_partly f k ->
+      predictor_valid (fun k' => f (k ++ k')).
+    Proof.
+      revert f. induction k.
+      - intros f H1 H2. assumption.
+      - intros f H1 H2. inversion H2. subst. simpl.
+        inversion H1.
+        + rewrite H4 in H. apply Hend in H. destruct H.
+        + subst. eapply IHk with (f := fun x => f (a :: x)).
+          -- apply X0. assumption.
+          -- eapply predicts_partly_ext. 2: eassumption. auto.
     Qed.
     
     Require Import coqutil.Z.Lia.
@@ -195,6 +265,20 @@ Section WithIOEvent.
         - intros. simpl. apply H.
         - intros. simpl. destruct x2; try reflexivity. apply IHx1. intros. apply H.
       Qed.
+
+      Definition s_predict_with_prefix_preserves_valid prefix predict_rest :
+        (forall e, In e prefix -> forall e', q e = q e' -> e = e') ->
+        (forall H, predictor_valid (fun k => predict_rest (prefix ++ k) k (H k))) ->
+        predictor_valid (fun k => predict_with_prefix prefix k (predict_rest k)).
+      Proof.
+        intros H1 H2. induction prefix.
+        - simpl in *. apply H2.
+        - simpl. apply valid_cons. intros. apply IHprefix.
+          + intros. apply H1; [|assumption]. simpl. right. assumption.
+          + intros. apply H1 in H.
+            -- subst. apply H2.
+            -- simpl. left. reflexivity.
+      Qed.
       
       Lemma predict_cons e f t1 t2 :
         predicts f (t1 ++ e :: t2) ->
@@ -207,6 +291,7 @@ Section WithIOEvent.
   End predictors.
   Print predicts.
   Definition s_predicts := predicts qend quot.
+  Definition s_predictor_valid := predictor_valid qend quot.
   
   Fixpoint predictor_of (a(*the whole thing*) : abstract_trace) (t(*so far*) : trace) : qevent :=
     match a, t with
@@ -232,41 +317,21 @@ Section WithIOEvent.
     s_predicts (predictor_of a) t.
   Proof. intros H. induction H; intros; econstructor; simpl; eauto. Qed.
 
-  Inductive s_predictor_valid : trace -> (trace -> qevent) -> Type :=
-  | s_valid_nil_end :
-    forall k f, f k = qend ->
-              s_predictor_valid k f
-  | s_valid_leak_unit :
-    forall k f, f k = qleak_unit ->
-              s_predictor_valid (fun k' => f (k ++ leak_unit :: k')) ->
-              s_predictor_valid k f
-  | s_valid_leak_bool :
-      forall k f b, f k = qleak_bool b ->
-                  s_predictor_valid (fun t => f (k ++ leak_bool b :: t)) ->
-                  s_predictor_valid f
-  | s_valid_leak_word :
-    forall f w, f [] = qleak_word w ->
-                s_predictor_valid (fun t => f (leak_word w :: t)) ->
-                s_predictor_valid f
-  | s_valid_leak_list :
-    forall f l, f [] = qleak_list l ->
-                s_predictor_valid (fun t => f (leak_list l :: t)) ->
-                s_predictor_valid f
-  | s_valid_consume_word :
-    forall f, f [] = qconsume_word ->
-              (forall w, s_predictor_valid (fun t => f (consume_word w :: t))) ->
-              s_predictor_valid f.
-
   Lemma predictor_of_valid a :
     s_predictor_valid (predictor_of a).
   Proof.
     induction a.
-    - apply s_valid_nil_end. reflexivity.
-    - apply s_valid_leak_unit; [reflexivity | assumption].
-    - eapply s_valid_leak_bool; [reflexivity | eassumption].
-    - eapply s_valid_leak_word; [reflexivity | eassumption].
-    - eapply s_valid_leak_list; [reflexivity | eassumption].
-    - eapply s_valid_consume_word; [reflexivity | eassumption].
+    - apply valid_nil. reflexivity.
+    - apply valid_cons. intros. simpl in H. destruct e; try discriminate H.
+      simpl. assumption.
+    - apply valid_cons. intros. simpl in H. destruct e; try discriminate H.
+      simpl. assumption.
+    - apply valid_cons. intros. simpl in H. destruct e; try discriminate H.
+      simpl. assumption.
+    - apply valid_cons. intros. simpl in H. destruct e; try discriminate H.
+      simpl. assumption.
+    - apply valid_cons. intros. simpl in H. destruct e; try discriminate H.
+      simpl. apply X.
   Qed.
 End WithIOEvent. (*maybe extend this to the end?*)
                             
@@ -769,3 +834,4 @@ Module exec. Section WithEnv.
       
   End WithEnv.
 End exec. Notation exec := exec.exec.
+
