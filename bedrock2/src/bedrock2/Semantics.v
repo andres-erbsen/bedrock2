@@ -131,21 +131,31 @@ Section WithIOEvent.
         f [] = qend ->
         predicts f [].
 
-    Inductive predicts_partly : (Trace -> QEvent) -> Trace -> Type :=
-    | predicts_partly_nil : forall f, predicts_partly f []
-    | predicts_partly_cons : forall f g e t,
-        f [] = q e ->
-        (forall t', f (e :: t') = g t') ->
-        predicts_partly g t ->
-        predicts_partly f (e :: t).
 
-    Inductive predictor_valid : (Trace -> QEvent) -> Type :=
+    (*idea: predicts_partly and predictor_valid should take in backwards traces and backward
+      predictors, as in 
+      Semantics.  Similarly, trace transformation functions should take in backwards *)
+    Inductive predicts_partly : (Trace -> QEvent) -> Trace -> Type :=
+    | predicts_partly_cons :
+      forall f e k,
+        f k = q e ->
+        predicts_partly f k ->
+        predicts_partly f (e :: k)
+    | predicts_partly_nil :
+      forall f,
+        predicts_partly f [].
+
+    (*this takes as input a backwards trace!*)
+    (*should I define predicts, predicts_partly like this?
+      where the function is fixed, and there's some trace that's changing? *)
+    Inductive predictor_valid : Trace -> (Trace -> QEvent) -> Type :=
     | valid_nil :
-      forall f, f [] = qend ->
-                predictor_valid f
+      forall k f, f k = qend ->
+                predictor_valid k f
     | valid_cons :
-      forall f, (forall e, f [] = q e -> predictor_valid (fun k' => f (e :: k'))) ->
-                predictor_valid f.
+      forall k f,
+        (forall e, q e = f k -> predictor_valid (e :: k) f) ->
+        predictor_valid k f.      
     
     Lemma predicts_ext f g t :
       predicts f t ->
@@ -166,17 +176,16 @@ Section WithIOEvent.
       predicts_partly g t.
     Proof.
       intros H1 H2. generalize dependent g. induction H2.
-      - constructor.
-      - econstructor.
+      - intros. apply predicts_partly_cons.
         + rewrite <- H1. assumption.
-        + reflexivity.
-        + apply IHpredicts_partly. intros. rewrite <- H1. rewrite e1. reflexivity.
+        + auto.
+      - intros. constructor.
     Qed.
 
-    Lemma predictor_valid_ext f g :
-      predictor_valid f ->
+    Lemma predictor_valid_ext k f g :
+      predictor_valid k f ->
       (forall x, f x = g x) ->
-      predictor_valid g.
+      predictor_valid k g.
     Proof.
       intros H. revert g. induction H; intros g Hfg.
       - apply valid_nil. rewrite <- Hfg. assumption.
@@ -187,30 +196,27 @@ Section WithIOEvent.
 
     Lemma predicts_partly_app k1 k2 next :
       predicts_partly next k1 ->
-      predicts_partly (fun k => next (k1 ++ k)) k2 ->
-      predicts_partly next (k1 ++ k2).
+      predicts_partly (fun k => next (k ++ k1)) k2 ->
+      predicts_partly next (k2 ++ k1).
     Proof.
-      revert k2. revert next. induction k1.
-      - intros next k2 H1 H2. apply H2.
-      - intros next k2 H1 H2. inversion H1. subst. econstructor; try eassumption. fold (app k1 k2).
-        apply IHk1.
+      revert k1. revert next. induction k2; intros next k1 H1 H2.
+      - assumption.
+      - inversion H2. subst. constructor; fold (app k2 k1).
         + assumption.
-        + eapply predicts_partly_ext; [|eassumption]. intros. simpl. apply H5.
+        + apply IHk2; assumption.
     Qed.
 
-    Lemma bigger_thing_valid f k :
-      predictor_valid f ->
-      predicts_partly f k ->
-      predictor_valid (fun k' => f (k ++ k')).
+    Lemma bigger_thing_valid f k1 k2 :
+      predictor_valid k1 f ->
+      predicts_partly (fun k => f (k ++ k1)) k2 ->
+      predictor_valid (k2 ++ k1) f.
     Proof.
-      revert f. induction k.
-      - intros f H1 H2. assumption.
-      - intros f H1 H2. inversion H2. subst. simpl.
-        inversion H1.
-        + rewrite H4 in H. apply Hend in H. destruct H.
-        + subst. eapply IHk with (f := fun x => f (a :: x)).
-          -- apply X0. assumption.
-          -- eapply predicts_partly_ext. 2: eassumption. auto.
+      intros H1. induction k2.
+      - intros H2. assumption.
+      - intros H2. inversion H2. subst. specialize (IHk2 ltac:(assumption)).
+        inversion IHk2; subst.
+        + rewrite H3 in H. apply Hend in H. destruct H.
+        + apply X0. auto.
     Qed.
     
     Require Import coqutil.Z.Lia.
@@ -268,17 +274,12 @@ Section WithIOEvent.
 
       Definition predict_with_prefix_valid prefix predict_rest :
         (forall e, In e prefix -> forall e', q e = q e' -> e = e') ->
-        (forall H, predictor_valid (fun k => predict_rest (prefix ++ k) k (H k))) ->
-        predictor_valid (fun k => predict_with_prefix prefix k (predict_rest k)).
+        (forall H, predictor_valid prefix (fun k => predict_rest (prefix ++ k) k (H k))) ->
+        predictor_valid [] (fun k => predict_with_prefix prefix k (predict_rest k)).
       Proof.
         intros H1 H2. induction prefix.
         - simpl in *. apply H2.
-        - simpl. apply valid_cons. intros. apply IHprefix.
-          + intros. apply H1; [|assumption]. simpl. right. assumption.
-          + intros. apply H1 in H.
-            -- subst. apply H2.
-            -- simpl. left. reflexivity.
-      Qed.
+        - simpl. apply valid_cons. constructor. apply IHprefix. Abort.
       
       Lemma predict_cons e f t1 t2 :
         predicts f (t1 ++ e :: t2) ->
@@ -318,13 +319,20 @@ Section WithIOEvent.
     s_predicts (predictor_of a) t.
   Proof. intros H. induction H; intros; econstructor; simpl; eauto. Qed.
 
-  Lemma predictor_of_valid a :
-    s_predictor_valid (predictor_of a).
+  Lemma predictor_of_valid a k :
+    generates a k ->
+    s_predictor_valid (rev k) (predictor_of a).
   Proof.
-    induction a.
+  Admitted.
+(*    intros H. induction H.
+    induction a; intros.
     - apply valid_nil. reflexivity.
-    - apply valid_cons. intros. simpl in H. destruct e; try discriminate H.
-      simpl. assumption.
+    - apply valid_cons. intros. destruct e; try discriminate H. inversion IHa; subst.
+      + econstructor. simpl. inversion IHa; subst.
+      + simpl. apply valid_cons. intros. destruct e; try discriminate H0.
+        constructor. assumption.
+      + simpl. apply valid_cons. intros. destruct e; try discriminate H.
+        constructor. assumption.
     - apply valid_cons. intros. simpl in H. destruct e; try discriminate H.
       simpl. assumption.
     - apply valid_cons. intros. simpl in H. destruct e; try discriminate H.
@@ -333,7 +341,7 @@ Section WithIOEvent.
       simpl. assumption.
     - apply valid_cons. intros. simpl in H. destruct e; try discriminate H.
       simpl. apply X.
-  Qed.
+  Qed.*)
 End WithIOEvent. (*maybe extend this to the end?*)
                             
   Definition ExtSpec{width: Z}{BW: Bitwidth width}{word: word.word width}{mem: map.map word byte} :=
