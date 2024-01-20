@@ -175,103 +175,6 @@ Section Spilling.
       happened so far, returns the next element of the trace.*)
   
   Definition lt_tuple' : abstract_trace * stmt -> abstract_trace * stmt -> Prop := slexprod _ _ abstract_trace_lt stmt_lt.
-
-  Fixpoint shrink (a : abstract_trace) (k : trace) : abstract_trace :=
-    match a, k with
-    | aleak_unit a', leak_unit :: k' => shrink a' k'
-    | aleak_bool b1 a', leak_bool b2 :: k' => shrink a' k'
-    | aleak_word w1 a', leak_word w2 :: k' => shrink a' k'
-    | aleak_list l1 a', leak_list l2 :: k' => shrink a' k'
-    | aconsume_word fa', consume_word w :: k' => shrink (fa' w) k'
-    | _, nil => a
-    | _, _ => empty (*fail*)
-    end.
-
-  Lemma shrink_correct (a : abstract_trace) (k1 k2 : trace) :
-    generates a (k1 ++ k2) ->
-    generates (shrink a k1) k2.
-  Proof.
-    revert a. induction k1.
-    - intros. destruct a; assumption.
-    - intros. inversion H; subst; simpl; auto.
-  Qed.
-
-  Lemma empty_min a :
-    a = empty \/ abstract_trace_lt empty a.
-  Proof.
-    induction a.
-    - left. reflexivity.
-    - right. destruct IHa as [IHa|IHa].
-      + subst. apply t_step. constructor.
-      + eapply t_trans; [eassumption|]. apply t_step. constructor.
-    - right. destruct IHa as [IHa|IHa].
-      + subst. apply t_step. constructor.
-      + eapply t_trans; [eassumption|]. apply t_step. constructor.
-    - right. destruct IHa as [IHa|IHa].
-      + subst. apply t_step. constructor.
-      + eapply t_trans; [eassumption|]. apply t_step. constructor.
-    - right. destruct IHa as [IHa|IHa].
-      + subst. apply t_step. constructor.
-      + eapply t_trans; [eassumption|]. apply t_step. constructor.
-    - right. specialize (H (word.of_Z 0)). destruct H as [H|H].
-      + rewrite <- H. apply t_step. constructor.
-      + eapply t_trans; [eassumption|]. apply t_step. constructor.
-  Qed.
-  
-  Lemma shrink_le a k :
-    a = shrink a k \/ abstract_trace_lt (shrink a k) a.
-  Proof.
-    revert k. induction a; intros.
-    - left. destruct k; reflexivity.
-    - destruct k as [|e]; [|destruct e]; simpl; try apply empty_min.
-      + left. reflexivity.
-      + right. specialize (IHa k). destruct IHa as [IHa|IHa].
-        -- rewrite <- IHa. apply t_step. constructor.
-        -- eapply t_trans; [eassumption|]. apply t_step. constructor.
-    - destruct k as [|e]; [|destruct e]; simpl; try apply empty_min.
-      + left. reflexivity.
-      + right. specialize (IHa k). destruct IHa as [IHa|IHa].
-        -- rewrite <- IHa. apply t_step. constructor.
-        -- eapply t_trans; [eassumption|]. apply t_step. constructor.
-    - destruct k as [|e]; [|destruct e]; simpl; try apply empty_min.
-      + left. reflexivity.
-      + right. specialize (IHa k). destruct IHa as [IHa|IHa].
-        -- rewrite <- IHa. apply t_step. constructor.
-        -- eapply t_trans; [eassumption|]. apply t_step. constructor.
-    - destruct k as [|e]; [|destruct e]; simpl; try apply empty_min.
-      + left. reflexivity.
-      + right. specialize (IHa k). destruct IHa as [IHa|IHa].
-        -- rewrite <- IHa. apply t_step. constructor.
-        -- eapply t_trans; [eassumption|]. apply t_step. constructor.
-    - destruct k as [|e]; [|destruct e]; simpl; try apply empty_min.
-      + left. reflexivity.
-      + right. specialize (H r k). destruct H as [H|H].
-        -- rewrite <- H. apply t_step. constructor.
-        -- eapply t_trans; [eassumption|]. apply t_step. constructor.
-  Qed.
-
-  Lemma shrink_le' a k :
-    a = shrink a k \/ abstract_trace_lt (shrink a k) a.
-  Proof.
-    revert a. induction k; intros.
-    - left. destruct a; reflexivity.
-    - destruct a1, a; simpl; try apply empty_min.
-      + right. specialize (IHk a1). destruct IHk as [IHk|IHk].
-        -- rewrite <- IHk. apply t_step. constructor.
-        -- eapply t_trans; [eassumption|]. apply t_step. constructor.
-      + right. specialize (IHk a1). destruct IHk as [IHk|IHk].
-        -- rewrite <- IHk. apply t_step. constructor.
-        -- eapply t_trans; [eassumption|]. apply t_step. constructor.
-      + right. specialize (IHk a1). destruct IHk as [IHk|IHk].
-        -- rewrite <- IHk. apply t_step. constructor.
-        -- eapply t_trans; [eassumption|]. apply t_step. constructor.
-      + right. specialize (IHk a1). destruct IHk as [IHk|IHk].
-        -- rewrite <- IHk. apply t_step. constructor.
-        -- eapply t_trans; [eassumption|]. apply t_step. constructor.
-      + right. specialize (IHk (after r)). destruct IHk as [IHk|IHk].
-        -- rewrite <- IHk. apply t_step. constructor.
-        -- eapply t_trans; [eassumption|]. apply t_step. constructor.
-  Qed.
   
   Definition bigtuple : Type := stmt * abstract_trace * word * (trace -> abstract_trace).
   
@@ -496,63 +399,12 @@ Section Spilling.
     {env: map.map String.string (list Z * list Z * stmt)} e
     := my_Fix _ _ lt_tuple_wf _ (stransform_stmt_trace_body e).
 
-  Inductive abs_tr_eq : abstract_trace -> abstract_trace -> Prop :=
-  | eq_empty : abs_tr_eq empty empty
-  | eq_leak_unit a1 a2 : abs_tr_eq a1 a2 -> abs_tr_eq (aleak_unit a1) (aleak_unit a2)
-  | eq_leak_bool b a1 a2 : abs_tr_eq a1 a2 -> abs_tr_eq (aleak_bool b a1) (aleak_bool b a2)
-  | eq_leak_word w a1 a2 : abs_tr_eq a1 a2 -> abs_tr_eq (aleak_word w a1) (aleak_word w a2)
-  | eq_leak_list l a1 a2 : abs_tr_eq a1 a2 -> abs_tr_eq (aleak_list l a1) (aleak_list l a2)
-  | eq_consume_word f1 f2 : (forall w, abs_tr_eq (f1 w) (f2 w)) -> abs_tr_eq (aconsume_word f1) (aconsume_word f2).
-
   Definition Equiv (x y : bigtuple) :=
     let '(x1, x2, x3, fx) := x in
     let '(y1, y2, y3, fy) := y in
     (x1, x2, x3) = (y1, y2, y3) /\
       forall k,
         abs_tr_eq (fx k) (fy k).
-
-  Print abstract_trace.
-
-  Lemma generates_ext a1 k :
-    generates a1 k ->
-    forall a2,
-      abs_tr_eq a1 a2 ->
-      generates a2 k.
-  Proof.
-    intros H. induction H.
-    - intros. inversion H. subst. constructor.
-    - intros a2 H'. inversion H'. subst. constructor. auto.
-    - intros a2 H'. inversion H'. subst. constructor. auto.
-    - intros a2 H'. inversion H'. subst. constructor. auto.
-    - intros a2 H'. inversion H'. subst. constructor. auto.
-    - intros a2 H'. inversion H'. subst. constructor. auto.
-  Qed.
-
-  Lemma abstract_app_ext a1 a2 a1' a2' :
-    abs_tr_eq a1 a1' ->
-    abs_tr_eq a2 a2' ->
-    abs_tr_eq (abstract_app a1 a2) (abstract_app a1' a2').
-  Proof.
-    intros H1 H2. induction H1; simpl; try constructor; assumption.
-  Qed.
-
-  Lemma abs_tr_eq_refl a : abs_tr_eq a a.
-  Proof. induction a; constructor; assumption. Qed.
-
-  Lemma abs_tr_eq_sym a b : abs_tr_eq a b -> abs_tr_eq b a.
-  Proof. intros H. induction H; constructor; auto. Qed.
-
-  Lemma abs_tr_eq_refl' a1 a2 : a1 = a2 -> abs_tr_eq a1 a2.
-  Proof. intros. subst. apply abs_tr_eq_refl. Qed.
-
-  Check generates_app.
-
-  Lemma generates_app_eq a1 a2 t1 t2 t :
-    generates a1 t1 ->
-    t1 ++ t2 = t ->
-    generates a2 t2 ->
-    generates (abstract_app a1 a2) t.
-  Proof. intros. subst. apply generates_app; assumption. Qed.
 
     Lemma stransform_stmt_trace_step {env: map.map String.string (list Z * list Z * stmt)} e tup :
       abs_tr_eq (stransform_stmt_trace e tup) (stransform_stmt_trace_body e tup (fun y _ => stransform_stmt_trace e y)).

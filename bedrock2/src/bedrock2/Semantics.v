@@ -108,6 +108,14 @@ Section WithIOEvent.
   | consume_word_gen : forall w f t_rev,
       generates (f w) t_rev -> generates (aconsume_word f) (consume_word w :: t_rev).
 
+  Inductive abs_tr_eq : abstract_trace -> abstract_trace -> Prop :=
+  | eq_empty : abs_tr_eq empty empty
+  | eq_leak_unit a1 a2 : abs_tr_eq a1 a2 -> abs_tr_eq (aleak_unit a1) (aleak_unit a2)
+  | eq_leak_bool b a1 a2 : abs_tr_eq a1 a2 -> abs_tr_eq (aleak_bool b a1) (aleak_bool b a2)
+  | eq_leak_word w a1 a2 : abs_tr_eq a1 a2 -> abs_tr_eq (aleak_word w a1) (aleak_word w a2)
+  | eq_leak_list l a1 a2 : abs_tr_eq a1 a2 -> abs_tr_eq (aleak_list l a1) (aleak_list l a2)
+  | eq_consume_word f1 f2 : (forall w, abs_tr_eq (f1 w) (f2 w)) -> abs_tr_eq (aconsume_word f1) (aconsume_word f2).
+
   Fixpoint abstract_app (a1 a2 : abstract_trace) : abstract_trace :=
     match a1 with
     | empty => a2
@@ -139,234 +147,113 @@ Section WithIOEvent.
     generates (generator t) t.
   Proof. induction t; try constructor. destruct a; cbn [generator]; constructor; assumption. Qed.
 
-  (*Section predictors.
-    Context {Event QEvent : Type} (qend : QEvent) (q : Event -> QEvent).
-    Context (Hend : forall e, q e <> qend).
-    Context (Trace := list Event).
-    
-    Inductive predicts : (Trace -> QEvent) -> Trace -> Prop :=
-    | predicts_cons :
-      forall f e g t,
-        f [] = q e ->
-        (forall t', f (e :: t') = g t') ->
-        predicts g t ->
-        predicts f (e :: t)
-    | predicts_nil :
-      forall f,
-        f [] = qend ->
-        predicts f [].
-
-
-    (*idea: predicts_partly and predictor_valid should take in backwards traces and backward
-      predictors, as in 
-      Semantics.  Similarly, trace transformation functions should take in backwards *)
-    Inductive predicts_partly : (Trace -> QEvent) -> Trace -> Type :=
-    | predicts_partly_cons :
-      forall f e k,
-        f k = q e ->
-        predicts_partly f k ->
-        predicts_partly f (e :: k)
-    | predicts_partly_nil :
-      forall f,
-        predicts_partly f [].
-
-    (*this takes as input a backwards trace!*)
-    (*should I define predicts, predicts_partly like this?
-      where the function is fixed, and there's some trace that's changing? *)
-    Inductive predictor_valid : Trace -> (Trace -> QEvent) -> Type :=
-    | valid_nil :
-      forall k f, f k = qend ->
-                predictor_valid k f
-    | valid_cons :
-      forall k f,
-        (forall e, q e = f k -> predictor_valid (e :: k) f) ->
-        predictor_valid k f.      
-    
-    Lemma predicts_ext f g t :
-      predicts f t ->
-      (forall x, f x = g x) ->
-      predicts g t.
-    Proof.
-      intros. generalize dependent g. induction H.
-      - econstructor.
-        + rewrite <- H. rewrite H2. reflexivity.
-        + intros t'. rewrite <- H2. apply H0.
-        + eapply IHpredicts. reflexivity.
-      - intros. constructor. rewrite <- H0. apply H.
-    Qed.
-
-    Lemma predicts_partly_ext f g t :
-      (forall t', f t' = g t') ->
-      predicts_partly f t ->
-      predicts_partly g t.
-    Proof.
-      intros H1 H2. generalize dependent g. induction H2.
-      - intros. apply predicts_partly_cons.
-        + rewrite <- H1. assumption.
-        + auto.
-      - intros. constructor.
-    Qed.
-
-    Lemma predictor_valid_ext k f g :
-      predictor_valid k f ->
-      (forall x, f x = g x) ->
-      predictor_valid k g.
-    Proof.
-      intros H. revert g. induction H; intros g Hfg.
-      - apply valid_nil. rewrite <- Hfg. assumption.
-      - apply valid_cons. intros. eapply X.
-        + rewrite Hfg. apply H.
-        + intros. apply Hfg.
-    Qed.
-
-    Lemma predicts_partly_app k1 k2 next :
-      predicts_partly next k1 ->
-      predicts_partly (fun k => next (k ++ k1)) k2 ->
-      predicts_partly next (k2 ++ k1).
-    Proof.
-      revert k1. revert next. induction k2; intros next k1 H1 H2.
-      - assumption.
-      - inversion H2. subst. constructor; fold (app k2 k1).
-        + assumption.
-        + apply IHk2; assumption.
-    Qed.
-
-    Lemma bigger_thing_valid f k1 k2 :
-      predictor_valid k1 f ->
-      predicts_partly (fun k => f (k ++ k1)) k2 ->
-      predictor_valid (k2 ++ k1) f.
-    Proof.
-      intros H1. induction k2.
-      - intros H2. assumption.
-      - intros H2. inversion H2. subst. specialize (IHk2 ltac:(assumption)).
-        inversion IHk2; subst.
-        + rewrite H3 in H. apply Hend in H. destruct H.
-        + apply X0. auto.
-    Qed.
-    
-    Require Import coqutil.Z.Lia.
-    
-    Definition predict_with_prefix_body (prefix : list Event) (t : list Event)
-      (predict_rest : forall (rest : list Event), (length prefix + length rest = length t) -> QEvent)
-      (predict_with_prefix : forall (prefix' t' : list Event), (forall rest':list Event, length prefix' + length rest' = length t' -> QEvent) -> QEvent)
-      : QEvent.
-      refine (
-          match prefix as x, t as y return prefix = x -> t = y -> _ with
-          | _ :: prefix', _ :: t' => fun _ _ => predict_with_prefix prefix' t' (fun rest pf => predict_rest rest _)
-          | e :: start', nil => fun _ _ => q e
-          | nil, _ => fun _ _ => predict_rest t _
-          end (eq_refl _) (eq_refl _)).
-      Proof.
-        - subst. simpl. blia.
-        - subst. simpl. blia.
-      Defined.
-      
-      Fixpoint predict_with_prefix prefix t predict_rest :=
-        predict_with_prefix_body prefix t predict_rest predict_with_prefix.
-      
-      Lemma predict_with_prefix_works prefix predict_rest rest :
-        (forall H, predicts (fun t => predict_rest (prefix ++ t) t (H t)) rest) ->
-        predicts (fun t => predict_with_prefix prefix t (predict_rest t)) (prefix ++ rest).
-      Proof.
-        intros H. induction prefix.
-        - simpl in H. simpl. apply H.
-        - simpl. econstructor; [reflexivity|reflexivity|]. apply IHprefix. intros. apply H.
-      Qed.
-      
-      Lemma predict_with_prefix_works_eq stuff prefix rest predict_rest :
-        stuff = prefix ++ rest ->
-        (forall H, predicts (fun t => predict_rest (prefix ++ t) t (H t)) rest) ->
-        predicts (fun t => predict_with_prefix prefix t (predict_rest t)) stuff.
-      Proof.
-        intros H. subst. apply predict_with_prefix_works.
-      Qed.
-      
-      Lemma predict_with_prefix_works_end prefix predict_rest :
-        (forall H, predicts (fun t => predict_rest (prefix ++ t) t (H t)) []) ->
-        predicts (fun t => predict_with_prefix prefix t (predict_rest t)) prefix.
-      Proof.
-        intros H. eapply predict_with_prefix_works in H. rewrite app_nil_r in H. eassumption.
-      Qed.
-      
-      Lemma predict_with_prefix_ext x1 x2 f1 f2  :
-        (forall y1 y2, f1 y1 y2 = f2 y1 y2) ->
-        predict_with_prefix x1 x2 f1 = predict_with_prefix x1 x2 f2.
-      Proof.
-        intros. generalize dependent x2. induction x1.
-        - intros. simpl. apply H.
-        - intros. simpl. destruct x2; try reflexivity. apply IHx1. intros. apply H.
-      Qed.
-
-      Definition predict_with_prefix_valid prefix predict_rest :
-        (forall e, In e prefix -> forall e', q e = q e' -> e = e') ->
-        (forall H, predictor_valid prefix (fun k => predict_rest (prefix ++ k) k (H k))) ->
-        predictor_valid [] (fun k => predict_with_prefix prefix k (predict_rest k)).
-      Proof.
-        intros H1 H2. induction prefix.
-        - simpl in *. apply H2.
-        - simpl. apply valid_cons. constructor. apply IHprefix. Abort.
-      
-      Lemma predict_cons e f t1 t2 :
-        predicts f (t1 ++ e :: t2) ->
-        f t1 = q e.
-      Proof.
-        clear. intros H. generalize dependent f. induction t1.
-        - intros. simpl in H. inversion H. subst. assumption.
-        - intros. simpl in H. inversion H. subst. rewrite H4. apply IHt1. assumption.
-      Qed.
-  End predictors.
-
-  Definition s_predicts := predicts qend quot.
-  Definition s_predicts_partly := predicts_partly quot.
-  Definition s_predictor_valid := predictor_valid qend quot.
-  
-  Fixpoint predictor_of (a(*the whole thing*) : abstract_trace) (t(*so far*) : trace) : qevent :=
-    match a, t with
-    | _, nil =>
-        match a with
-        | empty => qend
-        | aleak_unit _ => qleak_unit
-        | aleak_bool b _ => qleak_bool b
-        | aleak_word w _ => qleak_word w
-        | aleak_list l _ => qleak_list l
-        | aconsume_word _ => qconsume_word
-        end
-    | aleak_unit a', cons leak_unit t' => predictor_of a' t'
-    | aleak_bool _ a', cons (leak_bool _) t' => predictor_of a' t'
-    | aleak_word _ a', cons (leak_word _) t' => predictor_of a' t'
-    | aleak_list _ a', cons (leak_list _) t' => predictor_of a' t'
-    | aconsume_word f, cons (consume_word w) t' => predictor_of (f w) t'
-    | _, _ => qend (*failure*)
+  Fixpoint shrink (a : abstract_trace) (k : trace) : abstract_trace :=
+    match a, k with
+    | aleak_unit a', leak_unit :: k' => shrink a' k'
+    | aleak_bool b1 a', leak_bool b2 :: k' => shrink a' k'
+    | aleak_word w1 a', leak_word w2 :: k' => shrink a' k'
+    | aleak_list l1 a', leak_list l2 :: k' => shrink a' k'
+    | aconsume_word fa', consume_word w :: k' => shrink (fa' w) k'
+    | _, nil => a
+    | _, _ => empty (*fail*)
     end.
-  
-  Lemma predictor_works a t :
-    generates a t ->
-    s_predicts (predictor_of a) t.
-  Proof. intros H. induction H; intros; econstructor; simpl; eauto. Qed.
 
-  Lemma predictor_of_valid a k :
-    generates a k ->
-    s_predictor_valid (rev k) (predictor_of a).
+  Lemma shrink_correct (a : abstract_trace) (k1 k2 : trace) :
+    generates a (k1 ++ k2) ->
+    generates (shrink a k1) k2.
   Proof.
-  Admitted.
-(*    intros H. induction H.
-    induction a; intros.
-    - apply valid_nil. reflexivity.
-    - apply valid_cons. intros. destruct e; try discriminate H. inversion IHa; subst.
-      + econstructor. simpl. inversion IHa; subst.
-      + simpl. apply valid_cons. intros. destruct e; try discriminate H0.
-        constructor. assumption.
-      + simpl. apply valid_cons. intros. destruct e; try discriminate H.
-        constructor. assumption.
-    - apply valid_cons. intros. simpl in H. destruct e; try discriminate H.
-      simpl. assumption.
-    - apply valid_cons. intros. simpl in H. destruct e; try discriminate H.
-      simpl. assumption.
-    - apply valid_cons. intros. simpl in H. destruct e; try discriminate H.
-      simpl. assumption.
-    - apply valid_cons. intros. simpl in H. destruct e; try discriminate H.
-      simpl. apply X.
-  Qed.*) *)
+    revert a. induction k1.
+    - intros. destruct a; assumption.
+    - intros. inversion H; subst; simpl; auto.
+  Qed.
+
+  Lemma empty_min a :
+    a = empty \/ abstract_trace_lt empty a.
+  Proof.
+    induction a.
+    - left. reflexivity.
+    - right. destruct IHa as [IHa|IHa].
+      + subst. apply t_step. constructor.
+      + eapply t_trans; [eassumption|]. apply t_step. constructor.
+    - right. destruct IHa as [IHa|IHa].
+      + subst. apply t_step. constructor.
+      + eapply t_trans; [eassumption|]. apply t_step. constructor.
+    - right. destruct IHa as [IHa|IHa].
+      + subst. apply t_step. constructor.
+      + eapply t_trans; [eassumption|]. apply t_step. constructor.
+    - right. destruct IHa as [IHa|IHa].
+      + subst. apply t_step. constructor.
+      + eapply t_trans; [eassumption|]. apply t_step. constructor.
+    - right. specialize (H (word.of_Z 0)). destruct H as [H|H].
+      + rewrite <- H. apply t_step. constructor.
+      + eapply t_trans; [eassumption|]. apply t_step. constructor.
+  Qed.
+
+  Lemma shrink_le a k :
+    a = shrink a k \/ abstract_trace_lt (shrink a k) a.
+  Proof.
+    revert a. induction k; intros.
+    - left. destruct a; reflexivity.
+    - destruct a0, a; simpl; try apply empty_min.
+      + right. specialize (IHk a0). destruct IHk as [IHk|IHk].
+        -- rewrite <- IHk. apply t_step. constructor.
+        -- eapply t_trans; [eassumption|]. apply t_step. constructor.
+      + right. specialize (IHk a0). destruct IHk as [IHk|IHk].
+        -- rewrite <- IHk. apply t_step. constructor.
+        -- eapply t_trans; [eassumption|]. apply t_step. constructor.
+      + right. specialize (IHk a0). destruct IHk as [IHk|IHk].
+        -- rewrite <- IHk. apply t_step. constructor.
+        -- eapply t_trans; [eassumption|]. apply t_step. constructor.
+      + right. specialize (IHk a0). destruct IHk as [IHk|IHk].
+        -- rewrite <- IHk. apply t_step. constructor.
+        -- eapply t_trans; [eassumption|]. apply t_step. constructor.
+      + right. specialize (IHk (after r)). destruct IHk as [IHk|IHk].
+        -- rewrite <- IHk. apply t_step. constructor.
+        -- eapply t_trans; [eassumption|]. apply t_step. constructor.
+  Qed.
+
+  Lemma generates_ext a1 k :
+    generates a1 k ->
+    forall a2,
+      abs_tr_eq a1 a2 ->
+      generates a2 k.
+  Proof.
+    intros H. induction H.
+    - intros. inversion H. subst. constructor.
+    - intros a2 H'. inversion H'. subst. constructor. auto.
+    - intros a2 H'. inversion H'. subst. constructor. auto.
+    - intros a2 H'. inversion H'. subst. constructor. auto.
+    - intros a2 H'. inversion H'. subst. constructor. auto.
+    - intros a2 H'. inversion H'. subst. constructor. auto.
+  Qed.
+
+  Lemma abstract_app_ext a1 a2 a1' a2' :
+    abs_tr_eq a1 a1' ->
+    abs_tr_eq a2 a2' ->
+    abs_tr_eq (abstract_app a1 a2) (abstract_app a1' a2').
+  Proof.
+    intros H1 H2. induction H1; simpl; try constructor; assumption.
+  Qed.
+
+  Lemma abs_tr_eq_refl a : abs_tr_eq a a.
+  Proof. induction a; constructor; assumption. Qed.
+
+  Lemma abs_tr_eq_sym a b : abs_tr_eq a b -> abs_tr_eq b a.
+  Proof. intros H. induction H; constructor; auto. Qed.
+
+  Lemma abs_tr_eq_refl' a1 a2 : a1 = a2 -> abs_tr_eq a1 a2.
+  Proof. intros. subst. apply abs_tr_eq_refl. Qed.
+
+  Check generates_app.
+
+  Lemma generates_app_eq a1 a2 t1 t2 t :
+    generates a1 t1 ->
+    t1 ++ t2 = t ->
+    generates a2 t2 ->
+    generates (abstract_app a1 a2) t.
+  Proof. intros. subst. apply generates_app; assumption. Qed.
+
+  
 End WithIOEvent. (*maybe extend this to the end?*)
                             
   Definition ExtSpec{width: Z}{BW: Bitwidth width}{word: word.word width}{mem: map.map word byte} :=
