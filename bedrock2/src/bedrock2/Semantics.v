@@ -266,7 +266,7 @@ Section WithIOEvent.
         - intros. simpl. destruct x2; try reflexivity. apply IHx1. intros. apply H.
       Qed.
 
-      Definition s_predict_with_prefix_preserves_valid prefix predict_rest :
+      Definition predict_with_prefix_valid prefix predict_rest :
         (forall e, In e prefix -> forall e', q e = q e' -> e = e') ->
         (forall H, predictor_valid (fun k => predict_rest (prefix ++ k) k (H k))) ->
         predictor_valid (fun k => predict_with_prefix prefix k (predict_rest k)).
@@ -289,8 +289,9 @@ Section WithIOEvent.
         - intros. simpl in H. inversion H. subst. rewrite H4. apply IHt1. assumption.
       Qed.
   End predictors.
-  Print predicts.
+
   Definition s_predicts := predicts qend quot.
+  Definition s_predicts_partly := predicts_partly quot.
   Definition s_predictor_valid := predictor_valid qend quot.
   
   Fixpoint predictor_of (a(*the whole thing*) : abstract_trace) (t(*so far*) : trace) : qevent :=
