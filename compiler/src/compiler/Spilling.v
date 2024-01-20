@@ -217,200 +217,146 @@ Section Spilling.
     induction t1.
     - reflexivity.
     - simpl. assumption.
-  Qed.
+  Qed. Print generator. Print abstract_app. Search abstract_app.
 
-  Definition s_predict_with_prefix := predict_with_prefix quot.
-
-    Definition snext_stmt'_body
+  Fixpoint snext_stmt'
     {env: map.map String.string (list Z * list Z * stmt)}
-    (e: env) (next : trace -> qevent)
-    (tup : bigtuple)
-    (snext_stmt' : forall othertuple, lt_tuple othertuple tup -> qevent)
-    : qevent.
-    refine (
-        match tup as x return tup = x -> _ with
-        | (sk_so_far, s, k_so_far, fpval, f) =>
-           fun _ => 
-             match s as x return s = x -> _ with
-             | SLoad sz x y o => fun _ => 
-                                   match next k_so_far with
-                                   | qleak_word a =>
-                                       s_predict_with_prefix
-                                         (leak_load_iarg_reg fpval y ++ [leak_word a] ++ leak_save_ires_reg fpval x)
-                                         sk_so_far
-                                         (fun sk_so_far' pf => f (k_so_far ++ [leak_word a]) (length sk_so_far - length sk_so_far'))
-                                   | _ => qend
-                                   end
-             | SStore sz x y o => fun _ =>
-                                    match next k_so_far with
-                                    | qleak_word a =>
-                                        s_predict_with_prefix
-                                          (leak_load_iarg_reg fpval x ++ leak_load_iarg_reg fpval y ++ [leak_word a])
-                                          sk_so_far
-                                          (fun sk_so_far' pf => f (k_so_far ++ [leak_word a]) (length sk_so_far - length sk_so_far'))
-                                    | _ => qend
-                                    end
-             | SInlinetable _ x _ i => fun _ =>
-                                         match next k_so_far with
-                                         | qleak_word i' =>
-                                             s_predict_with_prefix
-                                               (leak_load_iarg_reg fpval i ++ [leak_word i'] ++ leak_save_ires_reg fpval x)
-                                               sk_so_far
-                                               (fun sk_so_far' pf => f (k_so_far ++ [leak_word i']) (length sk_so_far - length sk_so_far'))
-                                         | _ => qend
-                                         end
-             | SStackalloc x z body => fun _ =>
-                                         match next k_so_far with
-                                         | qconsume_word =>
-                                             match sk_so_far as x return sk_so_far = x -> _ with
-                                             | consume_word a :: sk_so_far' => fun _ =>
-                                                                                 s_predict_with_prefix
-                                                                                   (leak_save_ires_reg fpval x)
-                                                                                   sk_so_far'
-                                                                                   (fun sk_so_far'' _ =>
-                                                                                      snext_stmt'
-                                                                                        (sk_so_far'', body, k_so_far ++ [consume_word a], fpval,
-                                                                                          (fun k_so_far''' sk_so_far''' => f k_so_far''' (sk_so_far''' + length sk_so_far - length sk_so_far''))) _)
-                                             | nil => fun _ => qconsume_word
-                                             | _ => fun _ => qend
-                                             end (eq_refl sk_so_far)
-                                         | _ => qend
-                                         end
-             | SLit x _ => fun _ =>
-                             s_predict_with_prefix
-                               (leak_save_ires_reg fpval x)
-                               sk_so_far
-                               (fun sk_so_far' pf => f k_so_far (length sk_so_far - length sk_so_far'))
-             | SOp x op y oz => fun _ =>
-                                  let newt :=
-                                    match op with
-                                    | Syntax.bopname.divu
-                                    | Syntax.bopname.remu =>
-                                        match next k_so_far with
-                                        | qleak_word x1 =>
-                                            match next (k_so_far ++ [leak_word x1]) with
-                                            | qleak_word x2 => Some [leak_word x1; leak_word x2]
-                                            | _ => None
-                                            end
-                                        | _ => None
-                                        end
-                                    | Syntax.bopname.slu
-                                    | Syntax.bopname.sru
-                                    | Syntax.bopname.srs =>
-                                        match next k_so_far with
-                                        | qleak_word x2 => Some [leak_word x2]
-                                        | _ => None
-                                        end
-                                    | _ => Some []
-                                    end
-                                  in
-                                  match newt with
-                                  | Some newt =>
-                                      s_predict_with_prefix
-                                        (leak_load_iarg_reg fpval y ++
-                                           match oz with 
-                                           | Var z => leak_load_iarg_reg fpval z
-                                           | Const _ => []
-                                           end
-                                           ++ newt
-                                           ++ leak_save_ires_reg fpval x)
-                                        sk_so_far
-                                        (fun sk_so_far' pf => f (k_so_far ++ newt) (length sk_so_far - length sk_so_far'))
-                                  | None => qend
-                                  end
-             | SSet x y => fun _ =>
-                             s_predict_with_prefix
-                               (leak_load_iarg_reg fpval y ++ leak_save_ires_reg fpval x)
-                               sk_so_far
-                               (fun sk_so_far' pf => f k_so_far (length sk_so_far - length sk_so_far'))
-             | SIf c thn els => fun _ =>
-                                  match next k_so_far with
-                                  | qleak_bool b =>
-                                      s_predict_with_prefix
-                                        (leak_prepare_bcond fpval c ++ leak_spill_bcond ++ [leak_bool b])
-                                        sk_so_far
-                                        (fun sk_so_far' pf00 =>
-                                           snext_stmt'
-                                             (sk_so_far', (if b then thn else els), k_so_far ++ [leak_bool b], fpval,
-                                                (fun k_so_far'' sk_so_far''_diff => f k_so_far'' (sk_so_far''_diff + length sk_so_far - length sk_so_far'))) _)
-                                  | _ => qend
-                                  end
-             | SLoop s1 c s2 => fun _ =>
-                                  snext_stmt'
-                                    (sk_so_far, s1, k_so_far, fpval,
-                                       (fun k_so_far' sk_so_far'_len =>
-                                          let sk_so_far':= pop_elts sk_so_far'_len sk_so_far in
-                                          match next k_so_far' with
-                                          | qleak_bool true =>
-                                              s_predict_with_prefix
-                                                (leak_prepare_bcond fpval c ++ leak_spill_bcond ++ [leak_bool true])
-                                                sk_so_far'
-                                                (fun sk_so_far'' pf01 =>
-                                                   snext_stmt'
-                                                     (sk_so_far'', s2, k_so_far' ++ [leak_bool true], fpval,
-                                                        (fun k_so_far'' sk_so_far'''_len =>
-                                                           let sk_so_far''':= pop_elts sk_so_far'''_len sk_so_far'' in
-                                                           snext_stmt'
-                                                             (sk_so_far''', s, k_so_far'', fpval,
-                                                                (fun k_so_far''' sk_so_far''''_len => f k_so_far''' (sk_so_far''''_len + sk_so_far'''_len + (length sk_so_far - length sk_so_far'')))) _)) _)
-                                          | qleak_bool false =>
-                                              s_predict_with_prefix
-                                                (leak_prepare_bcond fpval c ++ leak_spill_bcond ++ [leak_bool false])
-                                                sk_so_far'
-                                                (fun sk_so_far'' pf01 => f (k_so_far' ++ [leak_bool false]) (length sk_so_far - length sk_so_far'') )
-                                          | _ => qend
-                                          end)) _
-             | SSeq s1 s2 => fun _ =>
-                               snext_stmt'
-                                 (sk_so_far, s1, k_so_far, fpval,
-                                    (fun k_so_far' sk_so_far'_len =>
-                                       let sk_so_far' := pop_elts sk_so_far'_len sk_so_far in
-                                       snext_stmt'
-                                         (sk_so_far', s2, k_so_far', fpval, (fun k_so_far'' sk_so_far''_len => f k_so_far'' (sk_so_far''_len + sk_so_far'_len))) _)) _
-             | SSkip => fun _ => f k_so_far 0
-             | SCall resvars fname argvars => fun _ =>
-                                                match next k_so_far with
-                                                | qleak_unit =>
-                                                    match @map.get _ _ env e fname with
-                                                    | Some (params, rets, fbody) =>
-                                                        s_predict_with_prefix
-                                                          (leak_set_reg_range_to_vars fpval argvars ++ [leak_unit])
-                                                          sk_so_far
-                                                          (fun sk_so_far' pf00 =>
-                                                             match sk_so_far' as x return sk_so_far' = x -> _ with (* would be nice if s_predict_with_prefix would do this *)
-                                                             | consume_word fpval' :: sk_so_far'' => fun _ => 
-                                                                                                       s_predict_with_prefix
-                                                                                                         (leak_set_vars_to_reg_range fpval' params)
-                                                                                                         sk_so_far''
-                                                                                                         (fun sk_so_far''' pf01 =>
-                                                                                                            snext_stmt'
-                                                                                                              (sk_so_far''', fbody, k_so_far ++ [leak_unit], fpval',
-                                                                                                                (fun k_so_far' sk_so_far''''_len =>
-                                                                                                                   let sk_so_far'''' := pop_elts sk_so_far''''_len sk_so_far''' in
-                                                                                                                   s_predict_with_prefix
-                                                                                                                     (leak_set_reg_range_to_vars fpval' rets ++ leak_set_vars_to_reg_range fpval resvars)
-                                                                                                                     sk_so_far''''
-                                                                                                                     (fun sk_so_far''''' pf03 => f k_so_far' (length sk_so_far - length sk_so_far''''')))) _) 
-                                                             | nil => fun _ => qconsume_word
-                                                             | _ => fun _ => qend
-                                                             end (eq_refl _))
-                                                    | None => qend
-                                                    end
-                                                | _ => qend
-                                                end
-             | SInteract resvars _ argvars => fun _ =>
-                                                match next k_so_far with
-                                                | qleak_list l =>
-                                                    s_predict_with_prefix
-                                                      (leak_set_reg_range_to_vars fpval argvars ++ [leak_list l] ++ leak_set_vars_to_reg_range fpval resvars)
-                                                      sk_so_far
-                                                      (fun sk_so_far' pf => f (k_so_far ++ [leak_list l]) (length sk_so_far - length sk_so_far'))
-                                                | _ => qend
-                                                end
-             end (eq_refl _)
-       end (eq_refl _))%nat.
-    Proof.
-      Unshelve.
+    (e: env)
+    (s : stmt) (a : abstract_trace) (fpval : word)
+    (f : abstract_trace (*rest of a*) -> abstract_trace(*rest of sa*))
+    : abstract_trace :=
+    match s with
+    | SLoad sz x y o =>
+        match a with
+        | aleak_word addr a' =>
+            abstract_app
+              (generator (leak_load_iarg_reg fpval y ++ [leak_word addr] ++ leak_save_ires_reg fpval x))
+              (f a')
+        | _ => empty
+        end
+    | SStore sz x y o =>
+        match a with
+        | aleak_word addr a' =>
+            abstract_app
+              (generator (leak_load_iarg_reg fpval x ++ leak_load_iarg_reg fpval y ++ [leak_word addr]))
+              (f a')
+        | _ => empty
+        end
+    | SInlinetable _ x _ i =>
+        match a with
+        | aleak_word i' a' =>
+            abstract_app
+              (generator (leak_load_iarg_reg fpval i ++ [leak_word i'] ++ leak_save_ires_reg fpval x))
+              (f a')
+        | _ => empty
+        end
+    | SStackalloc x z body =>
+        match a with
+        | aconsume_word fa' =>
+            aconsume_word (fun addr =>
+                             abstract_app
+                               (generator (leak_save_ires_reg fpval x))
+                               (snext_stmt' e body (fa' addr) fpval f))
+        | _ => empty
+        end
+    | SLit x _ =>
+        abstract_app
+          (generator (leak_save_ires_reg fpval x))
+          (f a)
+    | SOp x op y oz =>
+        let newt_a' :=
+          match op with
+          | Syntax.bopname.divu
+          | Syntax.bopname.remu =>
+              match a with
+              | aleak_word x1 (aleak_word x2 a') => Some ([leak_word x1; leak_word x2], a')
+              | _ => None
+              end
+          | Syntax.bopname.slu
+          | Syntax.bopname.sru
+          | Syntax.bopname.srs =>
+              match a with
+              | aleak_word x2 a' => Some ([leak_word x2], a')
+              | _ => None
+              end
+          | _ => Some ([], a)
+          end
+        in
+        match newt_a' with
+        | Some (newt, a') =>
+            abstract_app
+              (generator (leak_load_iarg_reg fpval y ++
+                            match oz with 
+                            | Var z => leak_load_iarg_reg fpval z
+                            | Const _ => []
+                            end
+                            ++ newt
+                            ++ leak_save_ires_reg fpval x))
+              (f a')
+        | None => empty
+        end
+    | SSet x y =>
+        abstract_app
+          (generator (leak_load_iarg_reg fpval y ++ leak_save_ires_reg fpval x))
+          (f a)
+    | SIf c thn els =>
+        match a with
+        | aleak_bool b a' =>
+            abstract_app
+              (generator (leak_prepare_bcond fpval c ++ leak_spill_bcond ++ [leak_bool b]))
+              (snext_stmt' e (if b then thn else els) a' fpval f)
+        | _ => empty
+        end
+    | SLoop s1 c s2 =>
+        snext_stmt' e s1 a fpval
+          (fun a' =>
+             match a' with
+             | aleak_bool true a'' =>
+                 abstract_app
+                   (generator (leak_prepare_bcond fpval c ++ leak_spill_bcond ++ [leak_bool true]))
+                   (snext_stmt' e s2 a'' fpval 
+                      (fun a''' => snext_stmt' e s a''' fpval f))
+             | aleak_bool false a'' =>
+                 abstract_app
+                   (generator (leak_prepare_bcond fpval c ++ leak_spill_bcond ++ [leak_bool false]))
+                   (f a'')
+             | _ => empty
+             end)
+    | SSeq s1 s2 =>
+        snext_stmt' e s1 a fpval
+          (fun a' => snext_stmt' e s2 a' fpval f)
+    | SSkip => f a
+    | SCall resvars fname argvars =>
+        match a with
+        | aleak_unit a' =>
+            match @map.get _ _ env e fname with
+            | Some (params, rets, fbody) =>
+                abstract_app
+                  (generator (leak_set_reg_range_to_vars fpval argvars ++ [leak_unit]))
+                  (aconsume_word
+                     (fun fpval' =>
+                        abstract_app
+                          (generator (leak_set_vars_to_reg_range fpval' params))
+                          (snext_stmt' e fbody a' fpval'
+                             (fun a'' =>
+                                abstract_app
+                                  (generator (leak_set_reg_range_to_vars fpval' rets ++ leak_set_vars_to_reg_range fpval resvars))
+                                  (f a'')))))
+            | None => empty
+            end
+        | _ => empty
+        end
+    | SInteract resvars _ argvars =>
+        match a with
+        | aleak_list l a' =>
+            abstract_app
+              (generator (leak_set_reg_range_to_vars fpval argvars ++ [leak_list l] ++ leak_set_vars_to_reg_range fpval resvars))
+              (f a')
+        | _ => empty
+        end
+    end%nat.
+  Proof.
+    Unshelve.
       all: intros.
       all: cbv [lt_tuple project_tuple].
       all: subst.
@@ -461,8 +407,6 @@ Section Spilling.
       { cbv [Equiv]. destruct bigtuple as [ [ [ [z1 z2] z3] z4] fz]. auto. }
     Qed.
 
-    Check predict_with_prefix_valid.
-
     Lemma non_consume_word_inj e :
       (forall w, e <> consume_word w) ->
       forall e', quot e = quot e' -> e = e'.
@@ -495,7 +439,7 @@ Section Spilling.
     Definition snext_stmt'_preserves_valid {env: map.map String.string (list Z * list Z * stmt)}
       next e :
       forall k_so_far,
-        s_predictor_valid (fun k => next (k_so_far ++ k)) ->
+        s_predictor_valid k_so_far next ->
         forall s fpval f k_so_far',
           (forall k_so_far'' k0 g,
               (forall k, g k = f (k0 ++ k) (k_so_far ++ k_so_far'') (length k0)) ->

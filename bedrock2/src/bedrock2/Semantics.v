@@ -114,7 +114,7 @@ Section WithIOEvent.
     generates (generator t) t.
   Proof. induction t; try constructor. destruct a; cbn [generator]; constructor; assumption. Qed.
 
-  Section predictors.
+  (*Section predictors.
     Context {Event QEvent : Type} (qend : QEvent) (q : Event -> QEvent).
     Context (Hend : forall e, q e <> qend).
     Context (Trace := list Event).
@@ -341,7 +341,7 @@ Section WithIOEvent.
       simpl. assumption.
     - apply valid_cons. intros. simpl in H. destruct e; try discriminate H.
       simpl. apply X.
-  Qed.*)
+  Qed.*) *)
 End WithIOEvent. (*maybe extend this to the end?*)
                             
   Definition ExtSpec{width: Z}{BW: Bitwidth width}{word: word.word width}{mem: map.map word byte} :=
