@@ -524,18 +524,227 @@ Section Spilling.
         + reflexivity.
         + apply IHpredicts_partly. intros. rewrite <- H1. rewrite e1. reflexivity.
     Qed.
+
+    Lemma predicts_partly_app k1 k2 next :
+      predicts_partly next k1 ->
+      predicts_partly (fun k => next (k1 ++ k)) k2 ->
+      predicts_partly next (k1 ++ k2).
+    Proof.
+      revert k2. revert next. induction k1.
+      - intros next k2 H1 H2. apply H2.
+      - intros next k2 H1 H2. inversion H1. subst. econstructor; try eassumption. fold (app k1 k2).
+        apply IHk1.
+        + assumption.
+        + eapply predicts_partly_ext; [|eassumption]. intros. simpl. apply H5.
+    Qed.      
+
+    Lemma bigger_thing_valid f k :
+      s_predictor_valid f ->
+      predicts_partly f k ->
+      s_predictor_valid (fun k' => f (k ++ k')).
+    Proof.
+      revert f. induction k.
+      - intros f H1 H2. eapply s_predictor_valid_ext. 1: eapply H1. intros. reflexivity.
+      - intros f H1 H2. inversion H2. subst. simpl. eapply s_predictor_valid_ext.
+        2: { intros. symmetry. rewrite H5. reflexivity. }
+        apply IHk; [|assumption]. inversion H1; subst.
+        + rewrite H4 in H. destruct a; discriminate H.
+        + rewrite H4 in H. destruct a; try discriminate H.
+          eapply s_predictor_valid_ext; [eassumption|]. intros. apply H5.
+        + rewrite H4 in H. destruct a; try discriminate H.
+          eapply s_predictor_valid_ext; [eassumption|]. intros.
+          injection H. intros. subst. apply H5.
+        + rewrite H4 in H. destruct a; try discriminate H.
+          eapply s_predictor_valid_ext; [eassumption|]. intros.
+          injection H. intros. subst. apply H5.
+        + rewrite H4 in H. destruct a; try discriminate H.
+          eapply s_predictor_valid_ext; [eassumption|]. intros.
+          injection H. intros. subst. apply H5.
+        + rewrite H4 in H. destruct a; try discriminate H.
+          eapply s_predictor_valid_ext; [eapply X0|]. intros.
+          eapply H5.
+    Qed.
     
     Definition snext_stmt'_preserves_valid {env: map.map String.string (list Z * list Z * stmt)}
-      next e k_so_far :
+      next e s :
+      forall k_so_far,
         s_predictor_valid (fun k => next (k_so_far ++ k)) ->
-        forall s fpval f k_so_far',
+        forall fpval f k_so_far',
           (forall k_so_far'' k0 g,
-            (forall k'', g k'' = length k0) ->
+              (forall k, g k = f (k0 ++ k) (k_so_far ++ k_so_far'') (length k0)) ->
               predicts_partly (fun k => next (k_so_far ++ k)) k_so_far'' ->
-              s_predictor_valid (fun k => f (k0 ++ k) (k_so_far ++ k_so_far'') (g k))) ->
+              s_predictor_valid g) ->
           predicts_partly (fun k => next (k_so_far ++ k)) k_so_far' ->
           s_predictor_valid (fun k => snext_stmt' e next (k, s, (k_so_far ++ k_so_far'), fpval, (f k))).
     Proof.
+      induction s; intros.
+      all: eapply s_predictor_valid_ext; [|intros; symmetry; rewrite snext_stmt'_step; reflexivity].
+      all: cbn [snext_stmt'_body].
+      - destruct (next (k_so_far ++ k_so_far')) eqn:E; try (apply s_valid_nil_end; reflexivity).
+        apply s_predict_with_prefix_preserves_valid.
+        + intros. cbv [leak_load_iarg_reg leak_save_ires_reg].
+          repeat Tactics.destruct_one_match; simpl; intuition congruence.
+        + intros _. eapply X0.
+          -- intros. f_equal.
+             ++ rewrite <- app_assoc. reflexivity.
+             ++ repeat (rewrite app_length || cbn [app length]). blia.
+          -- apply predicts_partly_app; [assumption|]. econstructor.
+             ++ rewrite app_nil_r. assumption.
+             ++ reflexivity.
+             ++ constructor.
+      - destruct (next (k_so_far ++ k_so_far')) eqn:E; try (apply s_valid_nil_end; reflexivity).
+        apply s_predict_with_prefix_preserves_valid.
+        + intros. cbv [leak_load_iarg_reg leak_save_ires_reg].
+          repeat Tactics.destruct_one_match; simpl; intuition congruence.
+        + intros _. eapply X0.
+          -- intros. f_equal.
+             ++ rewrite <- app_assoc. reflexivity.
+             ++ repeat (rewrite app_length || cbn [app length]). blia.
+          -- apply predicts_partly_app; [assumption|]. econstructor.
+             ++ rewrite app_nil_r. assumption.
+             ++ reflexivity.
+             ++ constructor.
+      - destruct (next (k_so_far ++ k_so_far')) eqn:E; try (apply s_valid_nil_end; reflexivity).
+        apply s_predict_with_prefix_preserves_valid.
+        + intros. cbv [leak_load_iarg_reg leak_save_ires_reg].
+          repeat Tactics.destruct_one_match; simpl; intuition congruence.
+        + intros _. eapply X0.
+          -- intros. f_equal.
+             ++ rewrite <- app_assoc. reflexivity.
+             ++ repeat (rewrite app_length || cbn [app length]). blia.
+          -- apply predicts_partly_app; [assumption|]. econstructor.
+             ++ rewrite app_nil_r. assumption.
+             ++ reflexivity.
+             ++ constructor.
+      - destruct (next (k_so_far ++ k_so_far')) eqn:E; try (apply s_valid_nil_end; reflexivity).
+        eapply s_valid_consume_word; [reflexivity|]. intros.
+        apply s_predict_with_prefix_preserves_valid.
+        + intros. cbv [leak_save_ires_reg].
+          repeat Tactics.destruct_one_match; simpl; intuition congruence.
+        + intros _. apply IHs.
+          -- Check bigger_thing_valid.
+             assert (H := bigger_thing_valid _ _ X X1).
+             simpl in H. eapply s_predictor_valid_ext. 1: eapply H.
+             intros. simpl. rewrite app_assoc. reflexivity.
+          -- intros. eapply X0.
+             ++ intros. rewrite H. f_equal.
+                --- instantiate (1 := _ :: _). simpl. f_equal. repeat rewrite app_assoc. reflexivity.
+                --- rewrite <- app_assoc. reflexivity.
+                --- repeat (rewrite app_length || cbn [app length]). blia.
+             ++ apply predicts_partly_app; [assumption|]. eapply predicts_partly_ext; [|eassumption].
+                intros. simpl. rewrite <- app_assoc. reflexivity.
+          -- econstructor.
+             ++ rewrite app_nil_r. exact E.
+             ++ reflexivity.
+             ++ constructor.
+      - apply s_predict_with_prefix_preserves_valid.
+        + intros. cbv [leak_save_ires_reg].
+          repeat Tactics.destruct_one_match; simpl; intuition congruence.
+        + intros _. eapply X0.
+          -- intros. f_equal. repeat (rewrite app_length || cbn [app length]). blia.
+          -- assumption.
+      - destruct op.
+        { apply s_predict_with_prefix_preserves_valid.
+          { intros. cbv [leak_load_iarg_reg leak_save_ires_reg].
+            repeat Tactics.destruct_one_match; simpl; intuition congruence. }
+          { intros _. eapply X0; [|eassumption]. intros. f_equal; [rewrite app_nil_r; reflexivity | repeat (rewrite app_length || cbn [app length]); blia]. } }
+        all: try (apply s_predict_with_prefix_preserves_valid;
+                  intros; cbv [leak_load_iarg_reg leak_save_ires_reg];
+                  [repeat Tactics.destruct_one_match; simpl; intuition congruence |
+                    eapply X0; [|eassumption]; intros; f_equal; [rewrite app_nil_r; reflexivity | repeat (rewrite app_length || cbn [app length]); blia] ]).
+        all: destruct (next (k_so_far ++ k_so_far')) eqn:?; try (apply s_valid_nil_end; reflexivity).
+        3,4,5: apply s_predict_with_prefix_preserves_valid;
+                  intros; cbv [leak_load_iarg_reg leak_save_ires_reg];
+                  [repeat Tactics.destruct_one_match; simpl; intuition congruence |
+                    eapply X0; [intros; f_equal; [rewrite <- app_assoc; reflexivity | repeat (rewrite app_length || cbn [app length]); blia] | idtac] ].
+        1,2: destruct (next ((k_so_far ++ k_so_far') ++ [leak_word r])) eqn:?; try (apply s_valid_nil_end; reflexivity).
+        1,2: apply s_predict_with_prefix_preserves_valid;
+                  intros; cbv [leak_load_iarg_reg leak_save_ires_reg];
+                  [repeat Tactics.destruct_one_match; simpl; intuition congruence |
+                    eapply X0; [intros; f_equal; [rewrite <- app_assoc; reflexivity | repeat (rewrite app_length || cbn [app length]); blia] | idtac] ].
+        all: apply predicts_partly_app; try assumption.
+        all: econstructor; try reflexivity; try rewrite app_nil_r; try assumption.
+        all: econstructor; try reflexivity; try constructor.
+        all: rewrite <- app_assoc in *; assumption.
+        
+      - apply s_predict_with_prefix_preserves_valid.
+        + intros. cbv [leak_load_iarg_reg leak_save_ires_reg].
+          repeat Tactics.destruct_one_match; simpl; intuition congruence.
+        + intros _. eapply X0.
+          -- intros. f_equal. repeat (rewrite app_length || cbn [app length]). blia.
+          -- assumption.
+      - destruct (next (k_so_far ++ k_so_far')) eqn:E; try (apply s_valid_nil_end; reflexivity).
+        apply s_predict_with_prefix_preserves_valid.
+        + intros. cbv [leak_prepare_bcond leak_spill_bcond leak_load_iarg_reg].
+          repeat Tactics.destruct_one_match; simpl; intuition congruence.
+        + intros _. destruct b.
+          -- apply IHs1.
+             ++ Check bigger_thing_valid. assert (H := bigger_thing_valid _ _ X X1).
+                simpl in H. eapply s_predictor_valid_ext. 1: eapply H.
+                intros. simpl. rewrite <- app_assoc. reflexivity.
+             ++ intros. eapply X0.
+                --- intros. rewrite H. f_equal.
+                    +++ repeat rewrite app_assoc. reflexivity.
+                    +++ rewrite <- app_assoc. reflexivity.
+                    +++ repeat (rewrite app_length || cbn [app length]). blia.
+                --- apply predicts_partly_app.
+                    +++ assumption.
+                    +++ eapply predicts_partly_ext. 2: eassumption.
+                        intros. simpl. rewrite <- app_assoc. reflexivity.
+             ++ econstructor.
+                --- rewrite app_nil_r. simpl. assumption.
+                --- reflexivity.
+                --- constructor.
+          -- apply IHs2.
+             ++ Check bigger_thing_valid. assert (H := bigger_thing_valid _ _ X X1).
+                simpl in H. eapply s_predictor_valid_ext. 1: eapply H.
+                intros. simpl. rewrite <- app_assoc. reflexivity.
+             ++ intros. eapply X0.
+                --- intros. rewrite H. f_equal.
+                    +++ repeat rewrite app_assoc. reflexivity.
+                    +++ rewrite <- app_assoc. reflexivity.
+                    +++ repeat (rewrite app_length || cbn [app length]). blia.
+                --- apply predicts_partly_app.
+                    +++ assumption.
+                    +++ eapply predicts_partly_ext. 2: eassumption.
+                        intros. simpl. rewrite <- app_assoc. reflexivity.
+             ++ econstructor.
+                --- rewrite app_nil_r. simpl. assumption.
+                --- reflexivity.
+                --- constructor.
+      - apply IHs1.
+        + assumption.
+        + intros. eapply s_predictor_valid_ext.
+          2: { intros. symmetry. rewrite H. reflexivity. } clear H.
+          destruct (next (k_so_far ++ k_so_far'')) eqn:E; try (apply s_valid_nil_end; reflexivity).
+          destruct b.
+          -- eapply s_predictor_valid_ext.
+             2: { intros. rewrite pop_elts_correct. reflexivity. }
+             apply s_predict_with_prefix_preserves_valid.
+             ++ intros. cbv [leak_prepare_bcond leak_spill_bcond leak_load_iarg_reg].
+                repeat Tactics.destruct_one_match; simpl; intuition congruence.
+             ++ intros _. apply IHs2.
+                --- Check bigger_thing_valid. assert (H' := bigger_thing_valid _ _ X X2).
+                    eapply s_predictor_valid_ext. 1: eapply H'.
+                    intros. simpl. rewrite <- app_assoc. reflexivity.
+                --- intros. eapply s_predictor_valid_ext.
+                    2: { intros. symmetry. rewrite H. rewrite pop_elts_correct. reflexivity. } clear H.
+                    apply 
+                    eapply 
+                    +++ intros. rewrite H.
+
+
+
+
+
+
+
+
+
+
+
+
+      
       intros H1.
       remember (fun _ => _) as f' eqn:E. induction H1; subst; rewrite app_nil_r in *.
       - intros s fpval f k_so_far' H1 H2. inversion H2.
