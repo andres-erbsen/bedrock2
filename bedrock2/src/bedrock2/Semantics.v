@@ -36,7 +36,7 @@ Inductive qevent {width: Z}{BW: Bitwidth width}{word: word.word width} : Type :=
 | qleak_bool : bool -> qevent
 | qleak_word : word -> qevent
 | qleak_list : list word -> qevent
-| qconsume : qevent
+| qconsume_word : qevent
 | qend : qevent.
 
 Inductive abstract_trace {width: Z}{BW: Bitwidth width}{word: word.word width} : Type :=
@@ -58,7 +58,7 @@ Section WithIOEvent.
     | leak_bool b => qleak_bool b
     | leak_word w => qleak_word w
     | leak_list l => qleak_list l
-    | consume_word w => qconsume
+    | consume_word w => qconsume_word
     end.
 
   (*should I call this leakage_trace, now that it doesn't contain io events?
@@ -120,7 +120,7 @@ Section WithIOEvent.
     
     Inductive predicts : (Trace -> QEvent) -> Trace -> Prop :=
     | predicts_cons :
-      forall f g e t,
+      forall f e g t,
         f [] = q e ->
         (forall t', f (e :: t') = g t') ->
         predicts g t ->
@@ -208,7 +208,7 @@ Section WithIOEvent.
   Print predicts.
   Definition s_predicts := predicts qend quot.
   
-  Fixpoint predictor (a(*the whole thing*) : abstract_trace) (t(*so far*) : trace) : qevent :=
+  Fixpoint predictor_of (a(*the whole thing*) : abstract_trace) (t(*so far*) : trace) : qevent :=
     match a, t with
     | _, nil =>
         match a with
@@ -217,20 +217,57 @@ Section WithIOEvent.
         | aleak_bool b _ => qleak_bool b
         | aleak_word w _ => qleak_word w
         | aleak_list l _ => qleak_list l
-        | aconsume_word _ => qconsume
+        | aconsume_word _ => qconsume_word
         end
-    | aleak_unit a', cons leak_unit t' => predictor a' t'
-    | aleak_bool _ a', cons (leak_bool _) t' => predictor a' t'
-    | aleak_word _ a', cons (leak_word _) t' => predictor a' t'
-    | aleak_list _ a', cons (leak_list _) t' => predictor a' t'
-    | aconsume_word f, cons (consume_word w) t' => predictor (f w) t'
+    | aleak_unit a', cons leak_unit t' => predictor_of a' t'
+    | aleak_bool _ a', cons (leak_bool _) t' => predictor_of a' t'
+    | aleak_word _ a', cons (leak_word _) t' => predictor_of a' t'
+    | aleak_list _ a', cons (leak_list _) t' => predictor_of a' t'
+    | aconsume_word f, cons (consume_word w) t' => predictor_of (f w) t'
     | _, _ => qend (*failure*)
     end.
   
   Lemma predictor_works a t :
     generates a t ->
-    s_predicts (predictor a) t.
+    s_predicts (predictor_of a) t.
   Proof. intros H. induction H; intros; econstructor; simpl; eauto. Qed.
+
+  Inductive s_predictor_valid : trace -> (trace -> qevent) -> Type :=
+  | s_valid_nil_end :
+    forall k f, f k = qend ->
+              s_predictor_valid k f
+  | s_valid_leak_unit :
+    forall k f, f k = qleak_unit ->
+              s_predictor_valid (fun k' => f (k ++ leak_unit :: k')) ->
+              s_predictor_valid k f
+  | s_valid_leak_bool :
+      forall k f b, f k = qleak_bool b ->
+                  s_predictor_valid (fun t => f (k ++ leak_bool b :: t)) ->
+                  s_predictor_valid f
+  | s_valid_leak_word :
+    forall f w, f [] = qleak_word w ->
+                s_predictor_valid (fun t => f (leak_word w :: t)) ->
+                s_predictor_valid f
+  | s_valid_leak_list :
+    forall f l, f [] = qleak_list l ->
+                s_predictor_valid (fun t => f (leak_list l :: t)) ->
+                s_predictor_valid f
+  | s_valid_consume_word :
+    forall f, f [] = qconsume_word ->
+              (forall w, s_predictor_valid (fun t => f (consume_word w :: t))) ->
+              s_predictor_valid f.
+
+  Lemma predictor_of_valid a :
+    s_predictor_valid (predictor_of a).
+  Proof.
+    induction a.
+    - apply s_valid_nil_end. reflexivity.
+    - apply s_valid_leak_unit; [reflexivity | assumption].
+    - eapply s_valid_leak_bool; [reflexivity | eassumption].
+    - eapply s_valid_leak_word; [reflexivity | eassumption].
+    - eapply s_valid_leak_list; [reflexivity | eassumption].
+    - eapply s_valid_consume_word; [reflexivity | eassumption].
+  Qed.
 End WithIOEvent. (*maybe extend this to the end?*)
                             
   Definition ExtSpec{width: Z}{BW: Bitwidth width}{word: word.word width}{mem: map.map word byte} :=
