@@ -566,10 +566,10 @@ Section Spilling.
     Qed.
     
     Definition snext_stmt'_preserves_valid {env: map.map String.string (list Z * list Z * stmt)}
-      next e s :
+      next e :
       forall k_so_far,
         s_predictor_valid (fun k => next (k_so_far ++ k)) ->
-        forall fpval f k_so_far',
+        forall fpval f s k_so_far',
           (forall k_so_far'' k0 g,
               (forall k, g k = f (k0 ++ k) (k_so_far ++ k_so_far'') (length k0)) ->
               predicts_partly (fun k => next (k_so_far ++ k)) k_so_far'' ->
@@ -577,6 +577,7 @@ Section Spilling.
           predicts_partly (fun k => next (k_so_far ++ k)) k_so_far' ->
           s_predictor_valid (fun k => snext_stmt' e next (k, s, (k_so_far ++ k_so_far'), fpval, (f k))).
     Proof.
+      intros k_so_far H. Print s_predictor_valid. induction H.
       induction s; intros.
       all: eapply s_predictor_valid_ext; [|intros; symmetry; rewrite snext_stmt'_step; reflexivity].
       all: cbn [snext_stmt'_body].
