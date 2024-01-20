@@ -1,3 +1,5 @@
+Require Import Coq.Relations.Relation_Operators.
+Require Import Coq.Wellfounded.Transitive_Closure.
 Require Import coqutil.sanity coqutil.Macros.subst coqutil.Macros.unique coqutil.Byte.
 Require Import coqutil.Datatypes.PrimitivePair coqutil.Datatypes.HList.
 Require Import coqutil.Decidable.
@@ -49,6 +51,29 @@ Inductive abstract_trace {width: Z}{BW: Bitwidth width}{word: word.word width} :
 
 Section WithIOEvent.
   Context {width: Z}{BW: Bitwidth width}{word: word.word width}{mem: map.map word byte}.
+
+  Inductive subtrace : abstract_trace -> abstract_trace -> Prop :=
+  | leak_unit_subtrace : forall a, subtrace a (aleak_unit a)
+  | leak_bool_subtrace : forall b a, subtrace a (aleak_bool b a)
+  | leak_word_subtrace : forall w a, subtrace a (aleak_word w a)
+  | leak_list_subtrace : forall l a, subtrace a (aleak_list l a)
+  | consume_word_subtrace : forall fa w, subtrace (fa w) (aconsume_word fa).
+  
+  Lemma wf_subtrace : well_founded subtrace.
+  Proof.
+    cbv [well_founded]. intros a. induction a.
+    all: try (constructor; intros ? H'; inversion H'; subst; auto).
+  Defined.
+
+  Definition abstract_trace_lt :=
+    clos_trans _ subtrace.
+
+  Lemma wf_abstract_trace_lt : well_founded abstract_trace_lt.
+  Proof.
+    cbv [abstract_trace_lt]. Search clos_trans.
+    apply Transitive_Closure.wf_clos_trans.
+    apply wf_subtrace.
+  Defined.
   
   Definition io_trace : Type := list io_event.
 
