@@ -170,11 +170,6 @@ Section Spilling.
 
   Definition leak_spill_bcond : trace :=
     nil.
-
-   (* for a constant-time program, we should have a function which, given all compiler decisions that have
-      happened so far, returns the next element of the trace.*)
-  
-  Definition lt_tuple' : abstract_trace * stmt -> abstract_trace * stmt -> Prop := slexprod _ _ abstract_trace_lt stmt_lt.
   
   Definition bigtuple : Type := stmt * abstract_trace * word * (trace -> abstract_trace).
   
@@ -182,25 +177,11 @@ Section Spilling.
     let '(s, a, fpval, f) := tup in (a, s).
   Definition lt_tuple (x y : bigtuple) :=
     lt_tuple' (project_tuple x) (project_tuple y).    
-  
-  Lemma lt_tuple'_wf : well_founded lt_tuple'.
-  Proof.
-    apply wf_slexprod.
-    - apply wf_abstract_trace_lt.
-    - apply wf_stmt_lt.
-  Defined.
 
   Lemma lt_tuple_wf : well_founded lt_tuple.
   Proof.
     cbv [lt_tuple]. apply wf_inverse_image. apply lt_tuple'_wf.
   Defined.
-
-  Definition Let_In_pf_nd {A B} (x : A) (f : forall a : A, a = x -> B) : B := let y := x in f y eq_refl.
-
-  Lemma Let_In_pf_nd_ext {A B} (E : B -> B -> Prop) (x : A) (f1 f2 : forall a : A, a = x -> B) :
-    (forall x1 x2, E (f1 x1 x2) (f2 x1 x2)) ->
-    E (Let_In_pf_nd x f1) (Let_In_pf_nd x f2).
-  Proof. intros. cbv [Let_In_pf_nd]. apply H. Qed.
   
   Definition stransform_stmt_trace_body
     {env: map.map String.string (list Z * list Z * stmt)}

@@ -513,10 +513,6 @@ Section FlatToRiscv1.
 
     Definition leak_Jal := ILeakage Jal_leakage.
     Definition leak_Jalr := ILeakage Jalr_leakage.
-
-    Require Import Coq.Init.Wf Relation_Operators Wellfounded PeanoNat Lia.
-
-    Definition lt_tuple' : abstract_trace * stmt Z -> abstract_trace * stmt Z -> Prop := slexprod _ _ abstract_trace_lt stmt_lt.
     
     Definition bigtuple : Type := stmt Z * abstract_trace * Z * word * Z * (trace -> list LeakageEvent).
   
@@ -525,21 +521,16 @@ Section FlatToRiscv1.
       (a, s).
 
     Definition lt_tuple (x y : bigtuple) :=
-    lt_tuple' (project_tuple x) (project_tuple y).    
-    
-    Lemma lt_tuple'_wf : well_founded lt_tuple'.
-    Proof.
-      apply wf_slexprod.
-      - apply wf_abstract_trace_lt.
-      - apply wf_stmt_lt.
-    Defined.
+      lt_tuple' (project_tuple x) (project_tuple y).
+
+    Require Import Coq.Init.Wf Relation_Operators Wellfounded.
     
     Lemma lt_tuple_wf : well_founded lt_tuple.
     Proof.
       cbv [lt_tuple]. apply wf_inverse_image. apply lt_tuple'_wf.
     Defined.
 
-    Definition transform_fun_trace_helper
+    Definition rtransform_fun_trace_helper
         (mypos : Z) (sp_val : word) rets fbody :=
         let need_to_save := list_diff Z.eqb (modVars_as_list Z.eqb fbody) rets in
         let scratchwords := stackalloc_words fbody in
@@ -567,170 +558,194 @@ Section FlatToRiscv1.
           match tup as x return tup = x -> _ with
           | (s, a, mypos, sp_val, stackoffset, f) =>
               fun _ =>
-              match s with
+              match s as x return s = x -> _ with
               | SLoad sz x y o =>
-                  match a with
-                  | aleak_word addr a' =>
-                      [leak_load sz addr] ++ 
-                        f [leak_word addr]
-                  | _ => []
-                  end
-              | SStore sz x y o =>
-                  match a with
-                  | aleak_word addr a' =>
-                      [leak_store sz addr] ++
-                        f [leak_word addr]
-                  | _ => []
-                  end
-              | SInlinetable sz x t i =>
-                  match a with
-                  | aleak_word i' a' =>
-                      [leak_Jal; leak_Add; leak_load sz (word.add (word.add (word.add program_base (word.of_Z mypos)) (word.of_Z 4)) i')] ++
-                        f [leak_word i']
-                  | _ => []
-                  end
-              | SStackalloc _ n body =>
-                  match a with
-                  | aconsume_word fa' =>
-                      let addr := (word.add sp_val (word.of_Z (stackoffset - n))) in
-                      [ leak_Addi ] ++
-                        rtransform_stmt_trace (body, fa' addr, mypos + 4, sp_val, stackoffset - n, fun k => f (consume_word addr :: k)) _
-                  | _ => []
-                  end
-              | SLit _ v =>
-                  leak_lit v ++
-                    f []
-              | SOp _ op _ operand2 =>
-                  let newt_operands :=
-                    match op with
-                    | Syntax.bopname.divu
-                    | Syntax.bopname.remu =>
-                        match a with
-                        | aleak_word x1 (aleak_word x2 a') => Some ([leak_word x1; leak_word x2], x1, x2)
-                        | _ => None
-                        end
-                    | Syntax.bopname.slu
-                    | Syntax.bopname.sru
-                    | Syntax.bopname.srs =>
-                        match a with
-                        | aleak_word x2 a' => Some ([leak_word x2], word.of_Z 0, x2)
-                        | _ => None
-                        end
-                    | _ => Some ([], word.of_Z 0, word.of_Z 0)
+                  fun _ =>
+                    match a with
+                    | aleak_word addr a' =>
+                        [leak_load sz addr] ++ 
+                          f [leak_word addr]
+                    | _ => []
                     end
-                  in
-                  match newt_operands with
-                  | Some (newt, x1, x2) =>
-                      match leak_op op operand2 x1 x2 with
-                      | Some l =>
-                          l ++
-                            f newt
-                      | None => []
+              | SStore sz x y o =>
+                  fun _ =>
+                    match a with
+                    | aleak_word addr a' =>
+                        [leak_store sz addr] ++
+                          f [leak_word addr]
+                    | _ => []
+                    end
+              | SInlinetable sz x t i =>
+                  fun _ =>
+                    match a with
+                    | aleak_word i' a' =>
+                        [leak_Jal; leak_Add; leak_load sz (word.add (word.add (word.add program_base (word.of_Z mypos)) (word.of_Z 4)) i')] ++
+                          f [leak_word i']
+                    | _ => []
+                    end
+              | SStackalloc _ n body =>
+                  fun _ =>
+                    match a as x return a = x -> _ with
+                    | aconsume_word fa' =>
+                        fun _ =>
+                          let addr := (word.add sp_val (word.of_Z (stackoffset - n))) in
+                          [ leak_Addi ] ++
+                            rtransform_stmt_trace (body, fa' addr, mypos + 4, sp_val, stackoffset - n, fun k => f (consume_word addr :: k)) _
+                    | _ => fun _ => []
+                    end eq_refl
+              | SLit _ v =>
+                  fun _ =>
+                    leak_lit v ++
+                      f []
+              | SOp _ op _ operand2 =>
+                  fun _ =>
+                    let newt_operands :=
+                      match op with
+                      | Syntax.bopname.divu
+                      | Syntax.bopname.remu =>
+                          match a with
+                          | aleak_word x1 (aleak_word x2 a') => Some ([leak_word x1; leak_word x2], x1, x2)
+                          | _ => None
+                          end
+                      | Syntax.bopname.slu
+                      | Syntax.bopname.sru
+                      | Syntax.bopname.srs =>
+                          match a with
+                          | aleak_word x2 a' => Some ([leak_word x2], word.of_Z 0, x2)
+                          | _ => None
+                          end
+                      | _ => Some ([], word.of_Z 0, word.of_Z 0)
                       end
-                  | None => []
-                  end
+                    in
+                    match newt_operands with
+                    | Some (newt, x1, x2) =>
+                        match leak_op op operand2 x1 x2 with
+                        | Some l =>
+                            l ++
+                              f newt
+                        | None => []
+                        end
+                    | None => []
+                    end
               | SSet _ _ =>
-                  [ leak_Add ] ++
-                    f []
+                  fun _ =>
+                    [ leak_Add ] ++
+                      f []
               | SIf cond bThen bElse =>
-                  let thenLength := Z.of_nat (length (compile_stmt (mypos + 4) stackoffset bThen)) in
-                  match a with
-                  | aleak_bool b a' =>
-                      [ leak_bcond_by_inverting cond (negb b) ] ++
-                        rtransform_stmt_trace (if b then bThen else bElse, a', if b then mypos + 4 else mypos + 4 + 4 * thenLength + 4, sp_val, stackoffset,
-                          fun k =>
-                            (if b then [leak_Jal] else []) ++
-                              f (leak_bool b :: k)) _
-                  | _ => []
-                  end
-              | SLoop body1 cond body2 =>
-                  let body1Length := Z.of_nat (length (compile_stmt mypos stackoffset body1)) in
-                  rtransform_stmt_trace (body1, a, mypos, sp_val, stackoffset,
-                      fun k =>
-                        let a' := shrink a k in
-                        match a' with
-                        | aleak_bool true a'' =>
-                            [ leak_bcond_by_inverting cond (negb true) ] ++
-                              rtransform_stmt_trace (body2, a'', mypos + (body1Length + 1) * 4, sp_val, stackoffset,
-                                fun k' =>
-                                  let a''' := shrink a'' k' in
-                                  [ leak_Jal ] ++
-                                    rtransform_stmt_trace (s, a''', mypos, sp_val, stackoffset,
-                                      fun k'' => f (k ++ leak_bool true :: k' ++ k'')) _) _
-                        | aleak_bool false a'' =>
-                            [ leak_bcond_by_inverting cond (negb false) ] ++
-                              f (k ++ [leak_bool false])
-                        | _ => []
-                        end) _
-              | SSeq s1 s2 =>
-                  let s1Length := Z.of_nat (length (compile_stmt mypos stackoffset s1)) in
-                  rtransform_stmt_trace (s1, a, mypos, sp_val, stackoffset,
-                      fun k =>
-                        let a' := shrink a k in
-                        rtransform_stmt_trace (s2, a', mypos + 4 * s1Length, sp_val, stackoffset,
-                          fun k' => f (k ++ k')) _) _
-              | SSkip => f []
-              | SCall resvars fname argvars =>
-                  match a with
-                  | aleak_unit a' =>
-                      match map.get e_env fname, map.get e fname with
-                      | Some (params, rets, fbody), Some fpos =>
-                          let '(beforeBody, afterBody, mypos', sp_val', stackoffset') := transform_fun_trace_helper fpos sp_val rets fbody in
-                          [ leak_Jal ] ++ (* jump to compiled function *)
-                            beforeBody ++
-                            rtransform_stmt_trace (fbody, a', mypos', sp_val', stackoffset',
+                  fun _ =>
+                    let thenLength := Z.of_nat (length (compile_stmt (mypos + 4) stackoffset bThen)) in
+                    match a as x return a = x -> _ with
+                    | aleak_bool b a' =>
+                        fun _ =>
+                          [ leak_bcond_by_inverting cond (negb b) ] ++
+                            rtransform_stmt_trace (if b then bThen else bElse, a', if b then mypos + 4 else mypos + 4 + 4 * thenLength + 4, sp_val, stackoffset,
                               fun k =>
-                                afterBody ++
-                                  f (leak_unit :: k)) _
-                      | _, _ => []
-                      end
-                  | _ => []
-                  end
+                                (if b then [leak_Jal] else []) ++
+                                  f (leak_bool b :: k)) _
+                    | _ => fun _ => []
+                    end eq_refl
+              | SLoop body1 cond body2 =>
+                  fun _ =>
+                    let body1Length := Z.of_nat (length (compile_stmt mypos stackoffset body1)) in
+                    rtransform_stmt_trace (body1, a, mypos, sp_val, stackoffset,
+                        fun k =>
+                          Let_In_pf_nd (shrink a k)
+                          (fun a' _ =>
+                             match a' as x return a' = x -> _ with
+                             | aleak_bool true a'' =>
+                                 fun _ =>
+                                   [ leak_bcond_by_inverting cond (negb true) ] ++
+                                     rtransform_stmt_trace (body2, a'', mypos + (body1Length + 1) * 4, sp_val, stackoffset,
+                                       fun k' =>
+                                         let a''' := shrink a'' k' in
+                                         [ leak_Jal ] ++
+                                           rtransform_stmt_trace (s, a''', mypos, sp_val, stackoffset,
+                                             fun k'' => f (k ++ leak_bool true :: k' ++ k'')) _) _
+                             | aleak_bool false a'' =>
+                                 fun _ =>
+                                   [ leak_bcond_by_inverting cond (negb false) ] ++
+                                     f (k ++ [leak_bool false])
+                             | _ => fun _ => []
+                             end eq_refl)) _
+              | SSeq s1 s2 =>
+                  fun _ =>
+                    let s1Length := Z.of_nat (length (compile_stmt mypos stackoffset s1)) in
+                    rtransform_stmt_trace (s1, a, mypos, sp_val, stackoffset,
+                        fun k =>
+                          let a' := shrink a k in
+                          rtransform_stmt_trace (s2, a', mypos + 4 * s1Length, sp_val, stackoffset,
+                              fun k' => f (k ++ k')) _) _
+              | SSkip => fun _ => f []
+              | SCall resvars fname argvars =>
+                  fun _ =>
+                    match a as x return a = x -> _ with
+                    | aleak_unit a' =>
+                        fun _ =>
+                          match map.get e_env fname, map.get e fname with
+                          | Some (params, rets, fbody), Some fpos =>
+                              let '(beforeBody, afterBody, mypos', sp_val', stackoffset') := rtransform_fun_trace_helper fpos sp_val rets fbody in
+                              [ leak_Jal ] ++ (* jump to compiled function *)
+                                beforeBody ++
+                                rtransform_stmt_trace (fbody, a', mypos', sp_val', stackoffset',
+                                  fun k =>
+                                    afterBody ++
+                                      f (leak_unit :: k)) _
+                          | _, _ => []
+                          end
+                    | _ => fun _ => []
+                    end eq_refl
               | SInteract _ _ _ =>
-                  match a with
-                  | aleak_list l a' =>
-                      leak_ext_call e mypos stackoffset s l ++
-                        f [leak_list l]
-                  | _ => []
-                  end
-              end
-        end eq_refl).
+                  fun _ =>
+                    match a with
+                    | aleak_list l a' =>
+                        leak_ext_call e mypos stackoffset s l ++
+                          f [leak_list l]
+                    | _ => []
+                    end
+              end eq_refl
+          end eq_refl).
     Proof.
-        Unshelve.
-        all: cbv [lt_tuple project_tuple].
-        all: subst.
-        all: repeat match goal with
-             | t := skipn ?n ?x |- _ =>
+      Unshelve.
+      all: intros.
+      all: cbv [lt_tuple project_tuple].
+      all: subst.
+      all: repeat match goal with
+             | t := shrink ?a ?k |- _ =>
                       let H := fresh "H" in
-                      assert (H := skipn_len n x); subst t end.
-        all: repeat match goal with
-               | t := _ |- _ => subst t end.
-        all: repeat rewrite app_length in *; cbn [length] in *.
+                      assert (H := shrink_le a k); subst t end.
+      all: try (right; constructor; constructor).
+      all: try (left; constructor; constructor).
+      - assert (H0 := shrink_le a k). left. destruct H.
+        + rewrite <- H. destruct H0.
+          -- rewrite H0. rewrite e3. apply t_step. constructor.
+          -- eapply t_trans; [|eassumption]. apply t_step. rewrite e3. constructor.
+        + eapply t_trans; [eapply H|]. clear H. destruct H0.
+          -- rewrite H. rewrite e3. apply t_step. constructor.
+          -- rewrite e3 in H. eapply t_trans; [|eassumption]. apply t_step. constructor.
+      - assert (H := shrink_le a k). left. destruct H.
+        + rewrite H. rewrite e3. apply t_step. constructor.
+        + eapply t_trans; [|eassumption]. rewrite e3. apply t_step. constructor.
+      - destruct H.
+        + rewrite <- H. right. apply t_step. constructor.
+        + left. assumption.
+    Defined.
 
-        all: try blia.
-        all: try (left; simpl; blia).
-        all: try (right; constructor; constructor).
-        destruct (length (skipn rt_so_far'_diff rt_so_far) =? length rt_so_far)%nat eqn:E.
-        - apply Nat.eqb_eq in E. rewrite E. right. constructor. constructor.
-        - apply Nat.eqb_neq in E. left. blia.
-      Defined.
-
-      Definition rnext_stmt next
-        := my_Fix _ _ lt_tuple_wf _ (rnext_stmt_body next).
-
+      Definition rtransform_stmt_trace
+        := my_Fix _ _ lt_tuple_wf _ rtransform_stmt_trace_body.
+      
       Definition Equiv (x y : bigtuple) :=
-        let '(x1, x2, x3, x4, x5, x6, fx) := x in
-        let '(y1, y2, y3, y4, y5, y6, fy) := y in
-        (x1, x2, x3, x4, x5, x6) = (y1, y2, y3, y4, y5, y6) /\
-          forall a1 a2,
-            fx a1 a2 = fy a1 a2.
+        let '(x1, x2, x3, x4, x5, fx) := x in
+        let '(y1, y2, y3, y4, y5, fy) := y in
+        (x1, x2, x3, x4, x5) = (y1, y2, y3, y4, y5) /\
+          forall k,
+            fx k = fy k.
 
       Lemma Equiv_sym (x y : bigtuple) :
         Equiv x y -> Equiv y x.
       Proof.
         intros. cbv [Equiv] in *.
-        destruct x as [ [ [ [ [ [x1 x2] x3] x4] x5] x6] fx].
-        destruct y as [ [ [ [ [ [y1 y2] y3] y4] y5] y6] fy].
+        destruct x as [ [ [ [ [x1 x2] x3] x4] x5] fx].
+        destruct y as [ [ [ [ [y1 y2] y3] y4] y5] fy].
         destruct H as [H1 H2]. auto.
       Qed.
 
@@ -738,73 +753,72 @@ Section FlatToRiscv1.
         Equiv x1 x2 -> lt_tuple x1 y -> lt_tuple x2 y.
       Proof.
         cbv [lt_tuple Equiv].
-        destruct x1 as [ [ [ [ [ [x1_1 x2_1] x3_1] x4_1] x5_1] x6_1] fx_1].
-        destruct x2 as [ [ [ [ [ [x1_2 x2_2] x3_2] x4_2] x5_2] x6_2] fx_2].
-        destruct y as [ [ [ [ [ [y1 y2] y3] y4] y5] y6] fy].
+        destruct x1 as [ [ [ [ [x1_1 x2_1] x3_1] x4_1] x5_1] fx_1].
+        destruct x2 as [ [ [ [ [x1_2 x2_2] x3_2] x4_2] x5_2] fx_2].
+        destruct y as [ [ [ [ [y1 y2] y3] y4] y5] fy].
         cbn [project_tuple].
         intros [H1 H2] H3. injection H1. intros. subst. assumption.
       Qed.
 
-      Lemma rnext_stmt_body_ext next :
-        forall (x1 x2 : bigtuple) (f1 : forall y : bigtuple, lt_tuple y x1 -> qLeakageEvent)
-               (f2 : forall y : bigtuple, lt_tuple y x2 -> qLeakageEvent),
+      Lemma app_eq {A} (t1 t1' t2 t2' : list A) :
+        t1 = t1' ->
+        t2 = t2' ->
+        t1 ++ t2 = t1' ++ t2'.
+      Proof. intros. subst. reflexivity. Qed.        
+
+      Lemma rtransform_stmt_trace_body_ext :
+        forall (x1 x2 : bigtuple) (f1 : forall y : bigtuple, lt_tuple y x1 -> list LeakageEvent)
+               (f2 : forall y : bigtuple, lt_tuple y x2 -> list LeakageEvent),
           Equiv x1 x2 ->
           (forall (y1 y2 : bigtuple) (p1 : lt_tuple y1 x1) (p2 : lt_tuple y2 x2),
-              Equiv y1 y2 -> f1 y1 p1 = f2 y2 p2) -> @rnext_stmt_body next x1 f1 = @rnext_stmt_body next x2 f2.
+              Equiv y1 y2 -> f1 y1 p1 = f2 y2 p2) -> @rtransform_stmt_trace_body x1 f1 = @rtransform_stmt_trace_body x2 f2.
       Proof.
-        intros. cbv [rnext_stmt_body]. cbv beta. Print bigtuple. Print rnext_stmt_body.
-        destruct x1 as [ [ [ [ [ [t_so_far_1 mypos_1] sp_val_1] stackoffset_1] s_1] rt_so_far_1] f_1].
-        destruct x2 as [ [ [ [ [ [t_so_far_2 mypos_2] sp_val_2] stackoffset_2] s_2] rt_so_far_2] f_2].
+        intros. cbv [rtransform_stmt_trace_body]. cbv beta.
+        destruct x1 as [ [ [ [ [s_1 a_1] mypos_1] sp_val_1] stackoffset_1] f_1].
+        destruct x2 as [ [ [ [ [s_2 a_2] mypos_2] sp_val_2] stackoffset_2] f_2].
         cbv [Equiv] in H. destruct H as [H1 H2]. injection H1. intros. subst. clear H1.
-        repeat (Tactics.destruct_one_match; try reflexivity || apply Semantics.predict_with_prefix_ext || apply H3 || intros || apply H0 || cbv [Equiv]; intuition).
-        all: try apply H0.
-        all: cbv [Equiv]; intuition.
+        repeat (Tactics.destruct_one_match || reflexivity || apply app_eq || apply H3 || intros || apply H0 || cbv [Equiv]; intuition).
+        all: try apply Let_In_pf_nd_ext; intros.
         all: repeat (Tactics.destruct_one_match; try reflexivity).
-        all: try apply Semantics.predict_with_prefix_ext; intros.
+        all: try apply app_eq; try reflexivity.
         all: try apply H0.
         all: cbv [Equiv]; intuition.
-        all: try apply Semantics.predict_with_prefix_ext; intros.
+        all: try apply app_eq; try reflexivity.
         all: try apply H0.
         all: cbv [Equiv]; intuition.
       Qed.
       
-      Lemma rnext_stmt_step next tup :
-        rnext_stmt next tup = @rnext_stmt_body next tup (fun y _ => rnext_stmt next y).
+      Lemma rtransform_stmt_trace_step tup :
+        rtransform_stmt_trace tup = @rtransform_stmt_trace_body tup (fun y _ => rtransform_stmt_trace y).
       Proof.
-        cbv [rnext_stmt].
-        rewrite my_Fix_eq with (E:=Equiv) (x1:=tup) (x2:=tup).
-        1: reflexivity.
-        { apply rnext_stmt_body_ext. }
-        { cbv [Equiv]. destruct tup as [ [ [ [ [ [x1 x2] x3] x4] x5] x6] fx]. auto. }
+        cbv [rtransform_stmt_trace]. Check my_Fix_eq.
+        apply my_Fix_eq with (E1:=Equiv) (x1:=tup) (x2:=tup).
+        { apply rtransform_stmt_trace_body_ext. }
+        { cbv [Equiv]. destruct tup as [ [ [ [ [x1 x2] x3] x4] x5] fx]. auto. }
       Qed.
 
-      Lemma rnext_stmt_ext next :
-        forall (x1 x2 : bigtuple), Equiv x1 x2 -> rnext_stmt next x1 = rnext_stmt next x2.
+      Lemma rtransform_stmt_trace_ext :
+        forall (x1 x2 : bigtuple), Equiv x1 x2 -> rtransform_stmt_trace x1 = rtransform_stmt_trace x2.
       Proof.
         intros x1. induction x1 using (well_founded_induction lt_tuple_wf). intros.
-        rewrite rnext_stmt_step. symmetry. rewrite rnext_stmt_step. apply rnext_stmt_body_ext.
+        rewrite rtransform_stmt_trace_step. symmetry. rewrite rtransform_stmt_trace_step.
+        apply rtransform_stmt_trace_body_ext.
         - apply Equiv_sym. assumption.
         - intros. apply H.
           + eapply lt_tuple_resp_Equiv_left; eauto using Equiv_sym.
           + assumption.
       Qed.
-      
-      Definition rnext_fun 
-        (next : trace -> qevent) (t_so_far : trace) (fpos : Z) (sp_val : word)
-        (rets : list Z) fbody (rt_so_far : list LeakageEvent)
-        (f : forall (t_so_far' : trace) (rt_so_far'_diff : nat), qLeakageEvent) :=
-        let '(beforeBody, afterBody, mypos', sp_val', stackoffset') := rnext_fun_helper fpos sp_val rets fbody in
-        rv_predict_with_prefix
-          beforeBody
-          rt_so_far
-          (fun rt_so_far' _  =>
-             rnext_stmt next (t_so_far, mypos', sp_val', stackoffset', fbody, rt_so_far',
-                 (fun t_so_far' rt_so_far''_diff =>
-                    let rt_so_far'' := skipn rt_so_far''_diff rt_so_far' in
-                    rv_predict_with_prefix
-                      afterBody
-                      rt_so_far''
-                      (fun rt_so_far''' _ => f t_so_far' (length rt_so_far - length rt_so_far'''))%nat))).
+      Print rtransform_stmt_trace_body.
+      Definition rtransform_fun_trace 
+        (a : abstract_trace) (fpos : Z) (sp_val : word)
+        (rets : list Z) fbody
+        (f : trace -> list LeakageEvent) :=
+        let '(beforeBody, afterBody, mypos', sp_val', stackoffset') := rtransform_fun_trace_helper fpos sp_val rets fbody in
+          beforeBody ++
+            rtransform_stmt_trace (fbody, a, mypos', sp_val', stackoffset',
+              fun k =>
+                afterBody ++
+                  f k).
     End WithOtherEnv.
   End WithEnv.
 

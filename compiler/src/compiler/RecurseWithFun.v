@@ -53,3 +53,29 @@ Proof.
 Qed.
 
 End FixPoint.
+
+Require Import bedrock2.Semantics.
+Require Import compiler.FlatImp.
+Require Import Coq.ZArith.ZArith.
+Require Import Coq.Init.Wf Relation_Operators Wellfounded.
+Require Import riscv.Utility.Utility.
+
+Section WithWord.
+  Context {width} {BW: Bitwidth width} {word: word.word width}.
+  
+  Definition lt_tuple' : abstract_trace * stmt Z -> abstract_trace * stmt Z -> Prop := slexprod _ _ abstract_trace_lt stmt_lt.
+  
+  Lemma lt_tuple'_wf : well_founded lt_tuple'.
+  Proof.
+    apply wf_slexprod.
+    - apply wf_abstract_trace_lt.
+    - apply wf_stmt_lt.
+  Defined.
+  
+  Definition Let_In_pf_nd {A B} (x : A) (f : forall a : A, a = x -> B) : B := let y := x in f y eq_refl.
+  
+  Lemma Let_In_pf_nd_ext {A B} (E : B -> B -> Prop) (x : A) (f1 f2 : forall a : A, a = x -> B) :
+    (forall x1 x2, E (f1 x1 x2) (f2 x1 x2)) ->
+    E (Let_In_pf_nd x f1) (Let_In_pf_nd x f2).
+  Proof. intros. cbv [Let_In_pf_nd]. apply H. Qed.
+End WithWord.
