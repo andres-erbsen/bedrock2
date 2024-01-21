@@ -358,27 +358,28 @@ Proof.
   assert (spec := @swap_ok Words32Naive.word mem word_ok' mem_ok).
   cbv [ProgramLogic.program_logic_goal_for] in spec.
   specialize (spec nil). cbv [ct_spec_of_swap] in spec. destruct spec as [f spec].
-  intros. Print compiler_correct_wp''.
-  edestruct (@compiler_correct_wp'' _ _ Words32Naive.word mem _ _ ext_spec _ _ _ _ _ ext_spec_ok _ _ _ _ _ word_ok _ _ RV32I _ compile_ext_call leak_ext_call compile_ext_call_correct compile_ext_call_length fs_swap instrs_swap finfo_swap req_stack_size_swap stack_hi p_funcs fname_swap).
+  intros. Check @compiler_correct_wp.
+  edestruct (@compiler_correct_wp _ _ Words32Naive.word mem _ ext_spec leak_ext _ _ _ ext_spec_ok _ _ _ _ _ word_ok _ _ RV32I _ compile_ext_call leak_ext_call compile_ext_call_correct compile_ext_call_length fs_swap instrs_swap finfo_swap req_stack_size_swap fname_swap 0 p_funcs stack_hi).
   { simpl. reflexivity. }
   { vm_compute. reflexivity. }
-  exists (x (f b_addr a_addr)). intros.
+  exists (rev (x (f b_addr a_addr))). intros.
   cbv [FlatToRiscvCommon.runsTo].
   eapply runsToNonDet.runsTo_weaken.
   1: eapply H with (post := (fun k_ t_ m_ r_ =>
                                  exists k'', (k_ = k'' ++ [])%list /\
                                                generates (f b_addr a_addr) (rev k'')
-                                             /\ post t_ m_ r_)) (k := nil).
+                                             /\ post t_ m_ r_)) (kH := nil).
   { simpl. repeat constructor. tauto. }
   2: { eapply map.get_of_list_In_NoDup.
        { vm_compute. repeat constructor; eauto. }
        { vm_compute. left. reflexivity. } }
-  2,3,4,5,6,7,9: eassumption.
-  2: reflexivity.
-  2: { simpl. intros. destruct H8 as [k'' [mH' [retvals [H8 [H9 [H10 [H11 [H12 H13] ] ] ] ] ] ] ].
-       destruct H9 as [k''0 [H14 [H15 H16] ] ]. Search (app _ _ = app _ _ -> _).
-       apply app_inv_tail in H14. subst. split; [eexists; eexists; eauto|].
-       apply H13. rewrite rev_involutive in H15. apply H15. }
+  all: try eassumption.
+  2,3: reflexivity.
+  2: { simpl. intros. destruct H8 as [k'' [mH' [retvals [kL'' [H9 [H10 [H11 [H12 [H13 [H14 H15] ] ] ] ] ] ] ] ] ].
+       destruct H10 as [k''0 [H16 [H17 H18] ] ].
+       apply app_inv_tail in H16. subst. split; [eexists; eexists; eauto|].
+       specialize H15 with (1 := H17). rewrite H15. rewrite H14.
+       rewrite rev_involutive. reflexivity. }
   { specialize (spec nil (getLog initial) m a_addr b_addr a b R H0). cbv [fs_swap fname_swap].
     eapply WeakestPreconditionProperties.Proper_call.
     2: eapply spec.
@@ -395,23 +396,40 @@ Check (@compiler_correct_wp _ _ Words32Naive.word mem _ ext_spec _ _ _ _ ext_spe
 Print Assumptions swap_ct.
 (* Prints:
 
-    Axioms:
-        PropExtensionality.propositional_extensionality : forall P Q : Prop, P <-> Q -> P = Q
-        mem_ok : map.ok mem
-        mem : map.map Words32Naive.word byte
-        localsL_ok : map.ok localsL
-        localsL : map.map Z Words32Naive.word
-        FunctionalExtensionality.functional_extensionality_dep
-          : forall (A : Type) (B : A -> Type) (f g : forall x : A, B x),
-            (forall x : A, f x = g x) -> f = g
-        envH_ok : map.ok envH
-        envH : map.map string (list string * list string * cmd)
-        em : forall P : Prop, P \/ ~ P
-        RVM : RiscvProgramWithLeakage
-        PRParams : PrimitivesParams M RiscvMachine
-        PR : MetricPrimitives PRParams
-        MM : Monad M
-        M : Type -> Type
+Axioms:
+
+PropExtensionality.propositional_extensionality : forall P Q : Prop, P <-> Q -> P = Q
+mem_ok : map.ok mem
+mem : map.map Words32Naive.word byte
+localsL_ok : map.ok localsL
+localsL : map.map Z Words32Naive.word
+FunctionalExtensionality.functional_extensionality_dep
+  : forall (A : Type) (B : A -> Type) (f g : forall x : A, B x),
+    (forall x : A, f x = g x) -> f = g
+envH_ok : map.ok envH
+envH : map.map string (list string * list string * cmd)
+WeakestPreconditionProperties.Proper_call
+  : forall (width : Z) (BW : Bitwidth width) (word : word width) (mem : map.map word byte)
+      (locals : map.map string word) (env : map.map string (list string * list string * cmd))
+      (ext_spec : ExtSpec) (leak_ext : LeakExt),
+    word.ok word ->
+    map.ok mem ->
+    map.ok locals ->
+    map.ok env ->
+    ext_spec.ok ext_spec ->
+    Morphisms.Proper
+      (Morphisms.pointwise_relation (list (string * (list string * list string * cmd)))
+         (Morphisms.pointwise_relation string
+            (Morphisms.pointwise_relation trace
+               (Morphisms.pointwise_relation io_trace
+                  (Morphisms.pointwise_relation mem
+                     (Morphisms.pointwise_relation (list word)
+                        (Morphisms.respectful
+                           (Morphisms.pointwise_relation trace
+                              (Morphisms.pointwise_relation io_trace
+                                 (Morphisms.pointwise_relation mem
+                                    (Morphisms.pointwise_relation (list word) Basics.impl))))
+                           Basics.impl))))))) WeakestPrecondition.call
 
  *)
 
@@ -434,10 +452,6 @@ Definition req_stack_size_io_function :=
   end.
 Definition fname_io_function := "io_function".
 Definition f_rel_pos_io_function := 88.
-
-Check (@compiler_correct_wp _ _ Words32Naive.word mem _ ext_spec _ _ _ _ ext_spec_ok _ _ _ _ _ word_ok _ _ RV32I _ compile_ext_call leak_ext_call compile_ext_call_correct compile_ext_call_length fs_io_function instrs_io_function finfo_io_function req_stack_size_io_function fname_io_function _ _ _ _).
-
-Print ct_spec_of_io_function.
 
 Lemma io_function_ct :
   forall p_funcs stack_hi,
@@ -473,28 +487,29 @@ Proof.
   specialize (spec nil). cbv [ct_spec_of_io_function] in spec.
   destruct spec as [a spec].
   intros.
-  edestruct (@compiler_correct_wp'' _ _ Words32Naive.word mem _ _ ext_spec _ _ _ _ _ ext_spec_ok _ _ _ _ _ word_ok _ _ RV32I _ compile_ext_call leak_ext_call compile_ext_call_correct compile_ext_call_length fs_io_function instrs_io_function finfo_io_function req_stack_size_io_function stack_hi p_funcs fname_io_function) as [f H].
+  edestruct (@compiler_correct_wp _ _ Words32Naive.word mem _ ext_spec leak_ext _ _ _ ext_spec_ok _ _ _ _ _ word_ok _ _ RV32I _ compile_ext_call leak_ext_call compile_ext_call_correct compile_ext_call_length fs_io_function instrs_io_function finfo_io_function req_stack_size_io_function fname_io_function f_rel_pos_io_function p_funcs stack_hi) as [f H].
   { simpl. reflexivity. }
   { vm_compute. reflexivity. }
-  exists (fun x => (f (a x))). intros.
+  exists (fun x => rev (f (a x))). intros.
   cbv [FlatToRiscvCommon.runsTo].
   specialize (spec nil (getLog initial) m R H0 H1).
   eapply runsToNonDet.runsTo_weaken.
-  1: eapply H with (k := nil) (*this is just the post of spec*)(post := (fun (k' : trace) (t' : io_trace) (_ : mem) (_ : list Words32Naive.word) =>
+  1: eapply H with (*this is just the post of spec*)(post := (fun (k' : trace) (t' : io_trace) (_ : mem) (_ : list Words32Naive.word) =>
             exists x y : Words32Naive.word,
               t' =
               ([(map.empty, "MMIOREAD", [word.of_Z 0], (map.empty, [x]));
                 (map.empty, "MMIOREAD", [word.of_Z 0], (map.empty, [y]))] ++ (getLog initial))%list /\
               R m /\ (exists k'' : list event, k' = (k'' ++ [])%list /\ generates (a x) (rev k'')))).
-  12: { simpl. intros.
-        destruct H9 as [k'' [mH' [retvals [H9 [H10 [H11 [H12 [H13 H14] ] ] ] ] ] ] ].
+  13: { simpl. intros.
+        destruct H9 as [kH'' [mH' [retvals [kL'' [H9 [H10 [H11 [H12 [H13 [H14 H15] ] ] ] ] ] ] ] ] ].
         split.
         { exists mH', retvals; intuition eauto. cbv [post]. reflexivity. }
-        { destruct H10 as [x [y [H15 [H16 [k''0 [H17 H18] ] ] ] ] ].
-          repeat rewrite app_nil_r in H17. subst. exists x, y. rewrite H15.
-          split; eauto. split; eauto. apply H14. rewrite rev_involutive in H18. apply H18. } }
-  4,5,6,7,8,9,11: eassumption.
-  4: reflexivity.
+        { destruct H10 as [x [y [H16 [H17 [k'' [H18 H19] ] ] ] ] ].
+          repeat rewrite app_nil_r in H18. subst. exists x, y. rewrite H16.
+          split; eauto. split; eauto. specialize H15 with (1 := H19). rewrite H15.
+          rewrite H14. rewrite rev_involutive. reflexivity. } }
+  all: try eassumption.
+  4,5: reflexivity.
   { simpl. repeat constructor.
     { intros H'. destruct H'; auto; congruence. }
     intros H'. destruct H'. }
@@ -504,250 +519,43 @@ Proof.
     clear H. destruct H9 as [x [y [H9 [H10 [k'' [H11 H12] ] ] ] ] ].
     subst. exists x, y. split; [reflexivity|]. split; [assumption|]. exists k''.
     split; [reflexivity|assumption]. }
-  reflexivity.
+  { reflexivity. }
 Qed.
+
+Print Assumptions io_function_ct.
 
 (*
-(* Not sure I can actually prove this. *)
-Lemma a_trace_exists :
-  forall initial next P,
-  FlatToRiscvCommon.runsTo initial
-    (fun final : RiscvMachine =>
-       P final /\
-         (exists (tL : list LeakageEvent) (F : nat),
-             getTrace final = (tL ++ getTrace initial)%list /\
-               (forall fuel : nat,
-                   (F <= fuel)%nat ->
-                   FlatToRiscvCommon.predictsLE (next fuel)
-                     (rev tL)))) ->
-  exists k',
-    FlatToRiscvCommon.runsTo initial
-      (fun final : RiscvMachine =>
-         P final /\
-           getTrace final = k').
-Proof. Abort.
-
-Print FlatToRiscvDef.qLeakageEvent.
-Fixpoint trace_of_predictor so_far next fuel :=
-  match fuel with
-  | O => nil
-  | S fuel' =>
-      match next fuel so_far with
-      | Some (FlatToRiscvDef.qLE e) => e :: trace_of_predictor (app so_far (cons e nil)) next fuel'
-      | Some (FlatToRiscvDef.qendLE) => []
-      | None => []
-      end
-  end.
-
-Notation predictsLE := FlatToRiscvCommon.predictsLE.
-Print FlatToRiscvDef.qLeakageEvent.
-Lemma predictsLE_end f l :
-      predictsLE f l ->
-      f l = Some FlatToRiscvDef.qendLE.
-Proof.
-  intros H. induction H.
-  - rewrite H0. assumption.
-  - assumption.
-Qed.
-
-Lemma trace_of_predictor_works' so_far next F k :
-  (forall fuel,
-    (F <= fuel)%nat ->
-    predictsLE (next fuel) (so_far ++ k)) ->
-  exists F',
-    (forall fuel,
-        (F' <= fuel)%nat ->
-        k%list = trace_of_predictor so_far next fuel).
-Proof.
-  intros H. generalize dependent so_far. subst. induction k.
-  - intros. exists (S F). intros. destruct fuel as [|fuel']; [blia|]. simpl.
-    specialize (H (S fuel') ltac:(blia)). rewrite List.app_nil_r in H.
-    apply predictsLE_end in H. rewrite H. reflexivity.
-  - intros.
-    specialize (IHk (so_far ++ [a])%list). rewrite <- app_assoc in IHk.
-    specialize (IHk H). destruct IHk as [F' IHk]. 
-    exists (S (F + F')). intros. destruct fuel as [|fuel']; [blia|].
-    specialize (H (S fuel') ltac:(blia)). Search predictsLE.
-    apply FlatToRiscvFunctions.predictLE_cons in H. simpl. rewrite H. simpl. f_equal.
-    apply IHk. blia.
-Qed.
-
-Lemma trace_of_predictor_works next F k :
-  (forall fuel,
-    (F <= fuel)%nat ->
-    predictsLE (next fuel) k) ->
-  exists F',
-    (forall fuel,
-        (F' <= fuel)%nat ->
-        k = trace_of_predictor [] next fuel).
-Proof.
-  intros. replace k with ([] ++ k)%list by reflexivity. eapply trace_of_predictor_works'.
-  apply H.
-Qed.
-
-Require Import riscv.Utility.MonadT.
-
-Lemma predictsLE_ext p1 p2 l :
-  (forall x, p1 x = p2 x) ->
-  predictsLE p1 l ->
-  predictsLE p2 l.
-Proof.
-  intros H H0. induction H0.
-  - econstructor.
-    + rewrite <- H. assumption.
-    + intros. rewrite <- H. auto.
-    + assumption.
-  - constructor. rewrite <- H. assumption.
-Qed.
-
-Lemma predictLE_unique p l1 l2 :
-  predictsLE p l1 ->
-  predictsLE p l2 ->
-  l1 = l2.
-Proof.
-  intros. generalize dependent l2. generalize dependent p. induction l1.
-  - intros. destruct l2; [reflexivity|]. remember [] as thing. destruct H; try congruence.
-    destruct H0; try congruence. rewrite H0 in H. injection H as H.
-    cbv [FlatToRiscvDef.quotLE] in H. congruence.
-  - intros. destruct l2 eqn:E.
-    + clear IHl1. remember [] as thing. destruct H; try congruence. destruct H0; try congruence.
-      rewrite H0 in H. injection H as H.
-      cbv [FlatToRiscvDef.quotLE] in H. congruence.
-    + remember (a :: l1) as l1'. destruct H.
-      -- destruct H0.
-         ++ rewrite H0 in H. injection H as H. subst. f_equal. injection Heql1'. intros. subst.
-            eapply IHl1.
-            --- exact H2.
-            --- eapply predictsLE_ext. 2: eassumption. intros. rewrite <- H3, H1. reflexivity.
-         ++ rewrite H0 in H. injection H as H. cbv [FlatToRiscvDef.quotLE] in H. congruence.
-      -- destruct H0; congruence.
-Qed.
-
-(* This should be easy to prove, though. *)
-Lemma a_trace_sorta_exists :
-  forall initial next P,
-  FlatToRiscvCommon.runsTo initial
-    (fun final : RiscvMachine =>
-       P final /\
-         (exists (tL : list LeakageEvent) (F : nat),
-             getTrace final = (tL ++ getTrace initial)%list /\
-               (forall fuel : nat,
-                   (F <= fuel)%nat ->
-                   FlatToRiscvCommon.predictsLE (next fuel)
-                     (rev tL)))) ->
-  exists finalTrace,
-    FlatToRiscvCommon.runsTo initial
-      (fun final : RiscvMachine =>
-         P final /\ exists F,
-           forall fuel : nat,
-             (F <= fuel)%nat ->
-             getTrace final = finalTrace fuel).
-Proof.
-  intros. exists (fun fuel => (rev (trace_of_predictor nil next fuel) ++ getTrace initial)%list).
-  cbv [FlatToRiscvCommon.runsTo]. eapply runsToNonDet.runsTo_weaken.
-  1: eapply H. simpl. intros. destruct H0 as [H1 [tL [F [H2 H3] ] ] ].
-  split; [assumption|]. assert (H3' := H3).
-  apply trace_of_predictor_works in H3. destruct H3 as [F' H3].
-  intros. simpl in H. exists F'. intros. rewrite H2. f_equal.
-  rewrite <- (rev_involutive tL). f_equal. apply H3. apply H0.
-Qed.
-
-Require Import riscv.Platform.MetricSane.
-
-Print FlatToRiscvCommon.runsTo.
-Search runsToNonDet.runsTo.
-
-Print runsToNonDet.runsTo.
-
-Definition P : nat -> Prop := fun n => (n <= 5)%nat.
-
-Check run1_sane. Check (run1 _).
-Print mcomp_sane.
-Lemma runsTo_sane :
-  forall (st : RiscvMachine) (post : RiscvMachine -> Prop),
-    valid_machine st ->
-    FlatToRiscvCommon.runsTo st post ->
-    (exists (st' : RiscvMachine), post st' /\ valid_machine st') /\
-      FlatToRiscvCommon.runsTo st
-        (fun (st' : RiscvMachine) =>
-           (post st' /\ (exists diff : list LogItem, getLog st' = (diff ++ getLog st)%list)) /\
-             valid_machine st').
-Proof.
-  intros. induction H0.
-  - split.
-    + exists initial. split; assumption.
-    + constructor. split; [|assumption]. split; [assumption|]. exists nil. reflexivity.
-  - assert (H3 := run1_sane RV32I). cbv [mcomp_sane] in H3.
-    specialize (H3 initial (fun _ => midset) H H0).
-    destruct H3 as [ [_ [midst [H3 H4] ] ] H5].
-    split.
-    + specialize (H2 midst H3 H4). destruct H2 as [H2 H2'].  exact H2.
-    + Print runsToNonDet.runsTo. eapply runsToNonDet.runsToStep.
-      -- exact H5.
-      -- simpl. intros mid [ [H6 H7] H8]. specialize (H2 mid H6 H8).
-         destruct H2 as [_ H2]. eapply runsToNonDet.runsTo_weaken.
-         ++ exact H2.
-         ++ simpl. intros final [ [H9 [diff H10] ] H11].
-            split; [|assumption]. split; [assumption|]. rewrite H10.
-            destruct H7 as [diff' H7]. rewrite H7. eexists. rewrite <- app_assoc. reflexivity.
-Qed.
-
-Lemma last_step :
-  forall
-    (initial : RiscvMachine)
-    (P : RiscvMachine -> Prop)
-    (finalTrace : nat -> list LeakageEvent),
-
-    valid_machine initial ->
-    FlatToRiscvCommon.runsTo initial
-      (fun final : RiscvMachine =>
-         P final /\
-           exists F,
-           forall fuel : nat,
-             (F <= fuel)%nat ->
-             getTrace final = finalTrace fuel) ->
-    
-    exists (n : nat),
-      FlatToRiscvCommon.runsTo initial
-      (fun final : RiscvMachine =>
-         P final /\
-           getTrace final = finalTrace n).
-Proof.
-  intros. cbv [FlatToRiscvCommon.runsTo] in H0. 
-  assert (H1 := runsTo_sane).
-  specialize (H1 _ _ H H0). destruct H1 as [H1 _]. destruct H1 as [st' [ [H1 H2] H3] ].
-  destruct H2 as [F H2].
-  exists F. eapply runsToNonDet.runsTo_weaken.
-  - exact H0.
-  - clear H H0. simpl. intros final [H4 H5]. split; [assumption|].
-    destruct H5 as [F' H5]. specialize (H5 (F' + F)%nat ltac:(blia)).
-    assert (H2' := H2 F ltac:(blia)).
-    specialize (H2 (F' + F)%nat ltac:(blia)).
-    rewrite <- H2'. rewrite H2. apply H5.
-Qed.
-
-Check a_trace_sorta_exists.
-Check last_step.
-
-Lemma predictor_thing_correct :
-  forall (initial : RiscvMachine)
-         (next : nat -> list LeakageEvent -> option FlatToRiscvDef.qLeakageEvent)
-         (P : RiscvMachine -> Prop),
-    valid_machine initial ->
-    FlatToRiscvCommon.runsTo initial
-      (fun final : RiscvMachine =>
-         P final /\
-           (exists (tL : list LeakageEvent) (F : nat),
-               getTrace final = (tL ++ getTrace initial)%list /\
-                 (forall fuel : nat, (F <= fuel)%nat -> predictsLE (next fuel) (rev tL)))) ->
-    exists finalTrace,
-      FlatToRiscvCommon.runsTo initial
-        (fun final : RiscvMachine => P final /\ getTrace final = finalTrace).
-Proof.
-  intros initial next P H1 H2.
-  apply a_trace_sorta_exists in H2.
-  destruct H2 as [finalTrace H2].
-  apply last_step in H2; try assumption.
-  destruct H2 as [n H2].
-  exists (finalTrace n). assumption.
-Qed.*)
+Axioms:
+PropExtensionality.propositional_extensionality : forall P Q : Prop, P <-> Q -> P = Q
+mem_ok : map.ok mem
+mem : map.map Words32Naive.word byte
+localsL_ok : map.ok localsL
+localsL : map.map Z Words32Naive.word
+FunctionalExtensionality.functional_extensionality_dep
+  : forall (A : Type) (B : A -> Type) (f g : forall x : A, B x),
+    (forall x : A, f x = g x) -> f = g
+envH_ok : map.ok envH
+envH : map.map string (list string * list string * cmd)
+WeakestPreconditionProperties.Proper_call
+  : forall (width : Z) (BW : Bitwidth width) (word : word width) (mem : map.map word byte)
+      (locals : map.map string word) (env : map.map string (list string * list string * cmd))
+      (ext_spec : ExtSpec) (leak_ext : LeakExt),
+    word.ok word ->
+    map.ok mem ->
+    map.ok locals ->
+    map.ok env ->
+    ext_spec.ok ext_spec ->
+    Morphisms.Proper
+      (Morphisms.pointwise_relation (list (string * (list string * list string * cmd)))
+         (Morphisms.pointwise_relation string
+            (Morphisms.pointwise_relation trace
+               (Morphisms.pointwise_relation io_trace
+                  (Morphisms.pointwise_relation mem
+                     (Morphisms.pointwise_relation (list word)
+                        (Morphisms.respectful
+                           (Morphisms.pointwise_relation trace
+                              (Morphisms.pointwise_relation io_trace
+                                 (Morphisms.pointwise_relation mem
+                                    (Morphisms.pointwise_relation (list word) Basics.impl))))
+                           Basics.impl))))))) WeakestPrecondition.call
+*)

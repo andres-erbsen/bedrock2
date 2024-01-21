@@ -506,12 +506,10 @@ Section LowerPipeline.
                exists kH'' (kL'': list LeakageEvent),
                  post (kH'' ++ kH) t' m' retvals /\
                    kL' = kL'' ++ kL /\
-                   forall next,
-                     Semantics.s_predicts next (rev kH'') ->
-                     r_predicts
-                       (fun kL''' =>
-                          rnext_fun iset compile_ext_call leak_ext_call finfo p_funcs p1 next nil f_rel_pos stack_pastend retnames fbody kL''' (fun _ _ => qendLE))
-                       (rev kL'')).
+                   forall a,
+                     Semantics.generates a (rev kH'') ->
+                     rtransform_fun_trace iset compile_ext_call leak_ext_call finfo p_funcs p1
+                       a f_rel_pos stack_pastend retnames fbody (fun _ => []) = rev kL'').
   Proof.
     unfold riscv_call.
     intros p1 p2. destruct p2 as ((finstrs & finfo) & req_stack_size). intros.
@@ -715,11 +713,8 @@ Section LowerPipeline.
       + eexists. eexists. split; [eassumption|]. split.
         { Search getTrace. rewrite H10p5p1. subst kL. reflexivity. }
         intros.
-        replace (rev rk') with (rev rk' ++ nil) by apply List.app_nil_r.
-        eapply H10p5p2.
-        -- simpl. Search Semantics.predicts. instantiate (1 := nil). rewrite app_nil_r.
-           assumption.
-        -- constructor. reflexivity.
+        replace (rev k') with (rev k' ++ nil) in H10 by apply List.app_nil_r.
+        rewrite H10p5p2 with (1 := H10). rewrite app_nil_r. reflexivity.
       + eapply only_differ_subset. 1: eassumption.
         rewrite ListSet.of_list_list_union.
         rewrite ?singleton_set_eq_of_list.

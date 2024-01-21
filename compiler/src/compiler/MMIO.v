@@ -398,10 +398,8 @@ Section MMIO1.
       }
       split; eauto.
       2: { eexists [_]. eexists [_]. split; [reflexivity|]. split; [reflexivity|].
-           exists (S O). intros. destruct fuel as [|fuel']; [blia|].
-           cbn [rnext_stmt leak_ext_call]. cbv [leak_interact]. rewrite String.eqb_refl.
-           apply predict_cons in H3. rewrite H3. simpl. econstructor; [reflexivity|reflexivity|].
-          apply H5. }
+           intros. rewrite rtransform_stmt_trace_step. cbn [rtransform_stmt_trace_body].
+           inversion H3. subst. reflexivity. }
       split; eauto.
       split; eauto.
       split; eauto.
@@ -557,11 +555,8 @@ Section MMIO1.
       }
       split.
       2: { eexists [_]. eexists [_]. split; [reflexivity|]. split; [reflexivity|].
-           exists (S O). intros. destruct fuel as [|fuel']; [blia|].
-           cbn [rnext_stmt leak_ext_call]. cbv [leak_interact].
-           replace (_ =? _)%string with false by reflexivity.
-           apply predict_cons in H3. rewrite H3. simpl. econstructor; [reflexivity|reflexivity|].
-          apply H5. }
+           intros. rewrite rtransform_stmt_trace_step. cbn [rtransform_stmt_trace_body].
+           inversion H3. subst. reflexivity. }
       split. {
         eapply map.put_extends. eassumption.
       }
