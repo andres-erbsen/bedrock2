@@ -296,7 +296,8 @@ Section WithParameters.
   (* note: [e_impl_reduced] and [funnames] will shrink one function at a time each time
      we enter a new function body, to make sure functions cannot call themselves, while
      [e_impl] and [e_pos] remain the same throughout because that's mandated by
-     [FlatImp.exec] and [compile_stmt], respectively *) Print rnext_stmt. Print bigtuple. (*(trace * Z * word * Z * stmt * list LeakageEvent * (trace -> nat -> qLeakageEvent))*)
+     [FlatImp.exec] and [compile_stmt], respectively *)
+  Print rtransform_stmt_trace_body.
   Definition compiles_FlatToRiscv_correctly{BWM: bitwidth_iset width iset}
     (f: pos_map -> Z -> Z -> stmt -> list Instruction)
     (s: stmt): Prop :=
@@ -329,10 +330,10 @@ Section WithParameters.
            exists t' rt',
              finalTrace = t' ++ initialTrace /\
                getTrace finalL = rt' ++ getTrace initialL /\
-               forall next t0 t'' rt'' f,
-                 s_predicts next (t0 ++ rev t' ++ t'') ->
-                 r_predicts (fun t => f (rev rt' ++ t) (t0 ++ rev t') (length (rev rt'))) rt'' ->
-                 r_predicts (fun t => rnext_stmt iset compile_ext_call leak_ext_call e_pos program_base e_impl_full next (t0, pos, g.(p_sp), (bytes_per_word * rem_framewords g), s, t, (f t))) (rev rt' ++ rt'')).
+               forall a t'' f,
+                 generates a (rev t' ++ t'') ->
+                 rtransform_stmt_trace iset compile_ext_call leak_ext_call e_pos program_base e_impl_full
+                   (s, a, pos, g.(p_sp), (bytes_per_word * rem_framewords g), f) = rev rt' ++ f (rev t')).
 End WithParameters.
 
 Ltac simpl_g_get :=
