@@ -1,5 +1,6 @@
 Require Import coqutil.Macros.unique.
 Require Import coqutil.Decidable.
+Require Import bedrock2.Semantics.
 Require Import compiler.FlatImp.
 Require Import Coq.Lists.List.
 Import ListNotations.
@@ -513,58 +514,15 @@ Section FlatToRiscv1.
     Definition leak_Jal := ILeakage Jal_leakage.
     Definition leak_Jalr := ILeakage Jalr_leakage.
 
-    Inductive qLeakageEvent :=
-    | qLE (le : LeakageEvent)
-    | qendLE.
-
-    Definition r_predicts := Semantics.predicts qendLE qLE.
-
-    Definition quotLE (e : LeakageEvent) : qLeakageEvent := qLE e.
-    
-    Print Semantics.predict_with_prefix.
-    Notation trace := Semantics.trace.
-
-    Notation event := Semantics.event.
-  
-    Notation qevent := Semantics.qevent. Search qevent.
-    Notation quot := Semantics.quot. Print Semantics.qevent.
-    Notation qleak_bool := Semantics.qleak_bool.
-    Notation qleak_word := Semantics.qleak_word.
-    Notation qleak_list := Semantics.qleak_list.
-    Notation qconsume := Semantics.qconsume.
-    Notation qend := Semantics.qend.
-
-    Notation leak_unit := Semantics.leak_unit.
-    Notation leak_bool := Semantics.leak_bool.
-    Notation leak_word := Semantics.leak_word.
-    Notation leak_list := Semantics.leak_list.
-    Notation consume_word := Semantics.consume_word.
-
-    Definition rv_predict_with_prefix := Semantics.predict_with_prefix qLE.
-        
-    Lemma skipn_len {A} n (x : list A) : (length (skipn n x) = length x - n)%nat.
-    Proof.
-      revert n. induction x; intros.
-      - simpl. destruct n; reflexivity.
-      - simpl. destruct n; try reflexivity. cbn [skipn]. apply IHx.
-    Qed.
-    
-    Lemma skipn_correct {A} (l1 l2 : list A) : skipn (length l1) (l1 ++ l2) = l2.
-    Proof.
-      induction l1; auto.
-    Qed.
-
-    Check (match 5%nat with | S _ | O => 5%nat end).
-
     Require Import Coq.Init.Wf Relation_Operators Wellfounded PeanoNat Lia.
 
-    Definition lt_tuple' : nat * (stmt Z) -> nat * (stmt Z) -> Prop := slexprod _ _ lt stmt_lt.
-
-    Definition bigtuple : Type := trace * Z * word * Z * stmt Z * list LeakageEvent * (trace -> nat -> qLeakageEvent).
-
-    Definition project_tuple (tup : bigtuple) : nat * stmt Z :=
-      let '(t_so_far, mypos, sp_val, stackoffset, s, rt_so_far, f) := tup in
-      (length rt_so_far, s).
+    Definition lt_tuple' : abstract_trace * stmt Z -> abstract_trace * stmt Z -> Prop := slexprod _ _ abstract_trace_lt stmt_lt.
+    
+    Definition bigtuple : Type := stmt Z * abstract_trace * Z * word * Z * (trace -> list LeakageEvent).
+  
+    Definition project_tuple (tup : bigtuple) : abstract_trace * stmt Z :=
+      let '(s, a, mypos, sp_val, stackoffset, f) := tup in
+      (a, s).
 
     Definition lt_tuple (x y : bigtuple) :=
     lt_tuple' (project_tuple x) (project_tuple y).    
@@ -572,7 +530,7 @@ Section FlatToRiscv1.
     Lemma lt_tuple'_wf : well_founded lt_tuple'.
     Proof.
       apply wf_slexprod.
-      - apply lt_wf.
+      - apply wf_abstract_trace_lt.
       - apply wf_stmt_lt.
     Defined.
     
@@ -581,7 +539,7 @@ Section FlatToRiscv1.
       cbv [lt_tuple]. apply wf_inverse_image. apply lt_tuple'_wf.
     Defined.
 
-    Definition rnext_fun_helper
+    Definition transform_fun_trace_helper
         (mypos : Z) (sp_val : word) rets fbody :=
         let need_to_save := list_diff Z.eqb (modVars_as_list Z.eqb fbody) rets in
         let scratchwords := stackalloc_words fbody in
@@ -601,203 +559,143 @@ Section FlatToRiscv1.
             [ leak_Jalr ] in
         (beforeBody, afterBody, (mypos + 4 * (2 + Z.of_nat (length need_to_save)))%Z, sp_val', (bytes_per_word * scratchwords)%Z).
 
-    Definition rnext_stmt_body
-      (next : trace -> qevent)
-      (tup : bigtuple)
-      (rnext_stmt : forall othertuple, lt_tuple othertuple tup -> qLeakageEvent)
-      : qLeakageEvent.
+    Definition rtransform_stmt_trace_body
+      (tup : stmt Z * abstract_trace * Z * word * Z * (trace -> list LeakageEvent))
+      (rtransform_stmt_trace : forall othertup, lt_tuple othertup tup -> list LeakageEvent)
+      : list LeakageEvent.
       refine (
           match tup as x return tup = x -> _ with
-          | (t_so_far, mypos, sp_val, stackoffset, s, rt_so_far, f) =>
+          | (s, a, mypos, sp_val, stackoffset, f) =>
               fun _ =>
-                match s as x return s = x -> _ with
-                | SLoad sz x y o =>
-                    fun _ =>
-                      match next t_so_far with
-                      | qleak_word a =>
-                          let flat_leakage := [leak_word a] in
-                          let rv_leakage := [leak_load sz a] in
-                          rv_predict_with_prefix
-                            rv_leakage
-                            rt_so_far
-                            (fun rt_so_far' _ => f (t_so_far ++ flat_leakage) (length rt_so_far - length rt_so_far'))
-                      | _ => qendLE
-                      end
-                | SStore sz x y o =>
-                    fun _ =>
-                      match next t_so_far with
-                      | qleak_word a =>
-                          let flat_leakage := [leak_word a] in
-                          let rv_leakage := [leak_store sz a] in
-                          rv_predict_with_prefix
-                            rv_leakage
-                            rt_so_far
-                            (fun rt_so_far' _ => f (t_so_far ++ flat_leakage) (length rt_so_far - length rt_so_far'))
-                      | _ => qendLE
-                      end
-                | SInlinetable sz x t i =>
-                    fun _ =>
-                      match next t_so_far with
-                      | qleak_word i' =>
-                          let flat_leakage := [leak_word i'] in
-                          let rv_leakage := [leak_Jal; leak_Add; leak_load sz (word.add (word.add (word.add program_base (word.of_Z mypos)) (word.of_Z 4)) i')] in
-                          rv_predict_with_prefix
-                            rv_leakage
-                            rt_so_far
-                            (fun rt_so_far' _ => f (t_so_far ++ flat_leakage) (length rt_so_far - length rt_so_far'))
-                      | _ => qendLE
-                      end
-                | SStackalloc _ n body =>
-                    fun _ =>
-                      let a := (word.add sp_val (word.of_Z (stackoffset - n))) in
-                      let flat_leakage := [consume_word a] in
-                      let rv_leakage := [ leak_Addi ] in
-                      rv_predict_with_prefix
-                        rv_leakage
-                        rt_so_far
-                        (fun rt_so_far' _ =>
-                           rnext_stmt (t_so_far ++ flat_leakage, (mypos + 4)%Z, sp_val, (stackoffset - n)%Z, body, rt_so_far',
-                               (fun t_so_far' rt_so_far''_diff => f t_so_far' (rt_so_far''_diff + length rt_so_far - length rt_so_far'))) _)
-                | SLit _ v =>
-                    fun _ =>
-                      rv_predict_with_prefix
-                        (leak_lit v)
-                        rt_so_far
-                        (fun rt_so_far' _ => f t_so_far (length rt_so_far - length rt_so_far'))
-                | SOp _ op _ operand2 =>
-                    fun _ =>
-                      let newt_operands :=
-                        match op with
-                        | Syntax.bopname.divu
-                        | Syntax.bopname.remu =>
-                            match next t_so_far with
-                            | qleak_word x1 =>
-                                match next (t_so_far ++ [leak_word x1]) with
-                                | qleak_word x2 => Some ([leak_word x1; leak_word x2], x1, x2)
-                                | _ => None
-                                end
-                            | _ => None
-                            end
-                        | Syntax.bopname.slu
-                        | Syntax.bopname.sru
-                        | Syntax.bopname.srs =>
-                            match next t_so_far with
-                            | qleak_word x2 => Some ([leak_word x2], word.of_Z 0, x2)
-                            | _ => None
-                            end
-                        | _ => Some ([], word.of_Z 0, word.of_Z 0)
+              match s with
+              | SLoad sz x y o =>
+                  match a with
+                  | aleak_word addr a' =>
+                      [leak_load sz addr] ++ 
+                        f [leak_word addr]
+                  | _ => []
+                  end
+              | SStore sz x y o =>
+                  match a with
+                  | aleak_word addr a' =>
+                      [leak_store sz addr] ++
+                        f [leak_word addr]
+                  | _ => []
+                  end
+              | SInlinetable sz x t i =>
+                  match a with
+                  | aleak_word i' a' =>
+                      [leak_Jal; leak_Add; leak_load sz (word.add (word.add (word.add program_base (word.of_Z mypos)) (word.of_Z 4)) i')] ++
+                        f [leak_word i']
+                  | _ => []
+                  end
+              | SStackalloc _ n body =>
+                  match a with
+                  | aconsume_word fa' =>
+                      let addr := (word.add sp_val (word.of_Z (stackoffset - n))) in
+                      [ leak_Addi ] ++
+                        rtransform_stmt_trace (body, fa' addr, mypos + 4, sp_val, stackoffset - n, fun k => f (consume_word addr :: k)) _
+                  | _ => []
+                  end
+              | SLit _ v =>
+                  leak_lit v ++
+                    f []
+              | SOp _ op _ operand2 =>
+                  let newt_operands :=
+                    match op with
+                    | Syntax.bopname.divu
+                    | Syntax.bopname.remu =>
+                        match a with
+                        | aleak_word x1 (aleak_word x2 a') => Some ([leak_word x1; leak_word x2], x1, x2)
+                        | _ => None
                         end
-                      in
-                      match newt_operands with
-                      | Some (newt, x1, x2) =>
-                          match leak_op op operand2 x1 x2 with
-                          | Some l =>
-                              rv_predict_with_prefix
-                                l
-                                rt_so_far
-                                (fun rt_so_far' _ => f (t_so_far ++ newt) (length rt_so_far - length rt_so_far'))
-                          | None => qendLE
-                          end
-                      | None => qendLE
+                    | Syntax.bopname.slu
+                    | Syntax.bopname.sru
+                    | Syntax.bopname.srs =>
+                        match a with
+                        | aleak_word x2 a' => Some ([leak_word x2], word.of_Z 0, x2)
+                        | _ => None
+                        end
+                    | _ => Some ([], word.of_Z 0, word.of_Z 0)
+                    end
+                  in
+                  match newt_operands with
+                  | Some (newt, x1, x2) =>
+                      match leak_op op operand2 x1 x2 with
+                      | Some l =>
+                          l ++
+                            f newt
+                      | None => []
                       end
-                | SSet _ _ =>
-                    fun _ =>
-                      rv_predict_with_prefix
-                        [ leak_Add ]
-                        rt_so_far
-                        (fun rt_so_far' _ => f t_so_far (length rt_so_far - length rt_so_far'))
-                | SIf cond bThen bElse =>
-                    fun _ =>
-                      let thenLength := Z.of_nat (length (compile_stmt (mypos + 4) stackoffset bThen)) in
-                      match next t_so_far with
-                      | qleak_bool b =>
-                          rv_predict_with_prefix
-                            [ leak_bcond_by_inverting cond (negb b) ]
-                            rt_so_far
-                            (fun rt_so_far' _ => rnext_stmt (t_so_far ++ [leak_bool b],
-                                                     (if b then (mypos + 4)%Z else (mypos + 4 + 4 * thenLength + 4)%Z),
-                                                     sp_val, stackoffset, (if b then bThen else bElse), rt_so_far',
-                                                     (fun t_so_far' rt_so_far''_diff =>
-                                                        let rt_so_far'' := skipn rt_so_far''_diff rt_so_far' in
-                                                        rv_predict_with_prefix
-                                                          (if b then [leak_Jal] else [])
-                                                          rt_so_far''
-                                                          (fun rt_so_far''' _ => f t_so_far' (length rt_so_far - length rt_so_far''')))) _)
-                      | _ => qendLE
-                      end
-                | SLoop body1 cond body2 =>
-                    fun _ =>
-                      let body1Length := Z.of_nat (length (compile_stmt mypos stackoffset body1)) in
-                      rnext_stmt (t_so_far, mypos, sp_val, stackoffset, body1, rt_so_far,
-                          (fun t_so_far' rt_so_far'_diff =>
-                             let rt_so_far' := skipn rt_so_far'_diff rt_so_far in
-                             match next t_so_far' with
-                             | qleak_bool true =>
-                                 rv_predict_with_prefix
-                                   [ leak_bcond_by_inverting cond (negb true) ]
-                                   rt_so_far'
-                                   (fun rt_so_far'' _ =>
-                                      rnext_stmt (t_so_far' ++ [leak_bool true],
-                                          (mypos + (body1Length + 1) * 4)%Z, sp_val, stackoffset, body2, rt_so_far'',
-                                          (fun t_so_far'' rt_so_far'''_diff =>
-                                             let rt_so_far''' := skipn rt_so_far'''_diff rt_so_far'' in
-                                             rv_predict_with_prefix
-                                               [ leak_Jal ]
-                                               rt_so_far'''
-                                               (fun rt_so_far'''' _ => rnext_stmt (t_so_far'', mypos, sp_val, stackoffset, s, rt_so_far'''',
-                                                                           (fun t_so_far''' rt_so_far'''''_diff => f t_so_far''' (rt_so_far'''''_diff + length rt_so_far - length rt_so_far''''))) _))) _)
-                             | qleak_bool false =>
-                                 rv_predict_with_prefix
-                                   [ leak_bcond_by_inverting cond (negb false) ]
-                                   rt_so_far'
-                                   (fun rt_so_far'' _ => f (t_so_far' ++ [leak_bool false]) (length rt_so_far - length rt_so_far''))
-                             | _ => qendLE
-                             end)) _
-                | SSeq s1 s2 =>
-                    fun _ =>
-                      let s1Length := Z.of_nat (length (compile_stmt mypos stackoffset s1)) in
-                      rnext_stmt (t_so_far, mypos, sp_val, stackoffset, s1, rt_so_far,
-                          (fun t_so_far' rt_so_far'_diff =>
-                             let rt_so_far' := skipn rt_so_far'_diff rt_so_far in
-                             rnext_stmt (t_so_far', (mypos + 4 * s1Length)%Z, sp_val, stackoffset, s2, rt_so_far',
-                                 (fun t_so_far'' rt_so_far''_diff => f t_so_far'' (rt_so_far''_diff + length rt_so_far - length rt_so_far'))) _)) _
-                | SSkip => fun _ => f t_so_far O
-                | SCall resvars fname argvars =>
-                    fun _ =>
+                  | None => []
+                  end
+              | SSet _ _ =>
+                  [ leak_Add ] ++
+                    f []
+              | SIf cond bThen bElse =>
+                  let thenLength := Z.of_nat (length (compile_stmt (mypos + 4) stackoffset bThen)) in
+                  match a with
+                  | aleak_bool b a' =>
+                      [ leak_bcond_by_inverting cond (negb b) ] ++
+                        rtransform_stmt_trace (if b then bThen else bElse, a', if b then mypos + 4 else mypos + 4 + 4 * thenLength + 4, sp_val, stackoffset,
+                          fun k =>
+                            (if b then [leak_Jal] else []) ++
+                              f (leak_bool b :: k)) _
+                  | _ => []
+                  end
+              | SLoop body1 cond body2 =>
+                  let body1Length := Z.of_nat (length (compile_stmt mypos stackoffset body1)) in
+                  rtransform_stmt_trace (body1, a, mypos, sp_val, stackoffset,
+                      fun k =>
+                        let a' := shrink a k in
+                        match a' with
+                        | aleak_bool true a'' =>
+                            [ leak_bcond_by_inverting cond (negb true) ] ++
+                              rtransform_stmt_trace (body2, a'', mypos + (body1Length + 1) * 4, sp_val, stackoffset,
+                                fun k' =>
+                                  let a''' := shrink a'' k' in
+                                  [ leak_Jal ] ++
+                                    rtransform_stmt_trace (s, a''', mypos, sp_val, stackoffset,
+                                      fun k'' => f (k ++ leak_bool true :: k' ++ k'')) _) _
+                        | aleak_bool false a'' =>
+                            [ leak_bcond_by_inverting cond (negb false) ] ++
+                              f (k ++ [leak_bool false])
+                        | _ => []
+                        end) _
+              | SSeq s1 s2 =>
+                  let s1Length := Z.of_nat (length (compile_stmt mypos stackoffset s1)) in
+                  rtransform_stmt_trace (s1, a, mypos, sp_val, stackoffset,
+                      fun k =>
+                        let a' := shrink a k in
+                        rtransform_stmt_trace (s2, a', mypos + 4 * s1Length, sp_val, stackoffset,
+                          fun k' => f (k ++ k')) _) _
+              | SSkip => f []
+              | SCall resvars fname argvars =>
+                  match a with
+                  | aleak_unit a' =>
                       match map.get e_env fname, map.get e fname with
                       | Some (params, rets, fbody), Some fpos =>
-                          rv_predict_with_prefix
-                            [ leak_Jal ](* jump to compiled function *)
-                            rt_so_far
-                            (fun rt_so_far' _ =>
-                               let t_so_far' := t_so_far ++ [leak_unit] in
-                               let '(beforeBody, afterBody, mypos', sp_val', stackoffset') := rnext_fun_helper fpos sp_val rets fbody in
-                               rv_predict_with_prefix
-                                 beforeBody
-                                 rt_so_far'
-                                 (fun rt_so_far'' _  =>
-                                    rnext_stmt (t_so_far', mypos', sp_val', stackoffset', fbody, rt_so_far'',
-                                        (fun t_so_far'' rt_so_far''_diff =>
-                                           let rt_so_far''' := skipn rt_so_far''_diff rt_so_far'' in
-                                           rv_predict_with_prefix
-                                             afterBody
-                                             rt_so_far'''
-                                             (fun rt_so_far'''' _ => f t_so_far'' (length rt_so_far - length rt_so_far''''))%nat)) _))
-                      | _, _ => qendLE
+                          let '(beforeBody, afterBody, mypos', sp_val', stackoffset') := transform_fun_trace_helper fpos sp_val rets fbody in
+                          [ leak_Jal ] ++ (* jump to compiled function *)
+                            beforeBody ++
+                            rtransform_stmt_trace (fbody, a', mypos', sp_val', stackoffset',
+                              fun k =>
+                                afterBody ++
+                                  f (leak_unit :: k)) _
+                      | _, _ => []
                       end
-                | SInteract _ _ _ =>
-                    fun _ =>
-                      match next t_so_far with
-                      | qleak_list l =>
-                          rv_predict_with_prefix
-                            (leak_ext_call e mypos stackoffset s l)
-                            rt_so_far
-                            (fun rt_so_far' _ => f (t_so_far ++ [leak_list l]) (length rt_so_far - length rt_so_far'))
-                      | _ => qendLE
-                      end
-                end (eq_refl _)
-          end%nat (eq_refl _) ).
-      Proof.
+                  | _ => []
+                  end
+              | SInteract _ _ _ =>
+                  match a with
+                  | aleak_list l a' =>
+                      leak_ext_call e mypos stackoffset s l ++
+                        f [leak_list l]
+                  | _ => []
+                  end
+              end
+        end eq_refl).
+    Proof.
         Unshelve.
         all: cbv [lt_tuple project_tuple].
         all: subst.
