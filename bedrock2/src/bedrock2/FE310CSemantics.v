@@ -28,32 +28,18 @@ Section WithParameters.
     n = 4%nat /\ word.unsigned addr mod 4 = 0.
 
   Global Instance ext_spec: ExtSpec :=
-    fun (t : io_trace) (mGive : mem) a (args: list word) (post: mem -> list word -> Prop) =>
+    fun (t : io_trace) (mGive : mem) a (args: list word) (post: mem -> list word -> list word -> Prop) =>
     if String.eqb "MMIOWRITE" a then
       exists addr val,
         args = [addr; val] /\
         (mGive = Interface.map.empty /\ isMMIOAddr addr /\ word.unsigned addr mod 4 = 0) /\
-        post Interface.map.empty nil
+        post Interface.map.empty nil [addr]
     else if String.eqb "MMIOREAD" a then
       exists addr,
         args = [addr] /\
         (mGive = Interface.map.empty /\ isMMIOAddr addr /\ word.unsigned addr mod 4 = 0) /\
-        forall val, post Interface.map.empty [val]
+        forall val, post Interface.map.empty [val] [addr]
     else False.
-  
-  Global Instance leak_ext: LeakExt :=
-    fun (t : io_trace) (mGive : mem) a (args: list word) =>
-      if String.eqb "MMIOWRITE" a then
-        match args with
-        | [addr;val] => [addr]
-        | _ => [] (*can't happen*)
-        end
-    else if String.eqb "MMIOREAD" a then
-           match args with
-           | [addr] => [addr]
-           | _ => []
-           end
-    else [].
   
   Global Instance ext_spec_ok : ext_spec.ok ext_spec.
   Proof.
@@ -61,13 +47,17 @@ Section WithParameters.
     cbv [ext_spec Morphisms.Proper Morphisms.respectful Morphisms.pointwise_relation Basics.impl];
     intros.
     all :
-    repeat match goal with
-      | H : context[(?x =? ?y)%string] |- _ =>
-          destruct (x =? y)%string in *
-      | H: exists _, _ |- _ => destruct H
-      | H: _ /\ _ |- _ => destruct H
-      | H: False |- _ => destruct H
-    end; subst; eauto 8 using Properties.map.same_domain_refl.
+      repeat match goal with
+        | H : context[(?x =? ?y)%string] |- _ =>
+            destruct (x =? y)%string in *
+        | H: exists _, _ |- _ => destruct H
+        | H: _ /\ _ |- _ => destruct H
+        | H: False |- _ => destruct H
+        end; subst;
+      repeat match goal with
+        | H: _ :: _ = _ :: _ |- _ => injection H; intros; subst; clear H
+        end;
+      eauto 8 using Properties.map.same_domain_refl.
   Qed.
 
   Global Instance locals: Interface.map.map String.string word := SortedListString.map _.

@@ -644,7 +644,6 @@ Section Spilling.
   Context {localsOk: map.ok locals}.
   Context {env: map.map String.string (list Z * list Z * stmt)} {env_ok: map.ok env}.
   Context {ext_spec: ExtSpec} {ext_spec_ok: ext_spec.ok ext_spec}.
-  Context {leak_ext: LeakExt}.
 
   Definition spill_functions: env -> result env :=
     map.try_map_values spill_fun.

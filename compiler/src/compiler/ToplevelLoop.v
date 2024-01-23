@@ -76,7 +76,7 @@ Section Pipeline1.
   Context {ext_spec: Semantics.ExtSpec}.
   Context {M: Type -> Type}.
   Context {MM: Monad M}.
-  Context {RVM: RiscvProgram M word}.
+  Context {RVM: RiscvProgramWithLeakage}.
   Context {PRParams: PrimitivesParams M MetricRiscvMachine}.
   Context {word_riscv_ok: RiscvWordProperties.word.riscv_ok word}.
   Context {string_keyed_map_ok: forall T, map.ok (string_keyed_map T)}.
@@ -87,8 +87,9 @@ Section Pipeline1.
   Context {mem_ok: map.ok mem}.
   Context {ext_spec_ok: Semantics.ext_spec.ok ext_spec}.
   Context (compile_ext_call : string_keyed_map Z -> Z -> Z -> FlatImp.stmt Z -> list Instruction).
+  Context (leak_ext_call    : string_keyed_map Z -> Z -> Z -> FlatImp.stmt Z -> list word -> list LeakageEvent).
   Context (compile_ext_call_correct: forall resvars extcall argvars,
-              compiles_FlatToRiscv_correctly compile_ext_call compile_ext_call
+              compiles_FlatToRiscv_correctly compile_ext_call leak_ext_call compile_ext_call
                                              (FlatImp.SInteract resvars extcall argvars)).
   Context (compile_ext_call_length_ignores_positions: forall stackoffset posmap1 posmap2 c pos1 pos2,
               List.length (compile_ext_call posmap1 pos1 stackoffset c) =
@@ -290,17 +291,20 @@ Section Pipeline1.
            end.
     intros. destruct_RiscvMachine mid. fwd.
     (* then, run body of init function (using compiler simulation and correctness of init) *)
-    eapply runsTo_weaken.
-    - pose proof compiler_correct compile_ext_call compile_ext_call_correct
+    pose proof compiler_correct compile_ext_call leak_ext_call compile_ext_call_correct
                                   compile_ext_call_length_ignores_positions as P.
-      unfold runsTo in P.
-      specialize P with (argvals := [])
-                        (post := fun t' m' retvals => isReady spec t' m' /\ goodTrace spec t')
-                        (fname := "init"%string).
-      edestruct P as (init_rel_pos & G & P'); clear P; cycle -1.
-      1: eapply P' with (p_funcs := word.add loop_pos (word.of_Z 8)) (Rdata := R).
+    unfold runsTo in P.
+    specialize P with (fname := "init"%string) (p_funcs := word.add loop_pos (word.of_Z 8)).
+    edestruct P as [f P']; clear P; cycle -1.
+    2: eassumption.
+    2: { unfold compile. rewrite_match. reflexivity. }
+    eapply runsTo_weaken.
+    - specialize P' with (argvals := [])
+                         (post := fun k' t' m' retvals => isReady spec t' m' /\ goodTrace spec t').
+      1: edestruct P' as (init_rel_pos & G & P''); clear P'; cycle -1.
+      1: eapply P'' with (Rdata := R).
       all: simpl_MetricRiscvMachine_get_set.
-      11: {
+      10: {
         unfold hl_inv in init_code_correct.
         move init_code_correct at bottom.
         do 4 eexists. split. 1: eassumption. split. 1: reflexivity.
@@ -310,9 +314,8 @@ Section Pipeline1.
           replace (datamem_start spec) with (heap_start ml) by congruence.
           replace (datamem_pastend spec) with (heap_pastend ml) by congruence.
           exact HMem.
-        - cbv beta. intros * _ HP. exists []. split. 1: reflexivity. exact HP.
+        - cbv beta. intros ? ? ? ? ? HP. exists []. split. 1: reflexivity. exact HP.
       }
-      10: { unfold compile. rewrite_match. reflexivity. }
       all: try eassumption.
       { apply stack_length_divisible. }
       { cbn. clear CP.
@@ -322,8 +325,9 @@ Section Pipeline1.
       { destruct mlOk. solve_divisibleBy4. }
       { reflexivity. }
       { reflexivity. }
+      { simpl. reflexivity. }
       unfold machine_ok.
-      clear P'.
+      clear P''.
       rewrite GetPos in G. fwd.
       unfold_RiscvMachine_get_set.
       repeat match goal with
@@ -497,23 +501,25 @@ Section Pipeline1.
       end.
       2: solve_word_eq word_ok.
       subst.
+      pose proof compiler_correct compile_ext_call leak_ext_call compile_ext_call_correct
+        compile_ext_call_length_ignores_positions as P.
+      unfold runsTo in P.
+      specialize P with (fname := "loop"%string) (p_funcs := word.add loop_pos (word.of_Z 8)).
+      edestruct P as [f P']; clear P; cycle -1.
+      2,3: eassumption.
       eapply runsTo_weaken.
-      + pose proof compiler_correct compile_ext_call compile_ext_call_correct
-                                    compile_ext_call_length_ignores_positions as P.
-        unfold runsTo in P.
-        specialize P with (argvals := [])
-                          (fname := "loop"%string)
-                          (post := fun t' m' retvals => isReady spec t' m' /\ goodTrace spec t').
-        edestruct P as (loop_rel_pos & G & P'); clear P; cycle -1.
-        1: eapply P' with (p_funcs := word.add loop_pos (word.of_Z 8)) (Rdata := R)
-                          (ret_addr := word.add loop_pos (word.of_Z 4)).
-        11: {
+      + unfold runsTo in P'.
+        specialize P' with (argvals := [])
+                           (post := fun k' t' m' retvals => isReady spec t' m' /\ goodTrace spec t').
+        1: edestruct P' as (loop_rel_pos & G & P''); clear P'; cycle -1.
+        1: eapply P'' with (Rdata := R) (ret_addr := word.add loop_pos (word.of_Z 4)).
+        10: {
           move loop_body_correct at bottom.
           do 4 eexists. split. 1: eassumption. split. 1: reflexivity.
           intros mc.
           eapply ExprImp.weaken_exec.
           - eapply loop_body_correct; eauto.
-          - cbv beta. intros * _ HP. exists []. split. 1: reflexivity. exact HP.
+          - cbv beta. intros ? ? ? ? ? HP. exists []. split. 1: reflexivity. exact HP.
         }
         all: try eassumption.
         all: simpl_MetricRiscvMachine_get_set.
@@ -524,6 +530,7 @@ Section Pipeline1.
         { subst loop_pos init_pos. destruct mlOk. solve_divisibleBy4. }
         { reflexivity. }
         { reflexivity. }
+        { simpl. reflexivity. }
         unfold loop_pos, init_pos.
         unfold machine_ok.
         unfold_RiscvMachine_get_set.
@@ -586,6 +593,8 @@ Section Pipeline1.
         * wcancel_assumption.
         * eapply rearrange_footpr_subset. 1: eassumption.
           wwcancel.
+          
+          Unshelve. exact nil.
   Qed.
 
   Lemma ll_inv_implies_prefix_of_good: forall st,

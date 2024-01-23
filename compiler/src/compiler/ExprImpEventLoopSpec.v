@@ -19,12 +19,12 @@ Section Params1.
     datamem_pastend: word;
     (* trace invariant which holds at the beginning (and end) of each loop iteration,
        but might not hold in the middle of the loop because more needs to be appended *)
-    goodTrace: Semantics.trace -> Prop;
+    goodTrace: Semantics.io_trace -> Prop;
     (* state invariant which holds at the beginning (and end) of each loop iteration *)
-    isReady: Semantics.trace -> mem -> Prop;
+    isReady: Semantics.io_trace -> mem -> Prop;
   }.
 
-  Definition hl_inv(spec: ProgramSpec)(t: Semantics.trace)(m: mem)
+  Definition hl_inv(spec: ProgramSpec)(k: Semantics.trace)(t: Semantics.io_trace)(m: mem)
              (l: locals)(mc: bedrock2.MetricLogging.MetricLog)
     : Prop := (* Restriction: no locals can be shared between loop iterations *)
     spec.(isReady) t m /\ spec.(goodTrace) t.
@@ -40,12 +40,12 @@ Section Params1.
     get_init_code: map.get (map.of_list e) init_f = Some (nil, nil, init_code);
     init_code_correct: forall m0 mc0,
         mem_available spec.(datamem_start) spec.(datamem_pastend) m0 ->
-        Semantics.exec (map.of_list e) init_code nil m0 map.empty mc0 (hl_inv spec);
+        Semantics.exec (map.of_list e) init_code nil nil m0 map.empty mc0 (hl_inv spec);
     loop_body: Syntax.cmd.cmd;
     get_loop_body: map.get (map.of_list e) loop_f = Some (nil, nil, loop_body);
-    loop_body_correct: forall t m l mc,
-        hl_inv spec t m l mc ->
-        Semantics.exec (map.of_list e) loop_body t m l mc (hl_inv spec);
+    loop_body_correct: forall k t m l mc,
+        hl_inv spec k t m l mc ->
+        Semantics.exec (map.of_list e) loop_body k t m l mc (hl_inv spec);
   }.
 
 End Params1.

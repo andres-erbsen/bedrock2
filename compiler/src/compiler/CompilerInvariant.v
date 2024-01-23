@@ -32,7 +32,7 @@ Section Pipeline1.
   Context {ext_spec: Semantics.ExtSpec}.
   Context {M: Type -> Type}.
   Context {MM: Monad M}.
-  Context {RVM: RiscvProgram M word}.
+  Context {RVM: RiscvProgramWithLeakage}.
   Context {PRParams: PrimitivesParams M MetricRiscvMachine}.
   Context {word_riscv_ok: RiscvWordProperties.word.riscv_ok word}.
   Context {string_keyed_map_ok: forall T, map.ok (string_keyed_map T)}.
@@ -43,8 +43,9 @@ Section Pipeline1.
   Context {mem_ok: map.ok mem}.
   Context {ext_spec_ok: Semantics.ext_spec.ok ext_spec}.
   Context (compile_ext_call : string_keyed_map Z -> Z -> Z -> FlatImp.stmt Z -> list Instruction).
+  Context (leak_ext_call    : string_keyed_map Z -> Z -> Z -> FlatImp.stmt Z -> list word -> list LeakageEvent).
   Context (compile_ext_call_correct: forall resvars extcall argvars,
-              compiles_FlatToRiscv_correctly compile_ext_call compile_ext_call
+              compiles_FlatToRiscv_correctly compile_ext_call leak_ext_call compile_ext_call
                                              (FlatImp.SInteract resvars extcall argvars)).
   Context (compile_ext_call_length_ignores_positions: forall stackoffset posmap1 posmap2 c pos1 pos2,
               List.length (compile_ext_call posmap1 pos1 stackoffset c) =
@@ -195,7 +196,7 @@ Section Pipeline1.
                 exists suff, spec.(goodTrace) (suff ++ st.(getLog))).
   Proof.
     ssplit; intros.
-    - eapply (establish_ll_inv _ compile_ext_call_correct compile_ext_call_length_ignores_positions).
+    - eapply (establish_ll_inv _ _ compile_ext_call_correct compile_ext_call_length_ignores_positions).
       1: assumption.
       unfold initial_conditions, ToplevelLoop.initial_conditions in *.
       simp.

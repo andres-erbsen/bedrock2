@@ -41,7 +41,7 @@ Section Proofs.
   Context {env: map.map String.string (list Z * list Z * stmt Z)} {env_ok: map.ok env}.
   Context {M: Type -> Type}.
   Context {MM: Monads.Monad M}.
-  Context {RVM: Machine.RiscvProgram M word}.
+  Context {RVM: Machine.RiscvProgramWithLeakage}.
   Context {PRParams: PrimitivesParams M MetricRiscvMachine}.
   Context {ext_spec: Semantics.ExtSpec} {ext_spec_ok: Semantics.ext_spec.ok ext_spec}.
   Context {PR: MetricPrimitives.MetricPrimitives PRParams}.
@@ -64,6 +64,7 @@ Section Proofs.
             ?word.divu0_simpl,
             ?word.modu0_simpl;
     simpl in *;
+    eexists; (* finalK *)
     eexists; (* finalMH *)
     eexists; (* finalMetricsH *)
     repeat split;
@@ -91,18 +92,18 @@ Section Proofs.
   Hypothesis no_ext_calls: forall t mGive action argvals outcome,
       ext_spec t mGive action argvals outcome -> False.
 
-  Hypothesis stackalloc_always_0: forall x n body t m (l: locals) mc post,
-      FlatImp.exec map.empty (SStackalloc x n body) t m l mc post -> n = 0.
+  Hypothesis stackalloc_always_0: forall x n body k t m (l: locals) mc post,
+      FlatImp.exec map.empty (SStackalloc x n body) k t m l mc post -> n = 0.
 
   Hypothesis sp_always_set: forall l: locals,
       map.get l RegisterNames.sp = Some (word.of_Z 42).
 
   (* not needed any more *)
-  Definition stmt_not_too_big(s: stmt Z): Prop := True.
+  Definition stmt_not_too_big(s: stmt Z): Prop := True. Print valid_machine.
 
   Lemma compile_stmt_correct:
-    forall (s: stmt Z) t initialMH initialRegsH postH initialMetricsH,
-    FlatImp.exec map.empty s t initialMH initialRegsH initialMetricsH postH ->
+    forall (s: stmt Z) k t initialMH initialRegsH postH initialMetricsH,
+    FlatImp.exec map.empty s k t initialMH initialRegsH initialMetricsH postH ->
     forall R Rexec (initialL: RiscvMachineL) insts pos,
     compile_stmt iset compile_ext_call map.empty pos 12345678 s = insts ->
     stmt_not_too_big s ->
@@ -114,8 +115,8 @@ Section Proofs.
     initialL.(getLog) = t ->
     initialL.(getNextPc) = add initialL.(getPc) (word.of_Z 4) ->
     valid_machine initialL ->
-    runsTo initialL (fun finalL => exists finalMH finalMetricsH,
-          postH finalL.(getLog) finalMH finalL.(getRegs) finalMetricsH /\
+    runsTo initialL (fun finalL => exists finalK finalMH finalMetricsH,
+          postH finalK finalL.(getLog) finalMH finalL.(getRegs) finalMetricsH /\
           subset (footpr (program iset initialL.(getPc) insts * Rexec)%sep)
                  (of_list finalL.(getXAddrs)) /\
           (program iset initialL.(getPc) insts * Rexec * eq finalMH * R)%sep finalL.(getMem) /\
@@ -184,7 +185,7 @@ Section Proofs.
 
     - (* SStackalloc *)
       assert (valid_register RegisterNames.sp) by (cbv; auto).
-      specialize (stackalloc_always_0 x n body t mSmall l mc post). move stackalloc_always_0 at bottom.
+      specialize (stackalloc_always_0 x n body k t mSmall l mc post). move stackalloc_always_0 at bottom.
       assert (n = 0). {
         eapply stackalloc_always_0. econstructor; eauto.
       }
@@ -204,7 +205,7 @@ Section Proofs.
       repeat match goal with
              | m: _ |- _ => destruct_RiscvMachine m; simpl_MetricRiscvMachine_get_set
              end.
-      eexists. eexists.
+      eexists. eexists. eexists.
       split; [eassumption|].
       split; [solve [sidecondition]|].
       split; [solve [sidecondition]|].
@@ -276,7 +277,7 @@ Section Proofs.
           end.
       all: simpl in *; fwd.
       all: try match goal with
-               | H: ?post _ _ _ |- ?post _ _ _ => eqexact H
+               | H: ?post _ _ _ _ _ |- ?post _ _ _ _ _ => eqexact H
              end.
       all : rewrite ?word.srs_ignores_hibits,
             ?word.sru_ignores_hibits,
@@ -294,7 +295,32 @@ Section Proofs.
       (* execute branch instruction, which will not jump *)
       eapply runsTo_det_step_with_valid_machine; simpl in *; subst.
       + assumption.
-      + simulate'. simpl_MetricRiscvMachine_get_set.
+      + instantiate (1 :=
+                       {|
+                         getMachine :=
+                           {|
+                             getRegs := _;
+                             getPc := _;
+                             getNextPc := _;
+                             getMem := _;
+                             getXAddrs := _;
+                             getLog := _;
+                             getTrace := (match cond with
+                                          | CondBinary op _ _ =>
+                                              match op with
+                                              | BEq => _
+                                              | BNe => _
+                                              | BLt => _
+                                              | BGe => _
+                                              | BLtu => _
+                                              | BGeu => _
+                                              end
+                                          | CondNez _ => _
+                                          end);
+                           |};
+                         getMetrics := _
+                       |}).
+        simulate'. simpl_MetricRiscvMachine_get_set.
         destruct cond; [destruct op | ];
           simpl in *; simp; repeat (simulate'; simpl_bools; simpl); try reflexivity.
       + intro V. eapply runsTo_trans; simpl_MetricRiscvMachine_get_set.
@@ -308,7 +334,37 @@ Section Proofs.
       (* execute branch instruction, which will jump over then-branch *)
       eapply runsTo_det_step_with_valid_machine; simpl in *; subst.
       + assumption.
-      + simulate'.
+      + (*This is obviously kinda gross.  Alternatives:
+          - write lemma "runsTo_det_mod_leakage_step_with_valid_machine", which doesn't require equality in the postcondition but just equality mod leakage traces.  This seems like a bad idea though, since sometime we might want to modify this proof to say something nontrivial about leakage traces.
+          - somehow hardcode the dependence on cond into a lemma, take cond as argument to lemma
+          - ?
+         *)
+        instantiate (1 :=
+                       {|
+                         getMachine :=
+                           {|
+                             getRegs := _;
+                             getPc := _;
+                             getNextPc := _;
+                             getMem := _;
+                             getXAddrs := _;
+                             getLog := _;
+                             getTrace := (match cond with
+                                          | CondBinary op _ _ =>
+                                              match op with
+                                              | BEq => _
+                                              | BNe => _
+                                              | BLt => _
+                                              | BGe => _
+                                              | BLtu => _
+                                              | BGeu => _
+                                              end
+                                          | CondNez _ => _
+                                          end);
+                           |};
+                         getMetrics := _
+                       |}).
+        simulate'.
         destruct cond; [destruct op | ];
           simpl in *; simp; repeat (simulate'; simpl_bools; simpl); try reflexivity.
       + intro V. eapply runsTo_trans; simpl_MetricRiscvMachine_get_set.
@@ -335,7 +391,32 @@ Section Proofs.
         * (* true: iterate again *)
           eapply runsTo_det_step_with_valid_machine; simpl in *; subst.
           { assumption. }
-          { simulate'.
+          { instantiate (1 :=
+                       {|
+                         getMachine :=
+                           {|
+                             getRegs := _;
+                             getPc := _;
+                             getNextPc := _;
+                             getMem := _;
+                             getXAddrs := _;
+                             getLog := _;
+                             getTrace := (match cond with
+                                          | CondBinary op _ _ =>
+                                              match op with
+                                              | BEq => _
+                                              | BNe => _
+                                              | BLt => _
+                                              | BGe => _
+                                              | BLtu => _
+                                              | BGeu => _
+                                              end
+                                          | CondNez _ => _
+                                          end);
+                           |};
+                         getMetrics := _
+                       |}).
+            simulate'.
             destruct cond; [destruct op | ];
               simpl in *; simp; repeat (simulate'; simpl_bools; simpl); try reflexivity. }
           { intro V. eapply runsTo_trans; simpl_MetricRiscvMachine_get_set.
@@ -355,7 +436,32 @@ Section Proofs.
         * (* false: done, jump over body2 *)
           eapply runsTo_det_step_with_valid_machine; simpl in *; subst.
           { assumption. }
-          { simulate'.
+          { instantiate (1 :=
+                       {|
+                         getMachine :=
+                           {|
+                             getRegs := _;
+                             getPc := _;
+                             getNextPc := _;
+                             getMem := _;
+                             getXAddrs := _;
+                             getLog := _;
+                             getTrace := (match cond with
+                                          | CondBinary op _ _ =>
+                                              match op with
+                                              | BEq => _
+                                              | BNe => _
+                                              | BLt => _
+                                              | BGe => _
+                                              | BLtu => _
+                                              | BGeu => _
+                                              end
+                                          | CondNez _ => _
+                                          end);
+                           |};
+                         getMetrics := _
+                       |}).
+            simulate'.
             destruct cond; [destruct op | ];
               simpl in *; simp; repeat (simulate'; simpl_bools; simpl); try reflexivity. }
           { intro V. simpl in *. run1done. }

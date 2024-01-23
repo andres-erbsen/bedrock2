@@ -20,7 +20,8 @@ Arguments env: simpl never.
   Morphisms.Proper
     (Morphisms.respectful
        (Morphisms.pointwise_relation Interface.map.rep
-          (Morphisms.pointwise_relation (list word) Basics.impl))
+          (Morphisms.pointwise_relation (list word)
+             (Morphisms.pointwise_relation (list word) Basics.impl)))
        Basics.impl) (ext_spec trace m0 act args).
 Proof.
   cbn in *.

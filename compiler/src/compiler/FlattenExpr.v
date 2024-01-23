@@ -28,7 +28,6 @@ Section FlattenExpr1.
           {ExprImp_env: map.map string (list string * list string * cmd)}
           {FlatImp_env: map.map string (list string * list string * FlatImp.stmt string)}
           {ext_spec: ExtSpec}
-          {leak_ext: LeakExt}
           {NGstate: Type}
           {NG: NameGen String.string NGstate}
           {locals_ok: map.ok locals}

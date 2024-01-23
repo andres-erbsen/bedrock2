@@ -62,7 +62,6 @@ Section Proofs.
   Context {RVM: Machine.RiscvProgramWithLeakage}.
   Context {PRParams: PrimitivesParams M MetricRiscvMachine}.
   Context {ext_spec: Semantics.ExtSpec}.
-  Context {leak_ext: Semantics.LeakExt}.
   Context {word_riscv_ok: RiscvWordProperties.word.riscv_ok word}.
   Context {locals_ok: map.ok locals}.
   Context {mem_ok: map.ok mem}.

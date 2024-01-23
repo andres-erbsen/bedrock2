@@ -140,7 +140,6 @@ Section WithWordAndMem.
     Context {Zlocals: map.map Z word}
             {string_keyed_map: forall T: Type, map.map string T} (* abstract T for better reusability *)
             {ext_spec: ExtSpec}
-            {leak_ext: LeakExt}
             {word_ok : word.ok word}
             {mem_ok: map.ok mem}
             {string_keyed_map_ok: forall T, map.ok (string_keyed_map T)}

@@ -347,7 +347,6 @@ Section LowerPipeline.
   Context {PRParams: PrimitivesParams M MetricRiscvMachine}.
   Context {PR: MetricPrimitives.MetricPrimitives PRParams}.
   Context {ext_spec: Semantics.ExtSpec}.
-  Context {leak_ext: Semantics.LeakExt}.
   Context {word_riscv_ok: RiscvWordProperties.word.riscv_ok word}.
 
   Definition machine_ok{BWM: bitwidth_iset width iset}

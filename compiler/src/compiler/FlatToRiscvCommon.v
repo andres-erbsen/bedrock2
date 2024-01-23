@@ -89,7 +89,6 @@ Section WithParameters.
   Context {RVM: RiscvProgramWithLeakage}.
   Context {PRParams: PrimitivesParams M MetricRiscvMachine}.
   Context {ext_spec: Semantics.ExtSpec}.
-  Context {leak_ext: Semantics.LeakExt}.
 
   Definition runsTo{BWM: bitwidth_iset width iset}: (* BWM is unused, but makes iset inferrable *)
     MetricRiscvMachine -> (MetricRiscvMachine -> Prop) -> Prop :=
@@ -372,7 +371,6 @@ Section FlatToRiscv1.
   Context {RVM: RiscvProgramWithLeakage}.
   Context {PRParams: PrimitivesParams M MetricRiscvMachine}.
   Context {ext_spec: Semantics.ExtSpec}.
-  Context {leak_ext: Semantics.LeakExt}.
   Context {word_riscv_ok: word.riscv_ok word}.
   Context {locals_ok: map.ok locals}.
   Context {mem_ok: map.ok mem}.
@@ -668,7 +666,7 @@ Section FlatToRiscv1.
       (valid_machine midL -> runsTo midL P) ->
       runsTo initialL P.
   Proof using PR.
- intros.
+    intros.
     eapply runsToStep with (midset := fun m' => m' = midL /\ valid_machine m').
     - eapply run1_get_sane; try eassumption.
       intros. subst. auto.

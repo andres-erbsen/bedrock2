@@ -302,7 +302,6 @@ Module exec.
     Context {mem: map.map word byte} {locals: map.map varname word}
             {env: map.map String.string (list varname * list varname * stmt varname)}.
     Context {ext_spec: ExtSpec}.
-    Context {leak_ext: LeakExt}.
     Context {varname_eq_spec: EqDecider varname_eqb}
             {word_ok: word.ok word}
             {mem_ok: map.ok mem}
@@ -333,11 +332,11 @@ Module exec.
         map.split m mKeep mGive ->
         map.getmany_of_list l argvars = Some argvals ->
         ext_spec t mGive action argvals outcome ->
-        (forall mReceive resvals,
-            outcome mReceive resvals ->
+        (forall mReceive resvals klist,
+            outcome mReceive resvals klist ->
             exists l', map.putmany_of_list_zip resvars resvals l = Some l' /\
             forall m', map.split m' mKeep mReceive ->
-            post (leak_list (leak_ext t mGive action argvals) :: k) (((mGive, action, argvals), (mReceive, resvals)) :: t) m' l'
+            post (leak_list klist :: k) (((mGive, action, argvals), (mReceive, resvals)) :: t) m' l'
                  (addMetricInstructions 1
                  (addMetricStores 1
                  (addMetricLoads 2 mc)))) ->
@@ -642,7 +641,7 @@ Module exec.
                                 post (k'' ++ k1) t' m' l' mc').
     Proof.
       intros H. generalize dependent k2. induction H; intros.
-      - econstructor; intuition eauto. specialize (H2 mReceive resvals H3).
+      - econstructor; intuition eauto. specialize (H2 mReceive resvals klist H3).
         destruct H2 as [l' H2]. exists l'. intuition eauto. eexists [_]. intuition eauto.
       - econstructor; intuition eauto. destruct H4 as [k'' [H4 H5] ].
         specialize (H3 _ _ _ _ _ H5). subst. destruct H3 as [retvs [l' H6] ].
@@ -701,7 +700,6 @@ Section FlatImp2.
   Context {mem: map.map word byte} {locals: map.map varname word}
           {env: map.map String.string (list varname * list varname * stmt varname)}.
   Context {ext_spec: ExtSpec}.
-  Context {leak_ext: LeakExt}.
   Context {varname_eq_spec: EqDecider varname_eqb}
           {word_ok: word.ok word}
           {mem_ok: map.ok mem}

@@ -9,7 +9,6 @@ Section WeakestPrecondition.
   Context {locals: map.map String.string word}.
   Context {env: map.map String.string (list String.string * list String.string * Syntax.cmd)}.
   Context {ext_spec: Semantics.ExtSpec}.
-  Context {leak_ext: Semantics.LeakExt}.
 
   Ltac ind_on X :=
     intros;
@@ -104,11 +103,11 @@ Section WeakestPrecondition.
       { destruct H2 as (?&?&?&?). eexists. eexists. split.
         { eapply Proper_expr; eauto; cbv [pointwise_relation Basics.impl]; eauto. }
         { eapply Proper_store; eauto; cbv [pointwise_relation Basics.impl]; eauto. } } }
-    { eapply IHa; eauto. simpl. intros ? ? ? ? (?&?&?&?&?). eauto 6. }
+    { eapply H1; eauto. simpl. intros ? ? ? ? (?&?&?&?&?). eauto 6. }
     { destruct H1 as (?&?&?&?). eexists. eexists. split.
       { eapply Proper_expr; eauto; cbv [pointwise_relation Basics.impl]; eauto. }
       { intuition eauto. } }
-    { eapply IHa1; eauto. intros. intuition eauto. }
+    { eapply H4; eauto. intros. intuition eauto. }
 
     { destruct H1 as (?&?&?&?&?&HH).
       eassumption || eexists.
@@ -122,7 +121,7 @@ Section WeakestPrecondition.
       1: eapply Proper_expr; eauto.
       1: cbv [pointwise_relation Basics.impl].
       all:intuition eauto 2.
-      - eapply IHa; eauto; cbn; intros.
+      - eapply H2; eauto; cbn; intros.
         match goal with H:_ |- _ => destruct H as (?&?&?); solve[eauto] end.
       - intuition eauto. }
     { destruct H1 as (?&?&?&?). eexists. eexists. split.
@@ -141,7 +140,7 @@ Section WeakestPrecondition.
         exists mKeep. exists mGive.
         split; [assumption|].
         eapply Semantics.ext_spec.weaken; [|solve[eassumption]].
-        intros ? ? (?&?&?); eauto 10. } }
+        intros ? ? ? (?&?&?); eauto 10. } }
   Qed.
 
   Global Instance Proper_func :
@@ -189,12 +188,10 @@ Section WeakestPrecondition.
       cbn in *; intuition (try typeclasses eauto with core).
     destruct a.
     destruct (String.eqb s a1); debug eauto.
-    
     eapply Proper_func;
       cbv [Proper respectful pointwise_relation Basics.flip Basics.impl  WeakestPrecondition.func];
       eauto.
-  Admitted.
-  (*Qed.*)
+  Qed.
   
   Global Instance Proper_program :
     Proper (
@@ -382,17 +379,18 @@ Section WeakestPrecondition.
   Import bedrock2.Syntax bedrock2.Semantics bedrock2.WeakestPrecondition.
   Lemma interact_nomem call action binds arges k t m l post k'
         args (Hargs : dexprs m l k arges args k')
-        (Hext : ext_spec t map.empty binds args (fun mReceive (rets : list word) =>
+        (Hext : ext_spec t map.empty binds args (fun mReceive (rets : list word) klist =>
            mReceive = map.empty /\
            exists l0 : locals, map.putmany_of_list_zip action rets l = Some l0 /\
-           post (leak_list (leak_ext t map.empty binds args) :: k')%list (cons (map.empty, binds, args, (map.empty, rets)) t) m l0))
+           klist = nil (*could make this more general, but probably don't need to*)/\
+           post (leak_list nil :: k')%list (cons (map.empty, binds, args, (map.empty, rets)) t) m l0))
     : WeakestPrecondition.cmd call (cmd.interact action binds arges) k t m l post.
   Proof using word_ok mem_ok ext_spec_ok.
     exists args. exists k'. split; [exact Hargs|].
     exists m.
     exists map.empty.
     split; [eapply Properties.map.split_empty_r; exact eq_refl|].
-    eapply ext_spec.weaken; [|eapply Hext]; intros ? ? [? [? []]]. subst a; subst.
+    eapply ext_spec.weaken; [|eapply Hext]; intros ? ? ? [? [? [? []]]]. subst a; subst.
     eexists; split; [eassumption|].
     intros. eapply Properties.map.split_empty_r in H. subst. assumption.
   Qed.

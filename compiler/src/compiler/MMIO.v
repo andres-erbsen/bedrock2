@@ -281,7 +281,7 @@ Section MMIO1.
     destruct_RiscvMachine initialL.
     unfold FlatToRiscvCommon.goodMachine in *.
     match goal with
-    | H: forall _ _, outcome _ _ -> _ |- _ => specialize H with (mReceive := map.empty)
+    | H: forall _ _ _, outcome _ _ _ -> _ |- _ => specialize H with (mReceive := map.empty)
     end.
     destruct (String.eqb "MMIOWRITE" action) eqn: E;
       cbn [getRegs getPc getNextPc getMem getLog getMachine getMetrics getXAddrs] in *.
@@ -324,7 +324,7 @@ Section MMIO1.
       | H: map.split _ _ map.empty |- _ => rewrite map.split_empty_r in H; subst
       end.
       match goal with
-      | HO: outcome _ _, H: _ |- _ => specialize (H _ HO); rename H into HP
+      | HO: outcome _ _ _, H: _ |- _ => specialize (H _ _ HO); rename H into HP
       end.
       destruct g. FlatToRiscvCommon.simpl_g_get.
       simp.
@@ -532,8 +532,8 @@ Section MMIO1.
 
       unfold mmioLoadEvent, signedByteTupleToReg.
       match goal with
-      | A: forall _, outcome _ _ -> _, OC: forall _, outcome _ _ |- _ =>
-         epose proof (A (cons _ nil) (OC _)) as P; clear A
+      | A: forall _ _, outcome _ _ _ -> _, OC: forall _, outcome _ _ _ |- _ =>
+         epose proof (A (cons _ nil) (cons _ nil) (OC _)) as P; clear A
       end.
       cbn in P.
       simp.

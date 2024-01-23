@@ -17,7 +17,6 @@ Section WithArguments.
   Context {mem :  map.map word (Init.Byte.byte : Type) } {mem_ok: map.ok mem}.
   Context {locals :  map.map string word } {locals_ok: map.ok locals}.
   Context {ext_spec : Semantics.ExtSpec} {ext_spec_ok: Semantics.ext_spec.ok ext_spec}.
-  Context {leak_ext : Semantics.LeakExt}.
   Context (is5BitImmediate : Z -> bool).
   Context (is12BitImmediate  : Z -> bool).
 

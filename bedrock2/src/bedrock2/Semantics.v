@@ -260,8 +260,8 @@ End WithIOEvent. (*maybe extend this to the end?*)
   (* Given a trace of what happened so far,
      the given-away memory, an action label and a list of function call arguments, *)
   io_trace -> mem -> String.string -> list word ->
-  (* and a postcondition on the received memory and function call results, *)
-  (mem -> list word -> Prop) ->
+  (* and a postcondition on the received memory, function call results, and leakage trace, *)
+  (mem -> list word -> list word -> Prop) ->
   (* tells if this postcondition will hold *)
   Prop.
 
@@ -273,7 +273,7 @@ Module ext_spec.
   {
     (* The action name and arguments uniquely determine the footprint of the given-away memory. *)
     unique_mGive_footprint: forall t1 t2 mGive1 mGive2 a args
-                                            (post1 post2: mem -> list word -> Prop),
+                                   (post1 post2: mem -> list word -> list word -> Prop),
         ext_spec t1 mGive1 a args post1 ->
         ext_spec t2 mGive2 a args post2 ->
         map.same_domain mGive1 mGive2;
@@ -282,28 +282,19 @@ Module ext_spec.
         Morphisms.Proper
           (Morphisms.respectful
              (Morphisms.pointwise_relation Interface.map.rep
-               (Morphisms.pointwise_relation (list word) Basics.impl)) Basics.impl)
+                (Morphisms.pointwise_relation (list word)
+                   (Morphisms.pointwise_relation (list word) Basics.impl))) Basics.impl)
           (ext_spec t mGive act args);
 
     intersect: forall t mGive a args
-                      (post1 post2: mem -> list word -> Prop),
+                      (post1 post2: mem -> list word -> list word -> Prop),
         ext_spec t mGive a args post1 ->
         ext_spec t mGive a args post2 ->
-        ext_spec t mGive a args (fun mReceive resvals =>
-                                   post1 mReceive resvals /\ post2 mReceive resvals);
+        ext_spec t mGive a args (fun mReceive resvals klist =>
+                                   post1 mReceive resvals klist /\ post2 mReceive resvals klist);
   }.
 End ext_spec.
 Arguments ext_spec.ok {_ _ _ _} _.
-
-Definition LeakExt {width: Z}{BW: Bitwidth width}{word: word.word width}{mem: map.map word byte} :=
-  (* Given a trace of what happened so far (idk when we'd need this, but why not allow it),
-     the given-away memory, an action label and a list of function call arguments, *)
-  io_trace -> mem -> String.string -> list word ->
-  (* Gives the leakage of this external call. *)
-  list word.
-
-(*IDK if this should be here.*)
-Existing Class LeakExt.
 
 Section binops.
   Context {width : Z} {BW: Bitwidth width} {word : Word.Interface.word width}.
@@ -487,7 +478,6 @@ Module exec. Section WithEnv.
   Context {locals: map.map String.string word}.
   Context {env: map.map String.string (list String.string * list String.string * cmd)}.
   Context {ext_spec: ExtSpec}.
-  Context {leak_ext: LeakExt}.
   Context (e: env).
 
   Local Notation metrics := MetricLog.
@@ -602,10 +592,10 @@ Module exec. Section WithEnv.
       mKeep mGive (_: map.split m mKeep mGive)
       args mc' k' (_ :  evaluate_call_args_log m l arges mc k = Some (args, mc', k'))
       mid (_ : ext_spec t mGive action args mid)
-      (_ : forall mReceive resvals, mid mReceive resvals ->
+      (_ : forall mReceive resvals klist, mid mReceive resvals klist ->
           exists l', map.putmany_of_list_zip binds resvals l = Some l' /\
           forall m', map.split m' mKeep mReceive ->
-          post (leak_list (leak_ext t mGive action args) :: k')%list (((mGive, action, args), (mReceive, resvals)) :: t) m' l'
+          post (leak_list klist :: k')%list (((mGive, action, args), (mReceive, resvals)) :: t) m' l'
             (addMetricInstructions 1
                (addMetricStores 1
                   (addMetricLoads 2 mc'))))
