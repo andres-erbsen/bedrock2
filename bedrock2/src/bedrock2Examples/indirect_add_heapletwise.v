@@ -26,7 +26,7 @@ From coqutil.Tactics Require Import letexists eabstract.
 Require Import bedrock2.ProgramLogic bedrock2.Scalars bedrock2.Array.
 
 Section WithParameters.
-  Context {word: word.word 32} {mem: map.map word Byte.byte} {pick_sp: PickSp}.
+  Context {word: word.word 32} {mem: map.map word Byte.byte}.
   Context {word_ok: word.ok word} {mem_ok: map.ok mem}.
 
   Definition f (a b : word) := word.add (word.add a b) b.
@@ -39,12 +39,12 @@ Section WithParameters.
         (* Note: the surviving frame needs to go last for heapletwise callers to work! *)
         m =* scalar a va * Ra;
       ensures t' m' :=
-        filterio t = filterio t' /\
+        t = t' /\
         m' =* scalar a (word.add vb vc) * Ra }.
   Instance spec_of_indirect_add_twice : spec_of "indirect_add_twice" :=
     fnspec! "indirect_add_twice" a b / va vb R,
     { requires t m := m =* scalar a va * scalar b vb * R;
-      ensures t' m' := filterio t=filterio t' /\ m' =* scalar a (f va vb) * scalar b vb * R }.
+      ensures t' m' := t=t' /\ m' =* scalar a (f va vb) * scalar b vb * R }.
 
   Lemma indirect_add_ok : program_logic_goal_for_function! indirect_add.
   Proof.
@@ -72,7 +72,7 @@ Section WithParameters.
     straightline_call.
     { split; [ecancel_assumption|]. split; ecancel_assumption. }
     repeat straightline.
-    { cbv [f]. split; trace_alignment. ecancel_assumption. }
+    { cbv [f]. ecancel_assumption. }
   Qed.
 
   Example link_both : spec_of_indirect_add_twice (("indirect_add_twice",indirect_add_twice)::("indirect_add",indirect_add)::nil).
@@ -92,7 +92,7 @@ Section WithParameters.
   Instance spec_of_indirect_add_three : spec_of "indirect_add_three" :=
     fnspec! "indirect_add_three" a b c / va vb vc Rb R,
     { requires t m := m =* scalar a va * scalar c vc * R /\ m =* scalar b vb * Rb;
-      ensures t' m' := filterio t=filterio t' /\ m' =* scalar a (g va vb vc) * scalar c vc * R }.
+      ensures t' m' := t=t' /\ m' =* scalar a (g va vb vc) * scalar c vc * R }.
 
   Lemma indirect_add_three_ok : program_logic_goal_for_function! indirect_add_three.
   Proof.
@@ -103,7 +103,7 @@ Section WithParameters.
     straightline_call.
     { split; [ecancel_assumption|]. split; ecancel_assumption. }
     repeat straightline.
-    { cbv [g]. split; trace_alignment. ecancel_assumption. }
+    { cbv [g]. ecancel_assumption. }
   Qed.
 
   Definition indirect_add_three' := func! (out, a, b, c) {
@@ -119,7 +119,7 @@ Section WithParameters.
         m =* scalar a va * Ra /\
         m =* scalar b vb * Rb /\
         m =* scalar c vc * Rc;
-      ensures t' m' := filterio t=filterio t' /\ m' =* scalar out (g va vb vc) * R }.
+      ensures t' m' := t=t' /\ m' =* scalar out (g va vb vc) * R }.
 
   Lemma indirect_add_three'_ok : program_logic_goal_for_function! indirect_add_three'.
   Proof.
@@ -171,16 +171,16 @@ H15 : (scalar a0 (word.add va vb) ⋆ (scalar out vout ⋆ R))%sep a2
     intros. eapply scalar_to_anybytes in H. exact H.
   Qed.
 
-  Lemma sep_call: forall funs f t m args
+  Lemma sep_call: forall funs f k t m args
       (calleePre: Prop)
-      (calleePost callerPost: trace -> mem -> list word -> Prop),
+      (calleePost callerPost: trace -> io_trace -> mem -> list word -> Prop),
       (* definition-site format: *)
-      (calleePre -> call funs f t m args calleePost) ->
+      (calleePre -> call funs f k t m args calleePost) ->
       (* use-site format: *)
       (calleePre /\ enable_frame_trick
-                      (forall t' m' rets, calleePost t' m' rets -> callerPost t' m' rets)) ->
+                      (forall k' t' m' rets, calleePost k' t' m' rets -> callerPost k' t' m' rets)) ->
       (* conclusion: *)
-      call funs f t m args callerPost.
+      call funs f k t m args callerPost.
   Proof.
     intros. destruct H0. eapply WeakestPreconditionProperties.Proper_call; eauto.
   Qed.
@@ -194,7 +194,7 @@ H15 : (scalar a0 (word.add va vb) ⋆ (scalar out vout ⋆ R))%sep a2
 
   Ltac straightline_call ::=
     lazymatch goal with
-    | |- WeakestPrecondition.call ?functions ?callee _ _ _ _ =>
+    | |- WeakestPrecondition.call ?functions ?callee _ _ _ _ _ =>
         let callee_spec := lazymatch constr:(_:spec_of callee) with ?s => s end in
         let Hcall := lazymatch goal with H: callee_spec functions |- _ => H end in
         eapply sep_call; [ eapply Hcall | ]
@@ -259,7 +259,6 @@ but that rest can be split in 4 different ways:
     clear Di.
     repeat step.
     unfold g.
-    split; trace_alignment.
     repeat step.
   Qed.
 
@@ -269,7 +268,7 @@ but that rest can be split in 4 different ways:
   Instance spec_of_indirect_add_gen : spec_of "indirect_add" :=
     fnspec! "indirect_add" a b c / va Ra vb Rb vc Rc,
     { requires t m := m =* scalar a va * Ra /\ m =* scalar b vb * Rb /\ m =* scalar c vc * Rc;
-      ensures t' m' := filterio t=filterio t' /\
+      ensures t' m' := t=t' /\
         forall va Ra, m =* scalar a va * Ra -> m' =* scalar a (word.add vb vc) * Ra }.
 
   Lemma indirect_add_gen_ok : program_logic_goal_for_function! indirect_add.

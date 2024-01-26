@@ -24,14 +24,13 @@ Local Notation "xs $@ a" := (Array.array ptsto (word.of_Z 1) a xs) (at level 10,
 Section WithParameters.
   Context {width} {BW: Bitwidth width}.
   Context {word: word.word width} {mem: map.map word byte} {locals: map.map string word}.
-  Context {pick_sp: PickSp}.
   Context {ext_spec: ExtSpec}.
   Import ProgramLogic.Coercions.
 
   Global Instance spec_of_memconst ident bs : spec_of "memconst" :=
     fnspec! ident (p : word) / (ds : list byte) (R : mem -> Prop),
     { requires t m := m =* ds$@p * R /\ length ds = length bs :>Z /\ length bs < 2^width ;
-      ensures t' m := m =* bs$@p * R /\ filterio t=filterio t' }.
+      ensures t' m := m =* bs$@p * R /\ t=t' }.
 
   Context {word_ok: word.ok word} {mem_ok: map.ok mem} {locals_ok : map.ok locals}
     {env : map.map string (list string * list string * Syntax.cmd)} {env_ok : map.ok env}
@@ -53,9 +52,9 @@ Section WithParameters.
       (HList.polymorphic_list.cons _
       HList.polymorphic_list.nil))
       ["p";"i"])
-      (fun (n:nat) (ds : list byte) R t m p i => PrimitivePair.pair.mk (
+      (fun (n:nat) (ds : list byte) R k t m p i => PrimitivePair.pair.mk (
         m =* ds$@p * R /\ i + n = length bs :> Z /\ length ds = n)
-      (fun              T M P N => filterio t = filterio T /\ M =* (List.skipn (Z.to_nat i) bs)$@p * R))
+      (fun              K T M P N => t = T /\ M =* (List.skipn (Z.to_nat i) bs)$@p * R))
       lt
       _ _ _ _ _ _ _);
       (* TODO wrap this into a tactic with the previous refine *)
@@ -70,12 +69,12 @@ Section WithParameters.
       subst l l0.
       repeat (rewrite ?map.get_put_dec, ?map.get_remove_dec; cbn); split.
       { exact eq_refl. }
-      { eapply map.map_ext; intros k.
+      { eapply map.map_ext; intros k0.
         repeat (rewrite ?map.get_put_dec, ?map.get_remove_dec, ?map.get_empty; cbn -[String.eqb]).
         repeat (destruct String.eqb; trivial). } }
     { eapply Wf_nat.lt_wf. }
     { ssplit; eauto; ZnWords. }
-    { intros ?n ?ds ?R ?t ?m ?p ?i.
+    { intros ?n ?ds ?R ?k ?t ?m ?p ?i.
       repeat straightline.
       cbn in localsmap.
       eexists; eexists; split; cbv [dexpr expr expr_body localsmap get].

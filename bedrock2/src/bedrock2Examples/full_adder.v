@@ -17,8 +17,6 @@ From bedrock2 Require Import WeakestPrecondition ProgramLogic BasicC64Semantics.
 Import coqutil.Word.Interface.
 Require Import bedrock2.ZnWords.
 
-Context {pick_sp: Semantics.PickSp}. (* is there a better place to put this?*)
-
 Local Instance spec_of_add_with_carry : spec_of "add_with_carry" :=
   fnspec! "add_with_carry" x y carry ~> sum carry_out,
     { (* The required upper bound on `carry` isn't necessary for the

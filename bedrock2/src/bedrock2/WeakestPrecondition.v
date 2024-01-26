@@ -172,16 +172,16 @@ End WeakestPrecondition.
 Check @cmd_body.
 Ltac unfold1_cmd e :=
   lazymatch e with
-    @cmd ?width ?BW ?word ?mem ?locals ?ext_spec ?leak_ext ?CA ?c ?k ?t ?m ?l ?post =>
+    @cmd ?width ?BW ?word ?mem ?locals ?ext_spec ?CA ?c ?k ?t ?m ?l ?post =>
     let c := eval hnf in c in
-    constr:(@cmd_body width BW word mem locals ext_spec leak_ext CA
-                      (@cmd width BW word mem locals ext_spec leak_ext CA) c k t m l post)
+    constr:(@cmd_body width BW word mem locals ext_spec CA
+                      (@cmd width BW word mem locals ext_spec CA) c k t m l post)
   end.
 Ltac unfold1_cmd_goal :=
   let G := lazymatch goal with |- ?G => G end in
   let G := unfold1_cmd G in
   change G.
-Check @expr. Check @expr_body.
+
 Ltac unfold1_expr e :=
   lazymatch e with
     @expr ?width ?BW ?word ?mem ?locals ?m ?l ?k ?arg ?post =>
@@ -203,7 +203,6 @@ Ltac unfold1_list_map_goal :=
   let G := lazymatch goal with |- ?G => G end in
   let G := unfold1_list_map G in
   change G.
-Check @list_map'. Check @list_map'_body.
 
 Ltac unfold1_list_map' e :=
   lazymatch e with
@@ -215,13 +214,13 @@ Ltac unfold1_list_map'_goal :=
   let G := lazymatch goal with |- ?G => G end in
   let G := unfold1_list_map' G in
   change G.
-Check @call. Check @call_body.
+
 Ltac unfold1_call e :=
   lazymatch e with
-    @call ?width ?BW ?word ?mem ?locals ?ext_spec ?leak_ext ?fs ?fname ?k ?t ?m ?l ?post =>
+    @call ?width ?BW ?word ?mem ?locals ?ext_spec ?fs ?fname ?k ?t ?m ?l ?post =>
     let fs := eval hnf in fs in
-    constr:(@call_body width BW word mem locals ext_spec leak_ext
-                       (@call width BW word mem locals ext_spec leak_ext) fs fname k t m l post)
+    constr:(@call_body width BW word mem locals ext_spec
+                       (@call width BW word mem locals ext_spec) fs fname k t m l post)
   end.
 Ltac unfold1_call_goal :=
   let G := lazymatch goal with |- ?G => G end in
@@ -240,7 +239,7 @@ Notation "'fnspec!' name a0 .. an '/' g0 .. gn '~>' r0 .. rn ',' '{' 'requires' 
                              pre ->
                              WeakestPrecondition.call
                                functions name k tr mem (cons a0 .. (cons an nil) ..)
-                               (fun tr' mem' rets =>
+                               (fun k' tr' mem' rets =>
                                   (exists r0,
                                       .. (exists rn,
                                             rets = (cons r0 .. (cons rn nil) ..) /\
@@ -399,7 +398,7 @@ Notation "'fnspec!' name a0 .. an '~>' r0 .. rn ',' '{' 'requires' tr mem := pre
                    pre ->
                    WeakestPrecondition.call
                      functions name k tr mem (cons a0 .. (cons an nil) ..)
-                     (fun tr' mem' rets =>
+                     (fun k' tr' mem' rets =>
                         (exists r0,
                             .. (exists rn,
                                   rets = (cons r0 .. (cons rn nil) ..) /\

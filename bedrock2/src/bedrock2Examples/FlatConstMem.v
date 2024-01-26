@@ -28,7 +28,7 @@ Require Import coqutil.Tactics.rewr.
 Require Import AdmitAxiom.
 
 Section WithParameters.
-  Context {word: word.word 32} {mem: map.map word Byte.byte} {pick_sp: PickSp}.
+  Context {word: word.word 32} {mem: map.map word Byte.byte}.
   Context {word_ok: word.ok word} {mem_ok: map.ok mem}.
   Add Ring wring : (Properties.word.ring_theory (word := word))
         (preprocess [autorewrite with rew_word_morphism],
@@ -36,10 +36,10 @@ Section WithParameters.
          constants [Properties.word_cst]).
 
   Local Instance spec_of_silly1 : spec_of "silly1" := fun functions =>
-      forall t m a bs R, Z.of_nat (length bs) = 32 ->
+      forall k t m a bs R, Z.of_nat (length bs) = 32 ->
       (sep (eq (map.of_list_word_at a bs)) R) m ->
-      WeakestPrecondition.call functions "silly1" t m [a]
-      (fun T M rets => True).
+      WeakestPrecondition.call functions "silly1" k t m [a]
+      (fun K T M rets => True).
 
   Ltac ring_simplify_unsigned_goal :=
     match goal with

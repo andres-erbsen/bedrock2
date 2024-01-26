@@ -46,7 +46,7 @@ Require Import coqutil.Tactics.Tactics.
 Local Ltac invert H := inversion H; clear H.
 
 Section WithParameters.
-  Context {word: word.word 32} {mem: map.map word Byte.byte} {pick_sp: PickSp}.
+  Context {word: word.word 32} {mem: map.map word Byte.byte}.
   Context {word_ok: word.ok word} {mem_ok: map.ok mem}.
   Import ProgramLogic.Coercions.
   Local Number Notation nat Nat.of_num_uint Nat.to_num_hex_uint (abstract after 5001) : core_scope.
@@ -65,7 +65,7 @@ Section WithParameters.
         m =*  array32 ps s * R /\ length s = 4;
       ensures T M := exists s,
         M =*  array32 ps s * R /\ length s = 4 /\
-        (filterio T) = (filterio t) /\ 2^128*c + eval s = eval a + eval b }.
+        T = t /\ 2^128*c + eval s = eval a + eval b }.
 
   Lemma ltu_as_carry (a b : word)
     (s : word := word.add a b)

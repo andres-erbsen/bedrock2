@@ -12,9 +12,9 @@ Existing Class spec_of.
 Existing Class ct_spec_of.*)
 
 (* not sure where to put these lemmas *)
-Lemma align_trace_cons {T} x xs cont t (H : xs = app cont t) : @cons T x xs = app (cons x cont) t.
+Lemma align_trace_cons {T} x xs cont t (H : xs = List.app cont t) : @List.cons T x xs = List.app (cons x cont) t.
 Proof. intros. cbn. congruence. Qed.
-Lemma align_trace_app {T} x xs cont t (H : xs = app cont t) : @app T x xs = app (app x cont) t.
+Lemma align_trace_app {T} x xs cont t (H : xs = List.app cont t) : @List.app T x xs = List.app (List.app x cont) t.
 Proof. intros. cbn. subst. rewrite List.app_assoc; trivial. Qed.
 
 Ltac trace_alignment :=
@@ -22,8 +22,8 @@ Ltac trace_alignment :=
       | t := cons _ _ |- _ => subst t
       end;
     repeat (eapply align_trace_app
-      || eapply align_trace_cons
-      || exact (eq_refl (app nil _))).
+            || eapply align_trace_cons
+            || exact (eq_refl (List.app nil _))).
 
 Module Import Coercions.
   Import Map.Interface Word.Interface BinInt.

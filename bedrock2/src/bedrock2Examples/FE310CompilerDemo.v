@@ -25,7 +25,7 @@ Definition uart0_rxdata := 0x10013004. Definition uart0_txdata  := 0x10013000.
 #[global] Instance mem: Interface.map.map word Byte.byte := SortedListWord.map _ _.
 #[global] Instance locals: Interface.map.map String.string word := SortedListString.map _.
 #[global] Instance env: Interface.map.map String.string (list String.string * list String.string * cmd) :=
-  SortedListString.map _.
+  SortedListString.map _. Check exec.interact. Search word.unsigned.
 
 #[global] Instance ext_spec: ExtSpec :=
   fun t mGive action args post =>
@@ -38,19 +38,17 @@ Definition uart0_rxdata := 0x10013004. Definition uart0_txdata  := 0x10013000.
       if (uart0_base <=? addr) && (addr <? uart0_pastend) then True else
       False )
       /\ addr mod 4 = 0
-      /\ forall v, post Map.Interface.map.empty [v]
+      /\ forall v, post Map.Interface.map.empty [v] [word.of_Z addr]
     | MMOutput, [addr; value] => (
       if addr =? hfrosccfg                                then True else
       if (gpio0_base <=? addr) && (addr <? gpio0_pastend) then True else
       if (uart0_base <=? addr) && (addr <? uart0_pastend) then True else
       False )
       /\ addr mod 4 = 0
-      /\ post Map.Interface.map.empty []
+      /\ post Map.Interface.map.empty [] [word.of_Z addr]
     | _, _ =>
       False
     end%list%bool.
-
-Context {pick_sp: PickSp}.
 
 Require Import bedrock2.NotationsCustomEntry.
 
@@ -127,7 +125,7 @@ From coqutil Require Import Z.div_mod_to_equations.
 
 Ltac t :=
   match goal with
-  | |- WeakestPrecondition.cmd _ (cmd.interact _ _ _) _ _ _ _ => eexists; eexists; split; [solve[repeat straightline]|]
+  | |- WeakestPrecondition.cmd _ (cmd.interact _ _ _) _ _ _ _ _ => eexists; eexists; split; [solve[repeat straightline]|]
   | |- map.split _ _ _ => eapply Properties.map.split_empty_r; reflexivity
   | H: map.of_list_zip ?ks ?vs = Some ?m |- _ => cbn in H; injection H; clear H; intro H; symmetry in H
   | H: map.putmany_of_list_zip ?ks ?vs ?m0 = Some ?m |- _ => cbn in H; injection H; clear H; intro H; symmetry in H
@@ -158,14 +156,14 @@ Local Instance mapok: map.ok mem := SortedListWord.ok Naive.word32 _.
 
 Local Instance wordok: word.ok word := Naive.word32_ok.
 
-Lemma swap_chars_over_uart_correct m :
-  WeakestPrecondition.cmd (fun _ _ _ _ _ => False) swap_chars_over_uart nil m map.empty
-  (fun t m l => True).
+Lemma swap_chars_over_uart_correct k m :
+  WeakestPrecondition.cmd (fun _ _ _ _ _ _ => False) swap_chars_over_uart k nil m map.empty
+  (fun k t m l => True).
 Proof.
   repeat t.
-  eexists _, _, (fun v t _ l => exists p, map.of_list_zip ["running"; "prev"; "one"; "dot"]%string [v; p; word.of_Z(1); word.of_Z(46)] = Some l ); repeat t.
-  eexists _, _, (fun v t _ l => exists rxv, map.putmany_of_list_zip ["polling"; "rx"]%string [v; rxv] l0 = Some l); repeat t.
-  eexists _, _, (fun v t _ l => exists txv, map.putmany_of_list_zip ["polling"; "tx"]%string [v; txv] l0 = Some l); repeat t.
+  eexists _, _, (fun v _ t _ l => exists p, map.of_list_zip ["running"; "prev"; "one"; "dot"]%string [v; p; word.of_Z(1); word.of_Z(46)] = Some l ); repeat t.
+  eexists _, _, (fun v _ t _ l => exists rxv, map.putmany_of_list_zip ["polling"; "rx"]%string [v; rxv] l0 = Some l); repeat t.
+  eexists _, _, (fun v _ t _ l => exists txv, map.putmany_of_list_zip ["polling"; "tx"]%string [v; txv] l0 = Some l); repeat t.
   eexists; eexists; split; repeat t.
 Defined.
 
@@ -242,17 +240,17 @@ Definition echo_server: cmd :=
     }
   ).
 
-Lemma echo_server_correct m :
-  WeakestPrecondition.cmd (fun _ _ _ _ _ => False) echo_server nil m map.empty
-  (fun t m l => echo_server_spec (filterio t) None).
+Lemma echo_server_correct k m :
+  WeakestPrecondition.cmd (fun _ _ _ _ _ _ => False) echo_server k nil m map.empty
+  (fun k t m l => echo_server_spec t None).
 Proof.
   repeat t.
-  eexists _, _, (fun v t _ l => map.of_list_zip ["running"; "one"]%string [v; word.of_Z(1)] = Some l /\ echo_server_spec (filterio t) None ); repeat t.
+  eexists _, _, (fun v _ t _ l => map.of_list_zip ["running"; "one"]%string [v; word.of_Z(1)] = Some l /\ echo_server_spec t None ); repeat t.
   { repeat split. admit. (* hfrosccfg*) }
-  eexists _, _, (fun v t _ l => exists rxv, map.putmany_of_list_zip ["polling"; "rx"]%string [v; rxv] l0 = Some l /\
+  eexists _, _, (fun v _ t _ l => exists rxv, map.putmany_of_list_zip ["polling"; "rx"]%string [v; rxv] l0 = Some l /\
                                             if Z.eq_dec (word.unsigned (word.and rxv (word.of_Z (2^31)))) 0
-                                            then echo_server_spec (filterio t) (Some rxv)
-                                            else echo_server_spec (filterio t) None); repeat t.
+                                            then echo_server_spec t (Some rxv)
+                                            else echo_server_spec t None); repeat t.
   { match goal with |- if ?D then _ else _ => destruct D end; cbn [Z.eq_dec echo_server_spec ].
     all: try rewrite e, ?Bool.andb_true_r.
     all: repeat match goal with |- if _ then ?A else ?B => change A end.

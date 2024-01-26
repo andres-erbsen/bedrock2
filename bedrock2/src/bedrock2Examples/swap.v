@@ -311,9 +311,7 @@ in the assembly-level trace.
       eexists. split.
       { subst k'. instantiate (1 := [_; _; _]). reflexivity. }
       Check word.eqb. Check (fun x => _ _ aleak_bool ((word.unsigned x) =? 0)).
-      (*instantiate (1 := (aleak_bool (negb (word.unsigned x =? 0)) _)).*)
-      simpl. cbv [leak_ext]. replace (String.eqb _ _) with false by reflexivity.
-      replace (String.eqb _ _) with true by reflexivity.
+      simpl.
       instantiate (1 := fun x => _). simpl.
       constructor. constructor.
       instantiate (1 := (aleak_bool (negb (word.unsigned x =? 0)) _)).
@@ -324,9 +322,7 @@ in the assembly-level trace.
       eexists. split.
       { subst k'0 k'. instantiate (1 := [_; _; _]). reflexivity. }
       Check word.eqb. Check (fun x => aleak_bool ((word.unsigned x) =? 0) _).
-      simpl. cbv [leak_ext].
-      replace (String.eqb _ _) with false by reflexivity.
-      replace (String.eqb _ _) with true by reflexivity.
+      simpl.
       rewrite <- Z.eqb_eq in H3. rewrite H3. constructor. constructor. constructor. constructor. } 
   Qed.
 End WithParameters.

@@ -32,14 +32,13 @@ Local Open Scope word_scope.
 From bedrock2 Require Import Semantics BasicC64Semantics.
 
 Import HList List.
-Context {pick_sp: PickSp}. (* why do we need this here?  where is it supposed to be? *)
 #[export] Instance spec_of_bsearch : spec_of "bsearch"%string := fun functions =>
-  forall left right target xs R t m,
+  forall left right target xs R k t m,
     sep (array scalar (word.of_Z 8) left xs) R m ->
     \_ (right ^- left) = 8*Z.of_nat (Datatypes.length xs) ->
     WeakestPrecondition.call functions
-      "bsearch"%string t m (left::right::target::nil)%list
-      (fun t' m' rets => (filterio t)=(filterio t') /\ sep (array scalar (word.of_Z 8) left xs) R m' /\ exists i, rets = (i::nil)%list /\
+      "bsearch"%string k t m (left::right::target::nil)%list
+      (fun k' t' m' rets => t=t' /\ sep (array scalar (word.of_Z 8) left xs) R m' /\ exists i, rets = (i::nil)%list /\
       ((*sorted*)False -> True)
       ).
 
@@ -54,11 +53,11 @@ Proof.
 
   refine (
     tailrec (HList.polymorphic_list.cons _ (HList.polymorphic_list.cons _ HList.polymorphic_list.nil)) ("left"::"right"::"target"::nil)%list%string
-        (fun l xs R t m left right target => PrimitivePair.pair.mk
+        (fun l xs R k t m left right target => PrimitivePair.pair.mk
                                                (sep (array scalar (word.of_Z 8) left xs) R m /\
                                                 \_ (right ^- left) = 8*Z.of_nat (Datatypes.length xs) /\
                                                 List.length xs = l)
-        (fun        T M LEFT RIGHT TARGET => (filterio T) = (filterio t) /\ sep (array scalar (word.of_Z 8) left xs) R M))
+        (fun        K T M LEFT RIGHT TARGET => T = t /\ sep (array scalar (word.of_Z 8) left xs) R M))
         lt _ _ _ _ _ _ _);
     cbn [reconstruct map.putmany_of_list HList.tuple.to_list
          HList.hlist.foralls HList.tuple.foralls
@@ -93,7 +92,7 @@ Proof.
       { ZnWords. }
       { ZnWords. }
       { trivial. }
-      { split; try trace_alignment. SeparationLogic.ecancel_assumption. } }
+      { SeparationLogic.ecancel_assumption. } }
     (* second branch of the if, very similar goals... *)
     { repeat letexists. split.
       1:split.
@@ -108,7 +107,7 @@ Proof.
       { ZnWords. }
       { ZnWords. }
       { ZnWords. }
-      { split; try trace_alignment. SeparationLogic.ecancel_assumption. } } }
+      { SeparationLogic.ecancel_assumption. } } }
   repeat straightline.
   repeat apply conj; auto; []. (* postcondition *)
   letexists. split.

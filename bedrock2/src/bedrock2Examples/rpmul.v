@@ -19,11 +19,9 @@ Definition rpmul := func! (x, e) ~> ret {
 From bedrock2 Require Import Semantics BasicC32Semantics WeakestPrecondition ProgramLogic.
 From coqutil Require Import Word.Properties Word.Interface Tactics.letexists.
 
-Context {pick_sp: PickSp}.
-
 #[export] Instance spec_of_rpmul : spec_of "rpmul" := fnspec! "rpmul" x e ~> v,
   { requires t m := True;
-    ensures t' m' := (filterio t)=(filterio t') /\ m=m' /\
+    ensures t' m' := t=t' /\ m=m' /\
       (* TODO could be expressed as just word.mul *)
       word.unsigned v = word.unsigned x * word.unsigned e mod 2^32 }.
 
@@ -51,8 +49,8 @@ Proof.
   refine ((Loops.tailrec
     (* types of ghost variables*) HList.polymorphic_list.nil
     (* program variables *) (["e";"ret";"x"] : list String.string))
-    (fun v t m e ret x => PrimitivePair.pair.mk (v = word.unsigned e) (* precondition *)
-    (fun   T M E RET X => (filterio T) = (filterio t) /\ M = m /\ (* postcondition *)
+    (fun v k t m e ret x => PrimitivePair.pair.mk (v = word.unsigned e) (* precondition *)
+    (fun   K T M E RET X => T = t /\ M = m /\ (* postcondition *)
         word.unsigned RET = (word.unsigned ret + word.unsigned x * word.unsigned e) mod 2^32))
     (fun n m => 0 <= n < m) (* well_founded relation *)
     _ _ _ _ _);

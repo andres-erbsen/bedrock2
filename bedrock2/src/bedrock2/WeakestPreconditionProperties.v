@@ -377,20 +377,19 @@ Section WeakestPrecondition.
   (** Ad-hoc lemmas here? *)
 
   Import bedrock2.Syntax bedrock2.Semantics bedrock2.WeakestPrecondition.
-  Lemma interact_nomem call action binds arges k t m l post k'
+  Lemma interact_nomem call action binds arges (*fk*) k t m l post k'
         args (Hargs : dexprs m l k arges args k')
         (Hext : ext_spec t map.empty binds args (fun mReceive (rets : list word) klist =>
            mReceive = map.empty /\
            exists l0 : locals, map.putmany_of_list_zip action rets l = Some l0 /\
-           klist = nil (*could make this more general, but probably don't need to*)/\
-           post (leak_list nil :: k')%list (cons (map.empty, binds, args, (map.empty, rets)) t) m l0))
+           post (leak_list klist :: k')%list (cons (map.empty, binds, args, (map.empty, rets)) t) m l0))
     : WeakestPrecondition.cmd call (cmd.interact action binds arges) k t m l post.
   Proof using word_ok mem_ok ext_spec_ok.
     exists args. exists k'. split; [exact Hargs|].
     exists m.
     exists map.empty.
     split; [eapply Properties.map.split_empty_r; exact eq_refl|].
-    eapply ext_spec.weaken; [|eapply Hext]; intros ? ? ? [? [? [? []]]]. subst a; subst.
+    eapply ext_spec.weaken; [|eapply Hext]; intros ? ? ? [? [? []]]. subst a; subst.
     eexists; split; [eassumption|].
     intros. eapply Properties.map.split_empty_r in H. subst. assumption.
   Qed.

@@ -19,7 +19,6 @@ Section WithParameters.
   Context {width} {BW: Bitwidth width}.
   Context {word: word.word width} {mem: map.map word byte} {locals: map.map string word}.
   Context {ext_spec: ExtSpec}.
-  Context {pick_sp: PickSp}.
   Import ProgramLogic.Coercions.
 
 
@@ -27,7 +26,7 @@ Section WithParameters.
     fnspec! "memmove" (dst src n : word) / (d s : list byte) (R Rs : mem -> Prop),
     { requires t m := m =* s$@src * Rs /\ m =* d$@dst * R /\
         length s = n :> Z /\ length d = n :> Z /\ n <= 2^(width-1);
-      ensures t' m := m =* s$@dst * R /\ (filterio t)=(filterio t') }.
+      ensures t' m := m =* s$@dst * R /\ t=t' }.
 
 
   Definition memmove := func! (dst, src, n) {
@@ -89,7 +88,7 @@ Section WithParameters.
       cbn; ssplit; eauto.
       eexists _, _; ssplit; eauto.
       eapply map.split_same_footprint; eauto.
-      intros k.
+      intros k0.
       rewrite 2map.get_of_list_word_at, 2List.nth_error_None.
       Morphisms.f_equiv. ZnWords. }
 
@@ -117,11 +116,11 @@ Section WithParameters.
         (HList.polymorphic_list.cons _
         HList.polymorphic_list.nil))))
         ["dst";"src";"n";"x"])
-        (fun (v:nat) s mRs d mRd t m dst src n _x => PrimitivePair.pair.mk (
+        (fun (v:nat) s mRs d mRd k t m dst src n _x => PrimitivePair.pair.mk (
           x + n < 2^width /\ map.split m (s$@src) mRs /\  map.split m (d$@dst) mRd /\
           x = word.sub src dst /\ v=n :> Z /\ length s = n :> Z /\ length d = n :> Z
         )
-        (fun                     T M DST SRC N X => (filterio t) = (filterio T)   /\  map.split M (s$@dst) mRd))
+        (fun                     K T M DST SRC N X => t = T   /\  map.split M (s$@dst) mRd))
         lt
         _ _ _ _ _ _ _ _ _);
         (* TODO wrap this into a tactic with the previous refine *)
@@ -136,15 +135,15 @@ Section WithParameters.
           subst l l0.
           repeat (rewrite ?map.get_put_dec, ?map.get_remove_dec; cbn); split.
           { exact eq_refl. }
-          { eapply map.map_ext; intros k.
+          { eapply map.map_ext; intros k0.
             repeat (rewrite ?map.get_put_dec, ?map.get_remove_dec, ?map.get_empty; cbn -[String.eqb]).
             repeat (destruct String.eqb; trivial). } }
         { eapply Wf_nat.lt_wf. }
         { cbn; ssplit; eauto. }
-        { intros ?v ?s ?mRs ?d ?mRd ?t ?m ?dst ?src ?n ?x.
+        { intros ?v ?s ?mRs ?d ?mRd ?k ?t ?m ?dst ?src ?n ?x.
           repeat straightline.
           cbn in localsmap.
-          eexists n0. eexists t0. split; cbv [dexpr expr expr_body localsmap get].
+          eexists n0. eexists k0. split; cbv [dexpr expr expr_body localsmap get].
           { rewrite ?Properties.map.get_put_dec. exists n0; cbn. auto. }
           split; cycle 1.
           { intros Ht; rewrite Ht in *.
@@ -254,12 +253,12 @@ Section WithParameters.
         (HList.polymorphic_list.cons _
         HList.polymorphic_list.nil))))
         ["dst";"src";"n";"x"])
-        (fun (v:nat) s mRs d mRd t m dst src n _x => PrimitivePair.pair.mk (
+        (fun (v:nat) s mRs d mRd k t m dst src n _x => PrimitivePair.pair.mk (
           n <= x /\ map.split m (s$@(word.sub src (word.sub n (word.of_Z 1)))) mRs /\
                     map.split m (d$@(word.sub dst (word.sub n (word.of_Z 1)))) mRd /\
           x = word.sub src dst /\ v=n :> Z /\ length s = n :> Z /\ length d = n :> Z
         )
-        (fun                     T M DST SRC N X => (filterio t) = (filterio T)   /\  map.split M (s$@(word.sub dst (word.sub n (word.of_Z 1)))) mRd))
+        (fun                     K T M DST SRC N X => t = T   /\  map.split M (s$@(word.sub dst (word.sub n (word.of_Z 1)))) mRd))
         lt
         _ _ _ _ _ _ _ _ _);
         (* TODO wrap this into a tactic with the previous refine *)
@@ -274,15 +273,15 @@ Section WithParameters.
           subst l l0 l1 l2.
           repeat (rewrite ?map.get_put_dec, ?map.get_remove_dec; cbn); split.
           { exact eq_refl. }
-          { eapply map.map_ext; intros k.
+          { eapply map.map_ext; intros k0.
             repeat (rewrite ?map.get_put_dec, ?map.get_remove_dec, ?map.get_empty; cbn -[String.eqb]).
             repeat (destruct String.eqb; trivial). } }
         { eapply Wf_nat.lt_wf. }
         { cbn. subst v0 v. rewrite !word.word_sub_add_l_same_r. ssplit; eauto. ZnWords. }
-        { intros ?v ?s ?mRs ?d ?mRd ?t ?m ?dst ?src ?n ?x.
+        { intros ?v ?s ?mRs ?d ?mRd ?k ?t ?m ?dst ?src ?n ?x.
           repeat straightline.
           cbn in localsmap.
-          eexists n0; eexists t0; split; cbv [dexpr expr expr_body localsmap get].
+          eexists n0; eexists k0; split; cbv [dexpr expr expr_body localsmap get].
           { rewrite ?Properties.map.get_put_dec. exists n0; cbn. auto. }
           split; cycle 1.
           { intros Ht; rewrite Ht in *.
@@ -385,7 +384,7 @@ Section WithParameters.
     fnspec! "memmove" (dst src n : word) / (d s : list byte) (R Rs : mem -> Prop),
     { requires t m := m =* s$@src * Rs /\ m =* d$@dst * R /\
         length s = n :> Z /\ length d = n :> Z /\ n <= 2^(width-1);
-      ensures t' m := m =* s$@dst * R /\ (filterio t)=(filterio t') }.
+      ensures t' m := m =* s$@dst * R /\ t=t' }.
 
   Lemma memmove_ok_array : program_logic_goal_for_function! memmove.
   Proof.
@@ -397,7 +396,7 @@ Section WithParameters.
       - seprewrite_in_by @ptsto_bytes.array1_iff_eq_of_list_word_at H ZnWords; eassumption.
       - trivial.
       - trivial. }
-    { intros ? ? ? ?. intuition idtac.
+    { intros ? ? ? ? ?. intuition idtac.
       seprewrite_in_by (symmetry! @ptsto_bytes.array1_iff_eq_of_list_word_at) H2 ZnWords; eassumption. }
   Qed.
 End WithParameters.

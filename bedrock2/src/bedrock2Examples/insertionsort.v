@@ -37,7 +37,7 @@ Require Import bedrock2.ZnWords.
 Require Import coqutil.Sorting.Permutation.
 
 Section WithParameters.
-  Context {word: word.word 32} {mem: map.map word Byte.byte} {pick_sp: PickSp}.
+  Context {word: word.word 32} {mem: map.map word Byte.byte}.
   Context {word_ok: word.ok word} {mem_ok: map.ok mem}.
 
   Definition nth(l: list word)(n: nat): word := List.nth n l (word.of_Z 0).
@@ -203,7 +203,7 @@ Section WithParameters.
   Instance spec_of_insertionsort : spec_of "insertionsort" :=
     fnspec! "insertionsort" addr n / xs R,
     { requires t m := n = word.of_Z (Z.of_nat (List.length xs)) /\ (array scalar32 (word.of_Z 4) addr xs * R) m;
-      ensures t' m' := (filterio t) = (filterio t') /\ exists ys,
+      ensures t' m' := t = t' /\ exists ys,
             Sorted ys /\ Permutation xs ys /\ (array scalar32 (word.of_Z 4) addr ys * R) m' }.
 
   Definition sorted_except(unsortedLen: nat)(addr: word)(xs: list word)(m: mem)(R: mem -> Prop): Prop :=
@@ -222,12 +222,12 @@ Section WithParameters.
 
     refine (tailrec HList.polymorphic_list.nil
         ["a"; "i"; "n"]
-        (fun unsortedLen t m a i n => PrimitivePair.pair.mk
+        (fun unsortedLen k t m a i n => PrimitivePair.pair.mk
           (Z.of_nat (List.length xs) = word.unsigned n /\
            word.unsigned i + Z.of_nat unsortedLen = word.unsigned n /\
            a = addr /\
            sorted_except unsortedLen addr xs m R)
-          (fun T M A I N => (filterio T) = (filterio t) /\ sorted_except 0 addr xs M R))
+          (fun K T M A I N => T = t /\ sorted_except 0 addr xs M R))
         lt _ (List.length xs) _ _ _);
     cbn [reconstruct map.putmany_of_list HList.tuple.to_list
          HList.hlist.foralls HList.tuple.foralls
@@ -289,14 +289,14 @@ Section WithParameters.
       refine (tailrec (HList.polymorphic_list.cons _ (HList.polymorphic_list.cons _
                       (HList.polymorphic_list.cons _ HList.polymorphic_list.nil)))
           ["a"; "i"; "j"; "n"; "t"]
-          (fun remSortedLen seenSorted remSorted R t m a i0 j n0 e0 => PrimitivePair.pair.mk
+          (fun remSortedLen seenSorted remSorted R k t m a i0 j n0 e0 => PrimitivePair.pair.mk
             (List.length remSorted = remSortedLen /\
              i0 = i /\ a = addr /\ n0 = n /\ e0 = e /\ sorted = seenSorted ++ remSorted /\
              word.unsigned j + Z.of_nat remSortedLen = word.unsigned i /\
              (forall k: nat, (k < List.length seenSorted)%nat -> word.unsigned (nth sorted k) <= word.unsigned e) /\
              (array scalar32 (word.of_Z 4) (word.add addr (word.mul (word.of_Z 4) j)) remSorted *
               scalar32 (word.add addr (word.mul (word.of_Z 4) i)) e * R) m)
-            (fun T M A I J N E => (filterio T) = (filterio t) /\ I = i /\ N = n /\ e = E /\ a = A /\
+            (fun K T M A I J N E => T = t /\ I = i /\ N = n /\ e = E /\ a = A /\
               word.unsigned J <= word.unsigned i /\
               List.length remSorted = remSortedLen /\
               sorted = seenSorted ++ remSorted /\
@@ -353,7 +353,7 @@ Section WithParameters.
             | |- context[List.nth ?N _ _] => replace N with O by ZnWordsL
             end.
             assumption. }
-          { intros k Hk.
+          { intros k0 Hk0.
             match goal with
             | H: forall _: nat, _ -> _ |- _ => apply H
             end.
@@ -384,7 +384,7 @@ Section WithParameters.
             rewrite <- List.app_assoc. rewrite <- List.app_comm_cons.
             rewrite List.nth_middle.
             assumption. }
-          { intros k Hk.
+          { intros k0 Hk0.
             match goal with
             | H: forall _: nat, _ -> _ |- _ => apply H
             end.
@@ -470,7 +470,7 @@ Section WithParameters.
       (* second inner loop: *)
       refine (tailrec (HList.polymorphic_list.cons _ (HList.polymorphic_list.cons _ HList.polymorphic_list.nil))
           ["a"; "i"; "j"; "n"; "t"]
-          (fun StoShiftLen toShift R t m a i0 j n0 shelf => PrimitivePair.pair.mk
+          (fun StoShiftLen toShift R k t m a i0 j n0 shelf => PrimitivePair.pair.mk
             (i0 = i /\ a = addr /\ n0 = n /\
              match StoShiftLen with
              | S toShiftLen => List.length toShift = toShiftLen /\
@@ -480,7 +480,7 @@ Section WithParameters.
              | O => (* special precondition for just before exiting the loop: *)
                     word.unsigned j = word.unsigned i + 1 /\ toShift = [] /\ R m
              end)
-            (fun T M A I J N E => (filterio T) = (filterio t) /\ I = i /\ N = n /\ A = a /\
+            (fun K T M A I J N E => T = t /\ I = i /\ N = n /\ A = a /\
                match StoShiftLen with
                | S toShiftLen =>
                  (array scalar32 (word.of_Z 4)
@@ -516,8 +516,8 @@ Section WithParameters.
         cbn [seps].
         cancel.
       }
-      { rename toShift into toShift_orig, R into R_orig, t into t0'.
-        intros StoShiftLen toShift R t m2 a i0 j n0 shelf.
+      { rename toShift into toShift_orig, R into R_orig, t into t0', k into k0'.
+        intros StoShiftLen toShift R k t m2 a i0 j n0 shelf.
         repeat straightline. 2: {
           (* if break, postcondition holds *)
           ssplit. all: try reflexivity.
@@ -576,7 +576,6 @@ Section WithParameters.
           { (* postcondition of previous loop iteration implies postcondition of current loop iteration *)
             repeat straightline.
             ssplit. all: try reflexivity.
-            { trace_alignment. }
             SeparationLogic.seprewrite @array_cons.
             use_sep_assumption.
             cancel.
@@ -601,7 +600,6 @@ Section WithParameters.
           { (* postcondition of previous loop iteration implies postcondition of current loop iteration *)
             repeat straightline.
             ssplit. all: try reflexivity.
-            { trace_alignment. }
             SeparationLogic.seprewrite @array_cons.
             SeparationLogic.seprewrite @array_nil.
             use_sep_assumption.
@@ -676,10 +674,10 @@ Section WithParameters.
       split.
       { (* measure decreases *) subst v0. constructor. }
       { (* postcondition of previous loop iteration implies postcondition of current loop iteration *)
-        repeat straightline. split; [trace_alignment|auto]. }
+        repeat straightline. auto. }
     }
     repeat straightline.
-    ssplit; try trace_alignment.
+    ssplit.
     match goal with
     | H: sorted_except _ _ _ _ _ |- _ => destruct H as (sorted & unsorted & EL & HM0 & So & Pe)
     end.

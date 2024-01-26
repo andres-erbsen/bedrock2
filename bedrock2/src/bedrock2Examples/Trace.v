@@ -40,16 +40,16 @@ Module Import IOMacros.
        eg for MMIO, or to communicate with the kernel *)
     is_reserved_addr: word -> Prop;
 
-    read_word_correct: forall t m l mc x tmp,
+    read_word_correct: forall k t m l mc x tmp,
         (forall a, is_reserved_addr a -> map.get m a = None) ->
-        exec map.empty (read_word_code x tmp) t m l mc (fun t' m' l' mc' =>
-          m = m' /\ exists t'' v, filterio t' = filterio t ++ t'' /\ read_word_trace v t'' /\ l' = map.put l x v);
+        exec map.empty (read_word_code x tmp) k t m l mc (fun k' t' m' l' mc' =>
+          m = m' /\ exists t'' v, t' = t ++ t'' /\ read_word_trace v t'' /\ l' = map.put l x v);
 
-    write_word_correct: forall t m l mc x tmp v,
+    write_word_correct: forall k t m l mc x tmp v,
         (forall a, is_reserved_addr a -> map.get m a = None) ->
         map.get l x = Some v ->
-        exec map.empty (write_word_code x tmp) t m l mc (fun t' m' l' mc' =>
-          m = m' /\ exists t'', filterio t' = filterio t ++ t'' /\ write_word_trace v t'' /\ l' = l);
+        exec map.empty (write_word_code x tmp) k t m l mc (fun k' t' m' l' mc' =>
+          m = m' /\ exists t'', t' = t ++ t'' /\ write_word_trace v t'' /\ l' = l);
   }.
 
 End IOMacros.
@@ -64,8 +64,8 @@ Section Squarer.
 
   Definition squarer: cmd. Admitted.
 
-  Lemma squarer_correct: forall (m: mem) (l: locals) mc,
-      exec map.empty squarer nil m l mc (fun t' m' l' mc' => squarer_trace (filterio t')).
+  Lemma squarer_correct: forall (k: trace) (m: mem) (l: locals) mc,
+      exec map.empty squarer k nil m l mc (fun k' t' m' l' mc' => squarer_trace t').
   Admitted.
 
 End Squarer.
@@ -143,14 +143,14 @@ Module SpiEth.
     Print exec.interact.
 
     Instance ext_spec: ExtSpec :=
-      fun t mGive action (argvals: list word) (post: (mem -> list word -> Prop)) =>
+      fun t mGive action (argvals: list word) (post: (mem -> list word -> list word -> Prop)) =>
         match argvals with
         | addr :: _ =>
           isMMIOAddr addr /\
           if String.eqb action MMInput then
-            argvals = [addr] /\ forall val, post map.empty [val]
+            argvals = [addr] /\ forall val, post map.empty [val] [addr]
           else if String.eqb action MMOutput then
-                 exists val, argvals = [addr; val] /\ post map.empty nil
+                 exists val, argvals = [addr; val] /\ post map.empty nil [addr]
           else False
         | nil => False
         end.
@@ -183,7 +183,7 @@ Module SpiEth.
     - (* read_word_correct: *)
       intros.
       eapply exec.seq with
-          (mid := fun t' m' l' mc' => t' = t /\ m' = m /\ l' = map.put l x (word.of_Z (-1))).
+          (mid := fun k' t' m' l' mc' => k' = k /\ t' = t /\ m' = m /\ l' = map.put l x (word.of_Z (-1))).
       { eapply exec.set; [reflexivity|auto]. }
       { intros. case TODO. (* will require a loop invariant *) }
     - (* write_word_correct: *)
@@ -242,16 +242,12 @@ Module Syscalls.
     Context {funname_env: forall T, map.map String.string T}.
 
     Instance ext_spec: ExtSpec :=
-      fun t m action (argvals: list word) (post: (mem -> list word -> Prop)) =>
+      fun t m action (argvals: list word) (post: (mem -> list word -> list word -> Prop)) =>
         (* TODO needs to be more precise *)
         match argvals with
-        | [trap; a1; a2; a3] => forall r1 r2 err, post m [r1; r2; err]
+        | [trap; a1; a2; a3] => forall r1 r2 err, post m [r1; r2; err] [](*does nil for this make sense? not used anyway.*)
         | _ => False
         end.
-
-    Check exec.interact. Print exec.exec.
-
-    
 
     Local Axiom TODO: False.
 
@@ -274,7 +270,7 @@ Module Syscalls.
     |}).
     - (* read_word_correct: *)
       intros.
-      eapply exec.interact with (mid := fun newM resvals =>
+      eapply exec.interact with (mid := fun newM resvals klist =>
          newM = map.empty /\ exists v ignored1 ignored2, resvals = [v; ignored1; ignored2])
          (mKeep := m) (mGive := map.empty).
       + apply map.split_empty_r. reflexivity.
@@ -300,7 +296,7 @@ End Syscalls.
 
 Module MMIOUsage.
   Section WithParams.
-    Context {word: word.word 32} {mem: map.map word Byte.byte} {pick_sp: PickSp}.
+    Context {word: word.word 32} {mem: map.map word Byte.byte}.
     Context {word_ok: word.ok word} {mem_ok: map.ok mem}.
     Context {locals: map.map String.string word}.
     Context {funname_env: forall T, map.map String.string T}.
@@ -313,7 +309,7 @@ End MMIOUsage.
 
 Module SyscallsUsage.
   Section WithParams.
-    Context {word: word.word 32} {mem: map.map word Byte.byte} {pick_sp: PickSp}.
+    Context {word: word.word 32} {mem: map.map word Byte.byte}.
     Context {word_ok: word.ok word} {mem_ok: map.ok mem}.
     Context {locals: map.map String.string word}.
     Context {funname_env: forall T, map.map String.string T}.

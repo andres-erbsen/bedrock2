@@ -64,16 +64,16 @@ Section WithParameters.
       (exists a v, h = ("ld", a, v) /\ l = (map.empty, "MMIOREAD", [a], (map.empty, [v]))).
   Definition mmio_trace_abstraction_relation := List.Forall2 mmio_event_abstraction_relation.
 
-  Global Instance spec_of_spi_write : spec_of "spi_write" := fun functions => forall t m b,
+  Global Instance spec_of_spi_write : spec_of "spi_write" := fun functions => forall k t m b,
     word.unsigned b < 2 ^ 8 ->
-    WeakestPrecondition.call functions "spi_write" t m [b] (fun T M RETS =>
-      M = m /\ exists iol, (filterio T) = (filterio t) ;++ iol /\ exists ioh, mmio_trace_abstraction_relation ioh iol /\ exists err, RETS = [err] /\ Logic.or
+    WeakestPrecondition.call functions "spi_write" k t m [b] (fun K T M RETS =>
+      M = m /\ exists iol, T = t ;++ iol /\ exists ioh, mmio_trace_abstraction_relation ioh iol /\ exists err, RETS = [err] /\ Logic.or
         (((word.unsigned err <> 0) /\ lightbulb_spec.spi_write_full _ ^* ioh /\ Z.of_nat (length ioh) = patience))
         (word.unsigned err = 0 /\ lightbulb_spec.spi_write word (byte.of_Z (word.unsigned b)) ioh)).
 
-  Global Instance spec_of_spi_read : spec_of "spi_read" := fun functions => forall t m,
-    WeakestPrecondition.call functions "spi_read" t m [] (fun T M RETS =>
-      M = m /\ exists iol, (filterio T) = (filterio t) ;++ iol /\ exists ioh, mmio_trace_abstraction_relation ioh iol /\ exists (b: byte) (err : word), RETS = [word.of_Z (byte.unsigned b); err] /\ Logic.or
+  Global Instance spec_of_spi_read : spec_of "spi_read" := fun functions => forall k t m,
+    WeakestPrecondition.call functions "spi_read" k t m [] (fun K T M RETS =>
+      M = m /\ exists iol, T = t ;++ iol /\ exists ioh, mmio_trace_abstraction_relation ioh iol /\ exists (b: byte) (err : word), RETS = [word.of_Z (byte.unsigned b); err] /\ Logic.or
         (word.unsigned err <> 0 /\ lightbulb_spec.spi_read_empty _ ^* ioh /\ Z.of_nat (length ioh) = patience)
         (word.unsigned err = 0 /\ lightbulb_spec.spi_read word b ioh)).
 
@@ -92,11 +92,11 @@ Section WithParameters.
   Proof.
     repeat straightline.
     rename H into Hb.
-
-    (* WHY do theese parentheses matter? *)
-    refine ((atleastonce ["b"; "busy"; "i"] (fun v T M B BUSY I =>
+    
+    (* WHY do theese parentheses matter? *) Check atleastonce.
+    refine ((atleastonce ["b"; "busy"; "i"] (fun v K T M B BUSY I =>
        b = B /\ v = word.unsigned I /\ word.unsigned I <> 0 /\ M = m /\
-       exists tl, (filterio T) = tl++(filterio t) /\
+       exists tl, T = tl++t /\
        exists th, mmio_trace_abstraction_relation th tl /\
        lightbulb_spec.spi_write_full _ ^* th /\
        Z.of_nat (length th) + word.unsigned I = patience
@@ -127,7 +127,7 @@ Section WithParameters.
       split.
       { constructor. }
       exact eq_refl. }*)
-    repeat straightline. Check WeakestPreconditionProperties.interact_nomem. Print ext_spec.
+    repeat straightline.
     eapply WeakestPreconditionProperties.interact_nomem; repeat straightline.
     letexists; split; [exact eq_refl|]; split; [split; trivial|].
     {
@@ -145,7 +145,6 @@ Section WithParameters.
     { (* SUBCASE loop condition was true (do loop again) *)
       eexists; split.
       { repeat (split; trivial; []). simpl.
-        match goal with | H : filterio t0 = _ |- _ => rewrite H end.
         eexists (_ ;++ cons _ nil). split; [exact eq_refl|].
         eexists; split.
         { refine (List.Forall2_app _ _); try eassumption.
@@ -159,8 +158,7 @@ Section WithParameters.
         { ZnWordsL. } }
         { ZnWords. } }
     { (* SUBCASE loop condition was false (exit loop because of timeout *)
-      letexists; letexists; split; [solve[repeat straightline]|split]; repeat straightline; try contradiction. simpl.
-      match goal with | H : filterio t0 = _ |- _ => rewrite H end.
+      letexists; letexists; split; [solve[repeat straightline]|split]; repeat straightline; try contradiction. simpl. subst t0.
       eexists (_ ;++ cons _ nil); split.
       { rewrite <-app_assoc; cbn [app]; f_equal. }
       eexists. split.
@@ -187,7 +185,7 @@ Section WithParameters.
     letexists; letexists; split; [exact eq_refl|]; split; [split; trivial|].
     { cbv [isMMIOAddr]. ZnWords. }
     repeat straightline.
-    simpl. match goal with | H : filterio t0 = _ |- _ => rewrite H end.
+    simpl. subst t0.
     eexists (_ ;++ cons _ (cons _ nil)). split.
     { rewrite <-app_assoc. cbn [app]. f_equal. }
     eexists. split.
@@ -214,7 +212,7 @@ Section WithParameters.
 
   Local Ltac split_if :=
     lazymatch goal with
-      |- WeakestPrecondition.cmd _ ?c _ _ _ ?post =>
+      |- WeakestPrecondition.cmd _ ?c _ _ _ _ ?post =>
       let c := eval hnf in c in
           lazymatch c with
           | cmd.cond _ _ _ => letexists; letexists; split; [solve[repeat straightline]|split]
@@ -223,10 +221,10 @@ Section WithParameters.
 
   Lemma spi_read_ok : program_logic_goal_for_function! spi_read.
     repeat straightline.
-    refine ((atleastonce ["b"; "busy"; "i"] (fun v T M B BUSY I =>
+    refine ((atleastonce ["b"; "busy"; "i"] (fun v K T M B BUSY I =>
        v = word.unsigned I /\ word.unsigned I <> 0 /\ M = m /\
        B = word.of_Z (byte.unsigned (byte.of_Z (word.unsigned B))) /\
-       exists tl, (filterio T) = tl++(filterio t) /\
+       exists tl, T = tl++t /\
        exists th, mmio_trace_abstraction_relation th tl /\
        lightbulb_spec.spi_read_empty _ ^* th /\
        Z.of_nat (length th) + word.unsigned I = patience
@@ -254,29 +252,28 @@ Section WithParameters.
     { eapply WeakestPreconditionProperties.interact_nomem; repeat straightline.
       letexists; split; [exact eq_refl|]; split; [split; trivial|].
     { cbv [isMMIOAddr]. ZnWords. }
-      repeat ((split; trivial; []) || straightline || split_if).
-      {
-        letexists. split; split.
-        { subst v'; exact eq_refl. }
-        { split; trivial.
-          split; trivial.
-          split; trivial.
-          eexists (x2 ;++ cons _ nil). split.
-          { simpl. match goal with | H : filterio t0 = _ |- _ => rewrite H end. eauto. }
-          eexists. split.
-          { econstructor; try eassumption; right; eauto. }
-          split.
-          {
-            refine (kleene_app _ (cons _ nil) _ x3 _); eauto.
-            refine (kleene_step _ (cons _ nil) nil _ (kleene_empty _)).
-            eexists; split.
-            { exact eq_refl. }
-            { ZnWords. } }
-          { ZnWordsL. } }
-          { ZnWords. }
+    repeat ((split; trivial; []) || straightline || split_if).
+    {
+      letexists. split; split.
+      { subst v'; exact eq_refl. }
+      { split; trivial.
+        split; trivial.
+        split; trivial.
+        eexists (x2 ;++ cons _ nil); split; cbn [app]; eauto.
+        eexists. split.
+        { econstructor; try eassumption; right; eauto. }
+        split.
+        {
+          refine (kleene_app _ (cons _ nil) _ x3 _); eauto.
+          refine (kleene_step _ (cons _ nil) nil _ (kleene_empty _)).
+          eexists; split.
+          { exact eq_refl. }
           { ZnWords. } }
-      { eexists (x2 ;++ cons _ nil); split; cbn [app].
-        { simpl. match goal with | H : filterio t0 = _ |- _ => rewrite H end. eauto. }
+        { ZnWordsL. } }
+      { ZnWords. }
+      { ZnWords. } }
+    { eexists (x2 ;++ cons _ nil); split; cbn [app].
+        { eauto. }
         eexists. split.
         { econstructor; try eassumption; right; eauto. }
         eexists (byte.of_Z (word.unsigned x)), _; split.
@@ -317,14 +314,13 @@ Section WithParameters.
           clear. Z.div_mod_to_equations. blia. }
         { (* copy-paste from above, trace manipulation *)
           eexists (x2 ;++ cons _ nil); split; cbn [app].
-          { simpl. match goal with | H : filterio t0 = _ |- _ => rewrite H end. eauto. }
+          { simpl. eauto. }
           eexists. split.
           { econstructor; try eassumption; right; eauto. }
           subst v6.
           rewrite Properties.word.unsigned_xor_nowrap, Z.lxor_nilpotent in H1; contradiction. } }
       { (* copy-paste from above, trace manipulation *)
         eexists (x2 ;++ cons _ nil); split; cbn [app]; eauto.
-        { simpl. match goal with | H : filterio t0 = _ |- _ => rewrite H end. eauto. }
         eexists. split.
         { econstructor; try eassumption; right; eauto. }
         eexists (byte.of_Z (word.unsigned v5)), _; split.
@@ -366,10 +362,10 @@ Section WithParameters.
           trivial. } } }
   Qed.
 
-  Global Instance spec_of_spi_xchg : spec_of "spi_xchg" := fun functions => forall t m b_out,
+  Global Instance spec_of_spi_xchg : spec_of "spi_xchg" := fun functions => forall k t m b_out,
     word.unsigned b_out < 2 ^ 8 ->
-    WeakestPrecondition.call functions "spi_xchg" t m [b_out] (fun T M RETS =>
-      M = m /\ exists iol, (filterio T) = (filterio t) ;++ iol /\ exists ioh, mmio_trace_abstraction_relation ioh iol /\ exists (b_in:byte) (err : word), RETS = [word.of_Z (byte.unsigned b_in); err] /\ Logic.or
+    WeakestPrecondition.call functions "spi_xchg" k t m [b_out] (fun K T M RETS =>
+      M = m /\ exists iol, T = t ;++ iol /\ exists ioh, mmio_trace_abstraction_relation ioh iol /\ exists (b_in:byte) (err : word), RETS = [word.of_Z (byte.unsigned b_in); err] /\ Logic.or
         (word.unsigned err <> 0 /\ (any +++ lightbulb_spec.spi_timeout _) ioh)
         (word.unsigned err = 0 /\ lightbulb_spec.spi_xchg word (byte.of_Z (word.unsigned b_out)) b_in ioh)).
 
@@ -390,7 +386,7 @@ Section WithParameters.
     straightline || straightline_call || split_if || refine (conj _ _) || eauto).
 
   { eexists. split.
-    { simpl. match goal with | H : filterio a = _ |- _ => rewrite H end. exact eq_refl. }
+    { exact eq_refl. }
     eexists. split.
     { eauto. }
     eexists. eexists. split.
@@ -409,30 +405,25 @@ Section WithParameters.
       eexists nil, x0; repeat split; cbv [any choice lightbulb_spec.spi_timeout]; eauto.
       rewrite app_nil_r; trivial. }
 
-      { destruct H11; intuition eauto.
+      { destruct H10; intuition eauto.
         { eexists. split.
-          { simpl. match goal with | H : filterio a0 = _ |- _ => rewrite H end.
-            subst t'. simpl. match goal with | H : filterio a = _ |- _ => rewrite H end.
-            rewrite List.app_assoc; trivial. }
-            eexists. split.
-            { eapply Forall2_app; eauto. }
-            eexists _, _; split.
-            { subst v; trivial. }
-            left; split; eauto.
-            eapply concat_app; cbv [any choice lightbulb_spec.spi_timeout]; eauto. }
-            eexists.
-            match goal with | H : filterio a0 = _ |- _ => rewrite H end.
-            subst t'. simpl.
-            match goal with | H : filterio a = _ |- _ => rewrite H end.
-            split.
-            { rewrite List.app_assoc; trivial. }
-            eexists.
-            split.
-            { eapply Forall2_app; eauto. }
-            eexists _, _; split.
-            { subst v. eauto. }
-            right. split; eauto.
-            cbv [lightbulb_spec.spi_xchg].
+          { simpl. subst a2. subst a0. rewrite List.app_assoc; trivial. }
+          eexists. split.
+          { eapply Forall2_app; eauto. }
+          eexists _, _; split.
+          { subst v; trivial. }
+          left; split; eauto.
+          eapply concat_app; cbv [any choice lightbulb_spec.spi_timeout]; eauto. }
+        eexists.
+        split.
+        { subst a2 a0. rewrite List.app_assoc; trivial. }
+        eexists.
+        split.
+        { eapply Forall2_app; eauto. }
+        eexists _, _; split.
+        { subst v. eauto. }
+        right. split; eauto.
+        cbv [lightbulb_spec.spi_xchg].
 
   assert (Trace__concat_app : forall T (P Q:list T->Prop) x y, P x -> Q y -> (P +++ Q) (y ++ x)). {
     cbv [concat]; eauto. }

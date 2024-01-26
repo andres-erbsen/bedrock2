@@ -23,7 +23,7 @@ Require Import bedrock2.ProgramLogic bedrock2.Scalars.
 Require Import bedrock2Examples.lightbulb_spec.
 
 Section WithParameters.
-  Context {word: word.word 32} {mem: map.map word Byte.byte} {pick_sp: PickSp}.
+  Context {word: word.word 32} {mem: map.map word Byte.byte}.
   Context {word_ok: word.ok word} {mem_ok: map.ok mem}.
 
   Definition f (a b : word) := word.add (word.add a b) b.
@@ -31,11 +31,11 @@ Section WithParameters.
   Instance spec_of_indirect_add : spec_of "indirect_add" :=
     fnspec! "indirect_add" a b c / va Ra vb Rb vc Rc,
     { requires t m := m =* scalar a va * Ra /\ m =* scalar b vb * Rb /\ m =* scalar c vc * Rc;
-      ensures t' m' := (filterio t)=(filterio t') /\ m' =* scalar a (word.add vb vc) * Ra }.
+      ensures t' m' := t=t' /\ m' =* scalar a (word.add vb vc) * Ra }.
   Instance spec_of_indirect_add_twice : spec_of "indirect_add_twice" :=
     fnspec! "indirect_add_twice" a b / va vb R,
     { requires t m := m =* scalar a va * scalar b vb * R;
-      ensures t' m' := (filterio t)=(filterio t') /\ m' =* scalar a (f va vb) * scalar b vb * R }.
+      ensures t' m' := t=t' /\ m' =* scalar a (f va vb) * scalar b vb * R }.
 
   Lemma indirect_add_ok : program_logic_goal_for_function! indirect_add.
   Proof. repeat straightline; []; eauto. Qed.
@@ -49,7 +49,7 @@ Section WithParameters.
     straightline_call.
     { split; [ecancel_assumption|]. split; ecancel_assumption. }
     repeat straightline.
-    cbv [f]. split; try trace_alignment. ecancel_assumption.
+    cbv [f]. ecancel_assumption.
   Qed.
 
   Example link_both : spec_of_indirect_add_twice (("indirect_add_twice",indirect_add_twice)::("indirect_add",indirect_add)::nil).
@@ -69,7 +69,7 @@ Section WithParameters.
   Instance spec_of_indirect_add_three : spec_of "indirect_add_three" :=
     fnspec! "indirect_add_three" a b c / va vb vc Rb R,
     { requires t m := m =* scalar a va * scalar c vc * R /\ m =* scalar b vb * Rb;
-      ensures t' m' := (filterio t)=(filterio t') /\ m' =* scalar a (g va vb vc) * scalar c vc * R }.
+      ensures t' m' := t=t' /\ m' =* scalar a (g va vb vc) * scalar c vc * R }.
 
   Lemma indirect_add_three_ok : program_logic_goal_for_function! indirect_add_three.
   Proof.
@@ -80,7 +80,7 @@ Section WithParameters.
     straightline_call.
     { split; [ecancel_assumption|]. split; ecancel_assumption. }
     repeat straightline.
-    cbv [g]. split; try trace_alignment. ecancel_assumption.
+    cbv [g]. ecancel_assumption.
   Qed.
 
   Definition indirect_add_three' := func! (out, a, b, c) {
@@ -96,7 +96,7 @@ Section WithParameters.
         m =* scalar a va * Ra /\
         m =* scalar b vb * Rb /\
         m =* scalar c vc * Rc;
-      ensures t' m' := (filterio t)=(filterio t') /\ m' =* scalar out (g va vb vc) * R }.
+      ensures t' m' := t=t' /\ m' =* scalar out (g va vb vc) * R }.
 
   Lemma indirect_add_three'_ok : program_logic_goal_for_function! indirect_add_three'.
   Proof.
@@ -194,7 +194,7 @@ H9 : (scalar a0 (word.add va vb)
     repeat match goal with H : _ |- _ => rewrite !HList.tuple.to_list_of_list in H end.
     set ((LittleEndianList.le_split (bytes_per access_size.word) (word.unsigned (word.add va vb)))) as stackbytes in *.
     assert (Datatypes.length stackbytes = 4%nat) by exact eq_refl.
-    repeat straightline. split; try trace_alignment. eauto.
+    repeat straightline. eauto.
   Qed.
 
   (* let's see how this would look like with an alternate spec of [indirect_add] *)
@@ -203,7 +203,7 @@ H9 : (scalar a0 (word.add va vb)
   Instance spec_of_indirect_add_gen : spec_of "indirect_add" :=
     fnspec! "indirect_add" a b c / va Ra vb Rb vc Rc,
     { requires t m := m =* scalar a va * Ra /\ m =* scalar b vb * Rb /\ m =* scalar c vc * Rc;
-      ensures t' m' := (filterio t)=(filterio t') /\
+      ensures t' m' := t=t' /\
         forall va Ra, m =* scalar a va * Ra -> m' =* scalar a (word.add vb vc) * Ra }.
 
   Lemma indirect_add_gen_ok : program_logic_goal_for_function! indirect_add.
@@ -255,13 +255,13 @@ H15 : forall (va0 : word) (Ra : mem -> Prop),
     straightline_call.
     { split; [>|split]; try ecancel_assumption. }
     repeat straightline.
-    rename a2 into m'.
+    rename a3 into m'.
     (*
 H15 : forall (va0 : word) (Ra : mem -> Prop),
       (scalar out va0 ⋆ Ra)%sep m ->
       (scalar out (word.add (word.add va vb) vc) ⋆ Ra)%sep m'
      *)
-    specialize (H16 _ _ ltac:(ecancel_assumption)).
+    specialize (H15 _ _ ltac:(ecancel_assumption)).
 
     (* unrelated: stack deallocation proof, would need scalar-to-bytes lemma *)
   Abort.
