@@ -28,7 +28,7 @@ Section WithParameters.
   Context {width} {BW: Bitwidth width}.
   Context {word: word.word width} {mem: map.map word byte} {locals: map.map string word}.
   Context {ext_spec: ExtSpec}.
-  Import ProgramLogic.Coercions. Locate "ctfunc!".
+  Import ProgramLogic.Coercions.
 
   Global Instance spec_of_memequal : spec_of "memequal" :=
     ctfunc! "memequal" (x y n : word) | / | (xs ys : list byte) (Rx Ry : mem -> Prop) ~> r,
@@ -43,8 +43,7 @@ Section WithParameters.
 
   Import coqutil.Tactics.letexists coqutil.Tactics.Tactics coqutil.Tactics.autoforward.
   Import coqutil.Word.Properties coqutil.Map.Properties.
-  Print Loops.tailrec. Check word.of_Z. Search (Z -> ?word).
-  Print word. Print word.word. Print read.
+  
   Fixpoint newtrace x y n :=
     match n with
     | S n' => newtrace (word.add x (word.of_Z 1)) (word.add y (word.of_Z 1)) n' ++
