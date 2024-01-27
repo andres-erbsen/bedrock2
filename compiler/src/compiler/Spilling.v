@@ -171,10 +171,10 @@ Section Spilling.
   Definition leak_spill_bcond : trace :=
     nil.
   
-  Definition bigtuple : Type := stmt * abstract_trace * word * (trace -> abstract_trace).
+  Definition bigtuple : Type := stmt * trace * word * (trace -> trace).
   
-  Definition project_tuple (tup : bigtuple) : abstract_trace * stmt :=
-    let '(s, a, fpval, f) := tup in (a, s).
+  Definition project_tuple (tup : bigtuple) : nat * stmt :=
+    let '(s, k, fpval, f) := tup in (length k, s).
   Definition lt_tuple (x y : bigtuple) :=
     lt_tuple' (project_tuple x) (project_tuple y).    
 
@@ -186,167 +186,151 @@ Section Spilling.
   Definition stransform_stmt_trace_body
     {env: map.map String.string (list Z * list Z * stmt)}
     (e: env)
-    (tup : stmt * abstract_trace * word * (trace -> abstract_trace))
-    (stransform_stmt_trace : forall othertup, lt_tuple othertup tup -> abstract_trace)
-    : abstract_trace.
+    (pick_sp_backwards : trace -> word)
+    (tup : stmt * trace * word * (trace -> trace))
+    (stransform_stmt_trace : forall othertup, lt_tuple othertup tup -> trace)
+    : trace.
     refine (
         match tup as x return tup = x -> _ with
-        | (s, a, fpval, f) =>
+        | (s, k, fpval, f) =>
             fun _ =>
               match s as x return s = x -> _ with
               | SLoad sz x y o =>
                   fun _ =>
-                    match a with
-                    | aleak_word addr a' =>
-                        abstract_app
-                          (generator (leak_load_iarg_reg fpval y ++ [leak_word addr] ++ leak_save_ires_reg fpval x))
-                          (f [leak_word addr])
-                    | _ => empty
+                    match k with
+                    | leak_word addr :: k' =>
+                        leak_load_iarg_reg fpval y ++ [leak_word addr] ++ leak_save_ires_reg fpval x ++
+                          f [leak_word addr]
+                    | _ => nil
                     end
               | SStore sz x y o =>
                   fun _ =>
-                    match a with
-                    | aleak_word addr a' =>
-                        abstract_app
-                          (generator (leak_load_iarg_reg fpval x ++ leak_load_iarg_reg fpval y ++ [leak_word addr]))
-                          (f [leak_word addr])
-                    | _ => empty
+                    match k with
+                    | leak_word addr :: k' =>
+                        leak_load_iarg_reg fpval x ++ leak_load_iarg_reg fpval y ++ [leak_word addr] ++
+                          f [leak_word addr]
+                    | _ => nil
                     end
               | SInlinetable _ x _ i =>
                   fun _ =>
-                    match a with
-                    | aleak_word i' a' =>
-                        abstract_app
-                          (generator (leak_load_iarg_reg fpval i ++ [leak_word i'] ++ leak_save_ires_reg fpval x))
-                          (f [leak_word i'])
-                    | _ => empty
+                    match k with
+                    | leak_word i' :: k' =>
+                        leak_load_iarg_reg fpval i ++ [leak_word i'] ++ leak_save_ires_reg fpval x ++
+                          f [leak_word i']
+                    | _ => nil
                     end
               | SStackalloc x z body =>
                   fun _ =>
-                    match a as x return a = x -> _ with
-                    | aconsume_word fa' =>
+                    match k as x return k = x -> _ with
+                    | consume_word addr :: k' =>
                         fun _ =>
-                          aconsume_word (fun addr =>
-                                           abstract_app
-                                             (generator (leak_save_ires_reg fpval x))
-                                             (stransform_stmt_trace (body, (fa' addr), fpval, (fun k => f (consume_word addr :: k))) _))
-                    | _ => fun _ => empty
+                          consume_word addr :: leak_save_ires_reg fpval x ++ 
+                            stransform_stmt_trace (body, k', fpval, (fun k => f (consume_word addr :: k))) _
+                    | _ => fun _ => nil
                     end eq_refl
               | SLit x _ =>
                   fun _ =>
-                  abstract_app
-                    (generator (leak_save_ires_reg fpval x))
-                    (f [])
+                    leak_save_ires_reg fpval x ++
+                      f []
               | SOp x op y oz =>
                   fun _ =>
                     let newt_a' :=
                       match op with
                       | Syntax.bopname.divu
                       | Syntax.bopname.remu =>
-                          match a with
-                          | aleak_word x1 (aleak_word x2 a') => Some ([leak_word x1; leak_word x2], a')
+                          match k with
+                          | leak_word x1 :: leak_word x2 :: k' => Some ([leak_word x1; leak_word x2], k')
                           | _ => None
                           end
                       | Syntax.bopname.slu
                       | Syntax.bopname.sru
                       | Syntax.bopname.srs =>
-                          match a with
-                          | aleak_word x2 a' => Some ([leak_word x2], a')
+                          match k with
+                          | leak_word x2 :: k' => Some ([leak_word x2], k')
                           | _ => None
                           end
-                      | _ => Some ([], a)
+                      | _ => Some ([], k)
                       end
                     in
                     match newt_a' with
                     | Some (newt, a') =>
-                        abstract_app
-                          (generator (leak_load_iarg_reg fpval y ++
-                                        match oz with 
-                                        | Var z => leak_load_iarg_reg fpval z
-                                        | Const _ => []
-                                        end
-                                        ++ newt
-                                        ++ leak_save_ires_reg fpval x))
-                          (f newt)
-                    | None => empty
+                        leak_load_iarg_reg fpval y ++
+                          match oz with 
+                          | Var z => leak_load_iarg_reg fpval z
+                          | Const _ => []
+                          end
+                          ++ newt
+                          ++ leak_save_ires_reg fpval x ++
+                          f newt
+                    | None => nil
                     end
               | SSet x y =>
                   fun _ =>
-                    abstract_app
-                      (generator (leak_load_iarg_reg fpval y ++ leak_save_ires_reg fpval x))
-                      (f [])
+                    leak_load_iarg_reg fpval y ++ leak_save_ires_reg fpval x ++
+                      f []
               | SIf c thn els =>
                   fun _ =>
-                    match a as x return a = x -> _ with
-                    | aleak_bool b a' =>
+                    match k as x return k = x -> _ with
+                    | leak_bool b :: k' =>
                         fun _ =>
-                          abstract_app
-                            (generator (leak_prepare_bcond fpval c ++ leak_spill_bcond ++ [leak_bool b]))
-                            (stransform_stmt_trace ((if b then thn else els), a', fpval,
-                                 (fun k => f (leak_bool b :: k))) _)
-                    | _ => fun _ => empty
+                            leak_prepare_bcond fpval c ++ leak_spill_bcond ++ [leak_bool b] ++
+                              stransform_stmt_trace ((if b then thn else els), k', fpval, (fun k'' => f (leak_bool b :: k''))) _
+                    | _ => fun _ => nil
                     end eq_refl
               | SLoop s1 c s2 =>
                   fun _ =>
-                    stransform_stmt_trace (s1, a, fpval,
-                        (fun k =>
-                           Let_In_pf_nd (shrink a k)
-                             (fun a' _ =>
-                                match a' as x return a' = x -> _ with
-                                | aleak_bool true a'' =>
+                    stransform_stmt_trace (s1, k, fpval,
+                        (fun skip =>
+                           Let_In_pf_nd (List.skipn (length skip) k)
+                             (fun k' _ =>
+                                match k' as x return k' = x -> _ with
+                                | leak_bool true :: k'' =>
                                     fun _ =>
-                                      abstract_app
-                                        (generator (leak_prepare_bcond fpval c ++ leak_spill_bcond ++ [leak_bool true]))
-                                        (stransform_stmt_trace (s2, a'', fpval, 
-                                             (fun k' =>
-                                                let a''' := shrink a'' k' in
-                                                stransform_stmt_trace (s, a''', fpval,
-                                                    (fun k'' => f (k ++ leak_bool true :: k' ++ k''))) _)) _)
-                                | aleak_bool false a'' =>
+                                      leak_prepare_bcond fpval c ++ leak_spill_bcond ++ [leak_bool true] ++
+                                        stransform_stmt_trace (s2, k'', fpval, 
+                                          (fun skip' =>
+                                             let k''' := List.skipn (length skip') k'' in
+                                             stransform_stmt_trace (s, k''', fpval,
+                                                 (fun skip'' => f (k ++ leak_bool true :: k' ++ skip''))) _)) _
+                                | leak_bool false :: k'' =>
                                     fun _ =>
-                                      abstract_app
-                                        (generator (leak_prepare_bcond fpval c ++ leak_spill_bcond ++ [leak_bool false]))
-                                        (f (k ++ [leak_bool false]))
-                                | _ => fun _ => empty
+                                      leak_prepare_bcond fpval c ++ leak_spill_bcond ++ [leak_bool false] ++
+                                        f (k ++ [leak_bool false])
+                                | _ => fun _ => nil
                                 end eq_refl))) _
               | SSeq s1 s2 =>
                   fun _ =>
-                    stransform_stmt_trace (s1, a, fpval,
-                        (fun k =>
-                           let a' := shrink a k in
-                           stransform_stmt_trace (s2, a', fpval, (fun k' => f (k ++ k'))) _)) _
+                    stransform_stmt_trace (s1, k, fpval,
+                        (fun skip =>
+                           let k' := List.skipn (length skip) k in
+                           stransform_stmt_trace (s2, k', fpval, (fun skip' => f (skip ++ skip'))) _)) _
               | SSkip => fun _ => f []
               | SCall resvars fname argvars =>
                   fun _ =>
-                    match a as x return a = x -> _ with
-                    | aleak_unit a' =>
+                    match k as x return k = x -> _ with
+                    | leak_unit :: k' =>
                         fun _ =>
                           match @map.get _ _ env e fname with
                           | Some (params, rets, fbody) =>
-                              abstract_app
-                                (generator (leak_set_reg_range_to_vars fpval argvars ++ [leak_unit]))
-                                (aconsume_word
-                                   (fun fpval' =>
-                                      abstract_app
-                                        (generator (leak_set_vars_to_reg_range fpval' params))
-                                        (stransform_stmt_trace (fbody, a', fpval',
-                                             (fun k =>
-                                                let a'' := shrink a' k in
-                                                abstract_app
-                                                  (generator (leak_set_reg_range_to_vars fpval' rets ++ leak_set_vars_to_reg_range fpval resvars))
-                                                  (f (leak_unit :: k)))) _)))
-                          | None => empty
+                              leak_set_reg_range_to_vars fpval argvars ++ [leak_unit] ++
+                                let fpval' := pick_sp_backwards k' in
+                                consume_word fpval' :: leak_set_vars_to_reg_range fpval' params ++
+                                  (stransform_stmt_trace (fbody, k', fpval',
+                                       (fun skip =>
+                                          let k'' := List.skipn (length skip) k' in
+                                          leak_set_reg_range_to_vars fpval' rets ++ leak_set_vars_to_reg_range fpval resvars ++
+                                            f (leak_unit :: skip))) _)
+                          | None => nil
                           end
-                    | _ => fun _ => empty
+                    | _ => fun _ => nil
                     end eq_refl
               | SInteract resvars _ argvars =>
                   fun _ =>
-                    match a with
-                    | aleak_list l a' =>
-                        abstract_app
-                          (generator (leak_set_reg_range_to_vars fpval argvars ++ [leak_list l] ++ leak_set_vars_to_reg_range fpval resvars))
-                          (f [leak_list l])
-                    | _ => empty
+                    match k with
+                    | leak_list l :: k' =>
+                        leak_set_reg_range_to_vars fpval argvars ++ [leak_list l] ++ leak_set_vars_to_reg_range fpval resvars ++
+                          f [leak_list l]
+                    | _ => nil
                     end
               end eq_refl
         end%nat eq_refl).
@@ -356,24 +340,19 @@ Section Spilling.
       all: cbv [lt_tuple project_tuple].
       all: subst.
       all: repeat match goal with
-             | t := shrink ?a ?k |- _ =>
+             | t := List.skipn ?n ?k |- _ =>
                       let H := fresh "H" in
-                      assert (H := shrink_le a k); subst t end.
+                      assert (H := List.skipn_length n k); subst t end.
       all: try (right; constructor; constructor).
       all: try (left; constructor; constructor).
-    - assert (H0 := shrink_le a k). left. destruct H.
-      + rewrite <- H. destruct H0.
-        -- rewrite H0. rewrite e3. apply t_step. constructor.
-        -- eapply t_trans; [|eassumption]. apply t_step. rewrite e3. constructor.
-      + eapply t_trans; [eapply H|]. clear H. destruct H0.
-        -- rewrite H. rewrite e3. apply t_step. constructor.
-        -- rewrite e3 in H. eapply t_trans; [|eassumption]. apply t_step. constructor.
-    - assert (H := shrink_le a k). left. destruct H.
-      + rewrite H. rewrite e3. apply t_step. constructor.
-      + eapply t_trans; [|eassumption]. rewrite e3. apply t_step. constructor.
-    - destruct H.
-      + rewrite <- H. right. apply t_step. constructor.
-      + left. assumption.
+    - assert (H0 := skipn_length (length skip) k). left.
+      rewrite H. assert (H1:= @f_equal _ _ (@length _) _ _ e4).
+      simpl in H1. blia.
+    - assert (H := skipn_length (length skip) k). left.
+      assert (H1 := @f_equal _ _ (@length _) _ _ e4). simpl in H1. blia.
+    - destruct (length (List.skipn (length skip) k) =? length k)%nat eqn:E.
+      + apply Nat.eqb_eq in E. rewrite E. right. constructor. constructor.
+      + apply Nat.eqb_neq in E. left. blia.
   Defined.
 
   Definition stransform_stmt_trace
@@ -2505,19 +2484,23 @@ Section Spilling.
       cbn [stransform_stmt_trace_body]. assumption.
   Qed.
 
+              Definition f : (trace -> event) -> (trace -> event).
+                 Admitted.
+
   Lemma spill_fun_correct: forall e1 e2 argnames1 retnames1 body1 argnames2 retnames2 body2,
       spill_functions e1 = Success e2 ->
       spill_fun (argnames1, retnames1, body1) = Success (argnames2, retnames2, body2) ->
       forall argvals k t m (post: trace -> io_trace -> mem -> list word -> Prop),
         call_spec e1 (argnames1, retnames1, body1) k t m argvals post ->
+        forall pick_sp,
         call_spec e2 (argnames2, retnames2, body2) k t m argvals
           (fun k2' t' m' retvals =>
              exists k1'' k2'',
                post (k1'' ++ k) t' m' retvals /\
                  k2' = k2'' ++ k /\
-                   forall a,                   
-                     generates a (rev k1'') ->
-                     generates (stransform_fun_trace e1 (argnames1, retnames1, body1) a) (rev k2'')).
+                 ((forall x s y, k2'' = x ++ consume_word s :: y -> pick_sp x = s) ->
+                  (forall x s y, k1'' = x ++ consume_word s :: y -> (f pick_sp) x = s)) /\
+                 rev k2'' = stransform_fun_trace e1 (argnames1, retnames1, body1) (rev k1'').
   Proof.
     intros. eapply spill_fun_correct_aux; try eassumption.
     unfold spilling_correct_for.
