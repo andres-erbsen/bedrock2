@@ -37,6 +37,33 @@ Section WithParameters.
     ctfunc! "swap" a_addr b_addr | / | a b R,
     { requires t m := m =* scalar a_addr a * scalar b_addr b * R;
       ensures T M :=  M =* scalar a_addr b * scalar b_addr a * R /\ T = t }.
+  Print ct_spec_of_swap.
+
+  Definition new_ct_spec_of_swap : spec_of "swap" :=
+    fun functions =>
+      forall pick_sp,
+      exists f : word -> word -> trace,
+      forall (k : trace) (t : io_trace) (m : mem) (a_addr b_addr a b : word) (R : mem -> Prop),
+        (scalar a_addr a ⋆ scalar b_addr b ⋆ R)%sep m ->
+        call functions "swap" k t m [a_addr; b_addr]
+          (fun (k' : trace) (T : io_trace) (M : mem) (rets : list word) =>
+             exists k'',
+               k' = (List.rev k'') ++ k /\
+                 ((forall x s y, k'' = x ++ [consume_word s] ++ y -> pick_sp x = y) ->
+                  k'' = f a_addr b_addr)
+          ).
+
+  Definition ct_spec_of_salloc_and_print : spec_of "swap" :=
+    fun functions =>
+      forall pick_sp,
+      exists output_event,
+      forall (k : trace) (t : io_trace) (m : mem),
+        call functions "salloc_and_print" k t m []
+          (fun (k' : trace) (T : io_trace) (M : mem) (rets : list word) =>
+             exists k'',
+               k' = (List.rev k'') ++ k /\
+                 ((forall x s y, k'' = x ++ [consume_word s] ++ y -> pick_sp x = y) ->
+                  T = output_event :: t)).
 
   (* I should make this work again.
 Instance ct_bad_swap : ct_spec_of "bad_swap" :=

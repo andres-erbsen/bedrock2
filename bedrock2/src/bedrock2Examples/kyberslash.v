@@ -20,4 +20,30 @@ void poly_tomsg(uint8_t msg[KYBER_INDCPA_MSGBYTES], const poly *a)
     }
   }
 }
-*)
+ *)
+
+Require Import Coq.ZArith.BinInt Coq.Strings.String Coq.Lists.List. Import ListNotations.
+Require Import coqutil.Macros.subst coqutil.Macros.unique bedrock2.Syntax.
+Require Import bedrock2.NotationsCustomEntry.
+Require Import coqutil.sanity.
+
+Local Open Scope Z_scope. Local Open Scope list_scope. Local Open Scope string_scope.
+
+Definition poly_tomsg :=
+  func! (msg, a) {
+      i = $0;
+      while (i < KYBER_N >> $3 (*could not figure out how to type /.  Also, optimization?*)) {
+          
+          i = i + $1
+        }
+    }.
+
+(*Instance spec_of_bsearch : spec_of "bsearch"%string := fun functions =>
+  forall left right target xs R k t m,
+    sep (array scalar (word.of_Z 8) left xs) R m ->
+    \_ (right ^- left) = 8*Z.of_nat (Datatypes.length xs) ->
+    WeakestPrecondition.call functions
+      "bsearch"%string k t m (left::right::target::nil)%list
+      (fun k' t' m' rets => t=t' /\ sep (array scalar (word.of_Z 8) left xs) R m' /\ exists i, rets = (i::nil)%list /\
+      ((*sorted*)False -> True)
+      ).*)
