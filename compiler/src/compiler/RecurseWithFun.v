@@ -11,6 +11,7 @@ Variable F : forall x:A, (forall y:A, R y x -> P) -> P.
 Variable E1 : A -> A -> Prop.
 Variable E2 : P -> P -> Prop.
 
+(* No need to make this my own thing; should just use Fix_F and assume it's non-dependent.*)
 Fixpoint my_Fix_F (x:A) (a:Acc R x) : P :=
   F x (fun (y:A) (h:R y x) => my_Fix_F y (Acc_inv a h)).
 

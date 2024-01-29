@@ -17,7 +17,7 @@ Require Import compiler.FlatImpConstraints.
 Require Import coqutil.Tactics.autoforward.
 Require Import coqutil.Tactics.fwd.
 Require Import compiler.RecurseWithFun.
-Require bedrock2.ProgramLogic.
+(*Require bedrock2.ProgramLogic.*)
 
 Open Scope Z_scope.
 
@@ -182,45 +182,6 @@ Section Spilling.
   Proof.
     cbv [lt_tuple]. apply wf_inverse_image. apply lt_tuple'_wf.
   Defined.
-
-  Print event.
-  Definition need_to_predict e :=
-    match e with
-    | consume_word _ => True
-    | _ => False
-    end.
-  
-  Inductive predicts : (trace -> event) -> trace -> Prop :=
-  | predicts_cons :
-    forall f e k,
-      (need_to_predict e -> f [] = e) ->
-      predicts (fun k' => f (e :: k')) k ->
-      predicts f (e :: k)
-  | predicts_nil :
-    forall f,
-      predicts f [].
-
-  Lemma predicts_ext f k g :
-    (forall k', f k' = g k') ->
-    predicts f k ->
-    predicts g k.
-  Proof.
-    intros H1 H2. revert H1. revert g. induction H2.
-    - intros g0 Hfg0. econstructor.
-      + rewrite <- Hfg0. apply H.
-      + apply IHpredicts. intros. apply Hfg0.
-    - intros. constructor.
-  Qed.
-
-  Lemma predict_cons f k1 k2 e :
-    predicts f (k1 ++ e :: k2) ->
-    need_to_predict e ->
-    f k1 = e.
-  Proof.
-    revert k2. revert e. revert f. induction k1.
-    - intros. inversion H. subst. auto.
-    - intros. inversion H. subst. apply IHk1 with (1 := H5) (2 := H0).
-  Qed.
   
   Definition stransform_stmt_trace_body
     {env: map.map String.string (list Z * list Z * stmt)}

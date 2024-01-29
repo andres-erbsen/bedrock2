@@ -52,208 +52,49 @@ Inductive abstract_trace {width: Z}{BW: Bitwidth width}{word: word.word width} :
 Section WithIOEvent.
   Context {width: Z}{BW: Bitwidth width}{word: word.word width}{mem: map.map word byte}.
 
-  Inductive subtrace : abstract_trace -> abstract_trace -> Prop :=
-  | leak_unit_subtrace : forall a, subtrace a (aleak_unit a)
-  | leak_bool_subtrace : forall b a, subtrace a (aleak_bool b a)
-  | leak_word_subtrace : forall w a, subtrace a (aleak_word w a)
-  | leak_list_subtrace : forall l a, subtrace a (aleak_list l a)
-  | consume_word_subtrace : forall fa w, subtrace (fa w) (aconsume_word fa).
-  
-  Lemma wf_subtrace : well_founded subtrace.
-  Proof.
-    cbv [well_founded]. intros a. induction a.
-    all: try (constructor; intros ? H'; inversion H'; subst; auto).
-  Defined.
-
-  Definition abstract_trace_lt :=
-    clos_trans _ subtrace.
-
-  Lemma wf_abstract_trace_lt : well_founded abstract_trace_lt.
-  Proof.
-    cbv [abstract_trace_lt]. Search clos_trans.
-    apply Transitive_Closure.wf_clos_trans.
-    apply wf_subtrace.
-  Defined.
-  
-  Definition io_trace : Type := list io_event.
-
-  Definition quot e : qevent :=
-    match e with
-    | leak_unit => qleak_unit
-    | leak_bool b => qleak_bool b
-    | leak_word w => qleak_word w
-    | leak_list l => qleak_list l
-    | consume_word w => qconsume_word
-    end.
-
   (*should I call this leakage_trace, now that it doesn't contain io events?
     shame to lengthen the name. No, I shouldn't call it a leakage trace, since 
     it contains the sources of nondeterminism as well as leakage events.*)
   Definition trace : Type := list event.
+  Definition io_trace : Type := list io_event.
 
-(* IO things to do:
-   set channel: input can either be private or not; output and leak a secret; output and don't leak; output and leak one function of secret,
-   take input, output and leak secret but do not leak secret until after input. *)  
-  Import ListNotations.
-  Inductive generates : abstract_trace -> trace -> Prop :=
-  | nil_gen : generates empty nil
-  | leak_unit_gen : forall a t_rev,
-      generates a t_rev -> generates (aleak_unit a) (leak_unit :: t_rev)
-  | leak_bool_gen : forall b a t_rev,
-      generates a t_rev -> generates (aleak_bool b a) (leak_bool b :: t_rev)
-  | leak_word_gen : forall w a t_rev,
-      generates a t_rev -> generates (aleak_word w a) (leak_word w :: t_rev)
-  | leak_list_gen : forall l a t_rev,
-      generates a t_rev -> generates (aleak_list l a) (leak_list l :: t_rev)
-  | consume_word_gen : forall w f t_rev,
-      generates (f w) t_rev -> generates (aconsume_word f) (consume_word w :: t_rev).
-
-  Inductive abs_tr_eq : abstract_trace -> abstract_trace -> Prop :=
-  | eq_empty : abs_tr_eq empty empty
-  | eq_leak_unit a1 a2 : abs_tr_eq a1 a2 -> abs_tr_eq (aleak_unit a1) (aleak_unit a2)
-  | eq_leak_bool b a1 a2 : abs_tr_eq a1 a2 -> abs_tr_eq (aleak_bool b a1) (aleak_bool b a2)
-  | eq_leak_word w a1 a2 : abs_tr_eq a1 a2 -> abs_tr_eq (aleak_word w a1) (aleak_word w a2)
-  | eq_leak_list l a1 a2 : abs_tr_eq a1 a2 -> abs_tr_eq (aleak_list l a1) (aleak_list l a2)
-  | eq_consume_word f1 f2 : (forall w, abs_tr_eq (f1 w) (f2 w)) -> abs_tr_eq (aconsume_word f1) (aconsume_word f2).
-
-  Fixpoint abstract_app (a1 a2 : abstract_trace) : abstract_trace :=
-    match a1 with
-    | empty => a2
-    | aleak_unit a1' => aleak_unit (abstract_app a1' a2)
-    | aleak_bool b a1' => aleak_bool b (abstract_app a1' a2)
-    | aleak_word w a1' => aleak_word w (abstract_app a1' a2)
-    | aleak_list l a1' => aleak_list l (abstract_app a1' a2)
-    | aconsume_word f => aconsume_word (fun w => abstract_app (f w) a2)
+  Definition need_to_predict e :=
+    match e with
+    | consume_word _ => True
+    | _ => False
     end.
-
-  Lemma generates_app :
-    forall a1 a2 t1 t2,
-      generates a1 t1 -> generates a2 t2 -> generates (abstract_app a1 a2) (t1 ++ t2).
-  Proof.
-    intros a1. induction a1; intros a2 t1 t2 H1 H2; inversion H1; subst; cbn [abstract_app List.app]; try constructor; auto.
-  Qed.
-
-  Fixpoint generator (t_rev : trace) : abstract_trace :=
-    match t_rev with
-    | nil => empty
-    | leak_unit :: t_rev' => aleak_unit (generator t_rev')
-    | leak_bool b :: t_rev' => aleak_bool b (generator t_rev')
-    | leak_word w :: t_rev' => aleak_word w (generator t_rev')
-    | leak_list l :: t_rev' => aleak_list l (generator t_rev')
-    | consume_word w :: t_rev' => aconsume_word (fun _ => generator t_rev')
-    end.
-
-  Lemma generator_generates (t: trace) :
-    generates (generator t) t.
-  Proof. induction t; try constructor. destruct a; cbn [generator]; constructor; assumption. Qed.
-
-  Fixpoint shrink (a : abstract_trace) (k : trace) : abstract_trace :=
-    match a, k with
-    | aleak_unit a', leak_unit :: k' => shrink a' k'
-    | aleak_bool b1 a', leak_bool b2 :: k' => shrink a' k'
-    | aleak_word w1 a', leak_word w2 :: k' => shrink a' k'
-    | aleak_list l1 a', leak_list l2 :: k' => shrink a' k'
-    | aconsume_word fa', consume_word w :: k' => shrink (fa' w) k'
-    | _, nil => a
-    | _, _ => empty (*fail*)
-    end.
-
-  Lemma shrink_correct (a : abstract_trace) (k1 k2 : trace) :
-    generates a (k1 ++ k2) ->
-    generates (shrink a k1) k2.
-  Proof.
-    revert a. induction k1.
-    - intros. destruct a; assumption.
-    - intros. inversion H; subst; simpl; auto.
-  Qed.
-
-  Lemma empty_min a :
-    a = empty \/ abstract_trace_lt empty a.
-  Proof.
-    induction a.
-    - left. reflexivity.
-    - right. destruct IHa as [IHa|IHa].
-      + subst. apply t_step. constructor.
-      + eapply t_trans; [eassumption|]. apply t_step. constructor.
-    - right. destruct IHa as [IHa|IHa].
-      + subst. apply t_step. constructor.
-      + eapply t_trans; [eassumption|]. apply t_step. constructor.
-    - right. destruct IHa as [IHa|IHa].
-      + subst. apply t_step. constructor.
-      + eapply t_trans; [eassumption|]. apply t_step. constructor.
-    - right. destruct IHa as [IHa|IHa].
-      + subst. apply t_step. constructor.
-      + eapply t_trans; [eassumption|]. apply t_step. constructor.
-    - right. specialize (H (word.of_Z 0)). destruct H as [H|H].
-      + rewrite <- H. apply t_step. constructor.
-      + eapply t_trans; [eassumption|]. apply t_step. constructor.
-  Qed.
-
-  Lemma shrink_le a k :
-    a = shrink a k \/ abstract_trace_lt (shrink a k) a.
-  Proof.
-    revert a. induction k; intros.
-    - left. destruct a; reflexivity.
-    - destruct a0, a; simpl; try apply empty_min.
-      + right. specialize (IHk a0). destruct IHk as [IHk|IHk].
-        -- rewrite <- IHk. apply t_step. constructor.
-        -- eapply t_trans; [eassumption|]. apply t_step. constructor.
-      + right. specialize (IHk a0). destruct IHk as [IHk|IHk].
-        -- rewrite <- IHk. apply t_step. constructor.
-        -- eapply t_trans; [eassumption|]. apply t_step. constructor.
-      + right. specialize (IHk a0). destruct IHk as [IHk|IHk].
-        -- rewrite <- IHk. apply t_step. constructor.
-        -- eapply t_trans; [eassumption|]. apply t_step. constructor.
-      + right. specialize (IHk a0). destruct IHk as [IHk|IHk].
-        -- rewrite <- IHk. apply t_step. constructor.
-        -- eapply t_trans; [eassumption|]. apply t_step. constructor.
-      + right. specialize (IHk (after r)). destruct IHk as [IHk|IHk].
-        -- rewrite <- IHk. apply t_step. constructor.
-        -- eapply t_trans; [eassumption|]. apply t_step. constructor.
-  Qed.
-
-  Lemma generates_ext a1 k :
-    generates a1 k ->
-    forall a2,
-      abs_tr_eq a1 a2 ->
-      generates a2 k.
-  Proof.
-    intros H. induction H.
-    - intros. inversion H. subst. constructor.
-    - intros a2 H'. inversion H'. subst. constructor. auto.
-    - intros a2 H'. inversion H'. subst. constructor. auto.
-    - intros a2 H'. inversion H'. subst. constructor. auto.
-    - intros a2 H'. inversion H'. subst. constructor. auto.
-    - intros a2 H'. inversion H'. subst. constructor. auto.
-  Qed.
-
-  Lemma abstract_app_ext a1 a2 a1' a2' :
-    abs_tr_eq a1 a1' ->
-    abs_tr_eq a2 a2' ->
-    abs_tr_eq (abstract_app a1 a2) (abstract_app a1' a2').
-  Proof.
-    intros H1 H2. induction H1; simpl; try constructor; assumption.
-  Qed.
-
-  Lemma abs_tr_eq_refl a : abs_tr_eq a a.
-  Proof. induction a; constructor; assumption. Qed.
-
-  Lemma abs_tr_eq_sym a b : abs_tr_eq a b -> abs_tr_eq b a.
-  Proof. intros H. induction H; constructor; auto. Qed.
-
-  Lemma abs_tr_eq_refl' a1 a2 : a1 = a2 -> abs_tr_eq a1 a2.
-  Proof. intros. subst. apply abs_tr_eq_refl. Qed.
-
-  Check generates_app.
-
-  Lemma generates_app_eq a1 a2 t1 t2 t :
-    generates a1 t1 ->
-    t1 ++ t2 = t ->
-    generates a2 t2 ->
-    generates (abstract_app a1 a2) t.
-  Proof. intros. subst. apply generates_app; assumption. Qed.
-
   
+  Inductive predicts : (trace -> event) -> trace -> Prop :=
+  | predicts_cons :
+    forall f e k,
+      (need_to_predict e -> f nil = e) ->
+      predicts (fun k' => f (e :: k')) k ->
+      predicts f (e :: k)
+  | predicts_nil :
+    forall f,
+      predicts f nil.
+  
+  Lemma predicts_ext f k g :
+    (forall k', f k' = g k') ->
+    predicts f k ->
+    predicts g k.
+  Proof.
+    intros H1 H2. revert H1. revert g. induction H2.
+    - intros g0 Hfg0. econstructor.
+      + rewrite <- Hfg0. apply H.
+      + apply IHpredicts. intros. apply Hfg0.
+    - intros. constructor.
+  Qed.
+  
+  Lemma predict_cons f k1 k2 e :
+    predicts f (k1 ++ e :: k2) ->
+    need_to_predict e ->
+    f k1 = e.
+  Proof.
+    revert k2. revert e. revert f. induction k1.
+    - intros. inversion H. subst. auto.
+    - intros. inversion H. subst. apply IHk1 with (1 := H5) (2 := H0).
+  Qed.
 End WithIOEvent. (*maybe extend this to the end?*)
                             
   Definition ExtSpec{width: Z}{BW: Bitwidth width}{word: word.word width}{mem: map.map word byte} :=
