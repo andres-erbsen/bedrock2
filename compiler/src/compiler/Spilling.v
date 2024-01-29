@@ -327,7 +327,7 @@ Section Spilling.
                                           (fun skip' sk_so_far'' =>
                                              let k''' := List.skipn (length skip') k'' in
                                              stransform_stmt_trace (s, k''', sk_so_far'', fpval,
-                                                 (fun skip'' => f (k ++ leak_bool true :: k' ++ skip''))) _)) _
+                                                 (fun skip'' => f (skip ++ leak_bool true :: skip' ++ skip''))) _)) _
                                 | leak_bool false :: k'' =>
                                     fun _ =>
                                       f (skip ++ [leak_bool false]) (sk_so_far' ++ leak_prepare_bcond fpval c ++ leak_spill_bcond ++ [leak_bool false])
@@ -1497,12 +1497,14 @@ Section Spilling.
                      post k1' t1' m1' l1' mc1' /\
                      k1' = k1'' ++ k1 /\
                      k2' = k2'' ++ k2 /\
-                     forall k1''' k20 k2''' f,
-                       (predicts pick_sp (k20 ++ rev k2'' ++ k2''')  ->
-                        fst (stransform_stmt_trace e1 pick_sp (s1, rev k1'' ++ k1''', k20, fpval, f (rev k1'' ++ k1'''))) =
-                          fst (f (rev k1'' ++ k1''') (rev k1'') (k20 ++ rev k2'')) /\
-                          (predicts (fun k => snd (f (rev k1'' ++ k) (rev k1'') (k20 ++ rev k2''))) k1''' ->
-                           predicts (fun k => snd (stransform_stmt_trace e1 pick_sp (s1, k, k20, fpval, (f k)))) (rev k1'' ++ k1''')))).
+                     forall k20 k2''',
+                       (predicts pick_sp (k20 ++ rev k2'' ++ k2''') ->
+                        (forall k1''' f,
+                            fst (stransform_stmt_trace e1 pick_sp (s1, rev k1'' ++ k1''', k20, fpval, f)) =
+                              fst (f (rev k1'') (k20 ++ rev k2''))) /\
+                          (forall k1''' f,
+                              predicts (fun k => snd (f (rev k1'' ++ k) (rev k1'') (k20 ++ rev k2''))) k1''' ->
+                              predicts (fun k => snd (stransform_stmt_trace e1 pick_sp (s1, k, k20, fpval, (f k)))) (rev k1'' ++ k1''')))).
 
   Definition call_spec(e: env) '(argnames, retnames, fbody)
     (k: trace)(t: io_trace)(m: mem)(argvals: list word)
@@ -1549,7 +1551,7 @@ Section Spilling.
                       match l with
                       | [] => m0
                       | a1 :: l1 => a1 :: app l1 m0
-                      end) = app.
+                      end) = @List.app event.
   Proof. reflexivity. Qed. Print stransform_fun_trace.
   
   Lemma spill_fun_correct_aux: forall e1 e2 argnames1 retnames1 body1 argnames2 retnames2 body2,
@@ -1705,15 +1707,13 @@ Section Spilling.
     { subst kL6. subst kL4. rewrite app_one_cons. repeat rewrite app_assoc. reflexivity. }
     { repeat (rewrite rev_app_distr || rewrite rev_involutive || cbn [rev List.app]).
       intros H. rewrite app_one_cons in H. rewrite app_assoc in H.
-      specialize CT with (k1''' := []) (1 := H).
+      specialize CT with (1 := H). destruct CT as [updown downup].
       simpl in H. inversion H. subst. specialize (H4 I).
       cbv [stransform_fun_trace]. rewrite H4. simpl.
-      edestruct CT as [updown downup]. rewrite app_nil_r in updown, downup.
-      instantiate (1 := fun _ => _) in updown. simpl in updown. rewrite updown.
-      simpl in *. clear updown. specialize (downup ltac:(constructor)).
-      split.
-      { repeat rewrite <- app_assoc. reflexivity. }
-      apply downup. }
+      specialize (updown []). specialize (downup []).
+      rewrite app_nil_r in updown, downup. split.
+      { rewrite updown. repeat rewrite <- app_assoc. reflexivity. }
+      apply downup. repeat rewrite <- app_assoc. constructor. }
      Unshelve.
     all: try assumption.
   Qed.
@@ -1741,13 +1741,14 @@ Section Spilling.
                      post k1' t1' m1' l1' mc1' /\
                      k1' = k1'' ++ k1 /\
                      k2' = k2'' ++ k2 /\
-                     forall k1''' k20 k2''' f,
+                     forall k20 k2''',
                        (predicts pick_sp (k20 ++ rev k2'' ++ k2''') ->
-                        (predicts (fun k => snd (f (rev k1'' ++ k) (rev k1'') (k20 ++ rev k2''))) k1''' ->
-                         predicts (fun k => snd (stransform_stmt_trace e1 pick_sp (s1, k, k20, fpval, (f k)))) (rev k1'' ++ k1''')) (*turns out to be important that we solve this goal first, so that we instantiate evar f properly*)/\
-                          fst (stransform_stmt_trace e1 pick_sp (s1, rev k1'' ++ k1''', k20, fpval, f (rev k1'' ++ k1'''))) =
-                          fst (f (rev k1'' ++ k1''') (rev k1'') (k20 ++ rev k2''))
-                          )).
+                        (forall k1''' f,
+                            fst (stransform_stmt_trace e1 pick_sp (s1, rev k1'' ++ k1''', k20, fpval, f)) =
+                              fst (f (rev k1'') (k20 ++ rev k2''))) /\
+                          (forall k1''' f,
+                              predicts (fun k => snd (f (rev k1'' ++ k) (rev k1'') (k20 ++ rev k2''))) k1''' ->
+                              predicts (fun k => snd (stransform_stmt_trace e1 pick_sp (s1, k, k20, fpval, (f k)))) (rev k1'' ++ k1''')))).
   Proof.
     intros e1 e2 Ev. intros s1 k1 t1 m1 l1 mc1 post.
     induction 1; intros; cbn [spill_stmt valid_vars_src Forall_vars_stmt] in *; fwd.
@@ -1811,14 +1812,14 @@ Section Spilling.
           intros.
           repeat (rewrite rev_app_distr in * || rewrite rev_involutive in * || cbn [rev List.app] in * ).
           split.
-          { intros Hpredicts.
-            eapply predicts_ext.
-            { intros. rewrite stransform_stmt_trace_step. cbn [stransform_stmt_trace_body].
-              reflexivity. }
-            constructor.
-            { intros F. destruct F. }
-            simpl. apply Hpredicts. }
-          rewrite stransform_stmt_trace_step. cbn [stransform_stmt_trace_body]. reflexivity. }
+          { intros. rewrite stransform_stmt_trace_step. cbn [stransform_stmt_trace_body]. reflexivity. }
+          intros ? ? Hpredicts.
+          eapply predicts_ext.
+          { intros. rewrite stransform_stmt_trace_step. cbn [stransform_stmt_trace_body].
+            reflexivity. }
+          constructor.
+          { intros []. }
+          simpl. apply Hpredicts. }
         (* related for set_vars_to_reg_range_correct: *)
         unfold related.
         eexists _, _, _. ssplit.
@@ -2051,20 +2052,19 @@ Section Spilling.
         repeat rewrite <- app_assoc in H3. Check app_one_cons.
         rewrite (app_one_cons (consume_word _)) in H3.
         repeat rewrite (app_assoc _ _ (rev tH5' ++ _)) in H3. eapply CT in H3. clear CT.
-        destruct H3 as [downup updown]. split.
-        { clear updown. intros Hpredicts.
-          eapply predicts_ext.
-          { intros. rewrite stransform_stmt_trace_step. cbn [stransform_stmt_trace_body].
-            reflexivity. }
-          constructor.
-          { intros F. destruct F. }
-          rewrite H. rewrite H3'.
-          instantiate (2 := fun _ => _) in downup. simpl in downup.
-          repeat rewrite <- app_assoc. apply downup. simpl.
+        destruct H3 as [updown downup]. split.
+        { intros. clear downup. rewrite stransform_stmt_trace_step. cbn [stransform_stmt_trace_body].
+          rewrite H. rewrite H3'. repeat rewrite <- app_assoc. simpl in updown. simpl.
+          rewrite updown. repeat rewrite <- app_assoc. reflexivity. }
+        clear updown. intros ? ? Hpredicts.
+        eapply predicts_ext.
+        { intros. rewrite stransform_stmt_trace_step. cbn [stransform_stmt_trace_body].
+          reflexivity. }
+        constructor.
+        { intros F. destruct F. }
+        rewrite H. rewrite H3'.
+        repeat rewrite <- app_assoc. apply downup. simpl.
         repeat rewrite <- app_assoc. apply Hpredicts. }
-        clear downup. rewrite stransform_stmt_trace_step. cbn [stransform_stmt_trace_body].
-        rewrite H. rewrite H3'. repeat rewrite <- app_assoc. simpl in updown. simpl.
-        rewrite updown. f_equal. f_equal. repeat rewrite <- app_assoc. reflexivity. }
                  
     - (* exec.load *)
       eapply exec.seq_cps.
@@ -2092,13 +2092,13 @@ Section Spilling.
         intros. 
         repeat (rewrite rev_app_distr in * || rewrite rev_involutive in * || cbn [rev List.app] in * ).
         split.
-        { intros Hpredicts. eapply predicts_ext.
-          { intros. rewrite stransform_stmt_trace_step. cbn [stransform_stmt_trace_body].
-            reflexivity. }
-          constructor.
-          { intros F. destruct F. }
-          apply Hpredicts. }
-        rewrite stransform_stmt_trace_step. cbn [stransform_stmt_trace_body]. reflexivity.
+        { intros. rewrite stransform_stmt_trace_step. cbn [stransform_stmt_trace_body]. reflexivity. }
+        intros ? ? Hpredicts. eapply predicts_ext.
+        { intros. rewrite stransform_stmt_trace_step. cbn [stransform_stmt_trace_body].
+          reflexivity. }
+        constructor.
+        { intros []. }
+        apply Hpredicts.
         (*end ct stuff for load*)
         
     - (* exec.store *)
@@ -2133,13 +2133,13 @@ Section Spilling.
       intros. 
       repeat (rewrite rev_app_distr in * || rewrite rev_involutive in * || cbn [rev List.app] in * ).
       split.
-      { intros Hpredicts. eapply predicts_ext.
-        { intros. rewrite stransform_stmt_trace_step. cbn [stransform_stmt_trace_body].
-          reflexivity. }
-        constructor.
-        { intros F. destruct F. }
-        apply Hpredicts. }
-      rewrite stransform_stmt_trace_step. cbn [stransform_stmt_trace_body]. reflexivity.
+      { intros. rewrite stransform_stmt_trace_step. cbn [stransform_stmt_trace_body]. reflexivity. }
+      intros ? ? Hpredicts. eapply predicts_ext.
+      { intros. rewrite stransform_stmt_trace_step. cbn [stransform_stmt_trace_body].
+        reflexivity. }
+      constructor.
+      { intros []. }
+      apply Hpredicts.
       
     - (* exec.inlinetable *)
       eapply exec.seq_cps. eapply load_iarg_reg_correct; (blia || eassumption || idtac).
@@ -2158,13 +2158,13 @@ Section Spilling.
         { subst k2'0 k2'. rewrite app_one_cons. repeat rewrite app_assoc. reflexivity. }
         repeat (rewrite rev_app_distr in * || rewrite rev_involutive in * || cbn [rev List.app] in * ).
         split.
-        { intros Hpredicts. eapply predicts_ext.
-          { intros. rewrite stransform_stmt_trace_step. cbn [stransform_stmt_trace_body].
-            reflexivity. }
-          constructor.
-          { intros F. destruct F. }
-          apply Hpredicts. }
-        rewrite stransform_stmt_trace_step. cbn [stransform_stmt_trace_body]. reflexivity.
+        { intros. rewrite stransform_stmt_trace_step. cbn [stransform_stmt_trace_body]. reflexivity. }
+        intros ? ? Hpredicts. eapply predicts_ext.
+        { intros. rewrite stransform_stmt_trace_step. cbn [stransform_stmt_trace_body].
+          reflexivity. }
+        constructor.
+        { intros []. }
+        apply Hpredicts.
 
     - (* exec.stackalloc *)
       rename H1 into IH.
@@ -2190,19 +2190,17 @@ Section Spilling.
       assert (H9' := predict_cons _ _ _ _ H9). specialize (H9' I).
       repeat rewrite <- app_assoc in H9. rewrite app_one_cons in H9.
       repeat rewrite (app_assoc _ _ (rev k2'' ++ _)) in H9.
-      specialize CT with (1 := H9). edestruct CT as [downup updown].
+      specialize CT with (1 := H9). edestruct CT as [updown downup].
       split.
-      { clear updown. intros Hpredicts. eapply predicts_ext.
-        { intros. rewrite stransform_stmt_trace_step. cbn [stransform_stmt_trace_body].
-          reflexivity. }
-        constructor.
-        { intros _. simpl. apply H9'. }
-        instantiate (2 := fun _ => _) in downup. simpl in downup.
-        apply downup. repeat rewrite <- app_assoc. apply Hpredicts. }
-      rewrite stransform_stmt_trace_step. cbn [stransform_stmt_trace_body].
-      repeat rewrite <- app_assoc in updown. simpl in updown.
-      apply updown. (*makes sense that apply works.  why does 'rewrite updown' fail?*)
-
+      { intros. rewrite stransform_stmt_trace_step. cbn [stransform_stmt_trace_body].
+        repeat rewrite <- app_assoc in updown. simpl in updown. rewrite updown. reflexivity. }
+      clear updown. intros ? ? Hpredicts. eapply predicts_ext.
+      { intros. rewrite stransform_stmt_trace_step. cbn [stransform_stmt_trace_body].
+        reflexivity. }
+      constructor.
+      { intros _. simpl. apply H9'. }
+      apply downup. repeat rewrite <- app_assoc. apply Hpredicts.
+      
     - (* exec.lit *)
       eapply exec.seq_cps. eapply exec.lit.
       eapply save_ires_reg_correct''; (blia || eassumption || idtac).
@@ -2212,11 +2210,11 @@ Section Spilling.
       intros.
       repeat (rewrite rev_app_distr in * || rewrite rev_involutive in * || cbn [rev List.app] in * ).
       split.
-      { intros Hpredicts. eapply predicts_ext.
-        { intros. rewrite stransform_stmt_trace_step. cbn [stransform_stmt_trace_body].
-          reflexivity. }
-        apply Hpredicts. }
-      rewrite stransform_stmt_trace_step. cbn [stransform_stmt_trace_body]. reflexivity.
+      { intros. rewrite stransform_stmt_trace_step. cbn [stransform_stmt_trace_body]. reflexivity. }
+      intros ? ? Hpredicts. eapply predicts_ext.
+      { intros. rewrite stransform_stmt_trace_step. cbn [stransform_stmt_trace_body].
+        reflexivity. }
+      apply Hpredicts.
       
     - (* exec.op *)
       unfold exec.lookup_op_locals in *.
@@ -2236,14 +2234,14 @@ Section Spilling.
         intros.
         repeat (rewrite rev_app_distr in * || rewrite rev_involutive in * || cbn [rev List.app] in * ).
         split.
-        { intros. eapply predicts_ext.
-          { intros. rewrite stransform_stmt_trace_step. cbn [stransform_stmt_trace_body].
-            reflexivity. }
-          destruct op; simpl in *; try apply H5.
-          all: repeat (constructor; [intros F; destruct F|]).
-          all: try apply H5. }
-        rewrite stransform_stmt_trace_step. cbn [stransform_stmt_trace_body].
-        destruct op; reflexivity. }
+        { intros. rewrite stransform_stmt_trace_step. cbn [stransform_stmt_trace_body].
+          destruct op; reflexivity. }
+        intros. eapply predicts_ext.
+        { intros. rewrite stransform_stmt_trace_step. cbn [stransform_stmt_trace_body].
+          reflexivity. }
+        destruct op; simpl in *; try apply H5.
+        all: repeat (constructor; [intros F; destruct F|]).
+        all: try apply H5. }
       {
         eapply exec.seq_cps. eapply exec.op.
         { apply map.get_put_same. }
@@ -2255,14 +2253,14 @@ Section Spilling.
         intros.
         repeat (rewrite rev_app_distr in * || rewrite rev_involutive in * || cbn [rev List.app] in * ).
         split.
-        { intros. eapply predicts_ext.
-          { intros. rewrite stransform_stmt_trace_step. cbn [stransform_stmt_trace_body].
-            reflexivity. }
-          destruct op; simpl in *; try apply H4.
-          all: repeat (constructor; [intros F; destruct F|]).
-          all: try apply H4. }
-        rewrite stransform_stmt_trace_step. cbn [stransform_stmt_trace_body].
-        destruct op; reflexivity. }
+        { intros. rewrite stransform_stmt_trace_step. cbn [stransform_stmt_trace_body].
+          destruct op; reflexivity. }
+        intros. eapply predicts_ext.
+        { intros. rewrite stransform_stmt_trace_step. cbn [stransform_stmt_trace_body].
+          reflexivity. }
+        destruct op; simpl in *; try apply H4.
+        all: repeat (constructor; [intros F; destruct F|]).
+        all: try apply H4. }
       
     - (* exec.set *)
       eapply exec.seq_cps. eapply load_iarg_reg_correct; (blia || eassumption || idtac).
@@ -2276,11 +2274,11 @@ Section Spilling.
       intros.
       repeat (rewrite rev_app_distr in * || rewrite rev_involutive in * || cbn [rev List.app] in * ).
       split.
-      { intros. eapply predicts_ext.
-        { intros. rewrite stransform_stmt_trace_step. cbn [stransform_stmt_trace_body].
-          reflexivity. }
-        assumption. }
-      rewrite stransform_stmt_trace_step. cbn [stransform_stmt_trace_body]. reflexivity.
+      { intros. rewrite stransform_stmt_trace_step. cbn [stransform_stmt_trace_body]. reflexivity. }
+      intros. eapply predicts_ext.
+      { intros. rewrite stransform_stmt_trace_step. cbn [stransform_stmt_trace_body].
+        reflexivity. }
+      assumption.      
       
     - (* exec.if_true *)
       unfold prepare_bcond. destr cond; cbn [ForallVars_bcond eval_bcond spill_bcond] in *; fwd.
@@ -2303,19 +2301,19 @@ Section Spilling.
         repeat (rewrite rev_app_distr in * || rewrite rev_involutive in * || cbn [rev List.app] in * ).
         repeat rewrite <- app_assoc in H3. simpl in H3. rewrite app_one_cons in H3.
         repeat rewrite (app_assoc _ _ (rev k2'' ++ _)) in H3.
-        specialize CT with (1 := H3). edestruct CT as [downup updown].
+        specialize CT with (1 := H3). destruct CT as [updown downup].
         split.
-        { intros Hpredicts. eapply predicts_ext.
-          { intros. rewrite stransform_stmt_trace_step. cbn [stransform_stmt_trace_body].
-            reflexivity. }
-          constructor.
-          { intros []. }
-          clear updown. instantiate (2 := fun _ => _) in downup. simpl in downup.
-          cbv [leak_prepare_bcond leak_spill_bcond]. simpl. repeat rewrite <- app_assoc.
-          eapply downup. repeat rewrite <- app_assoc. apply Hpredicts. }
-        rewrite stransform_stmt_trace_step. cbn [stransform_stmt_trace_body].
-        cbv [leak_prepare_bcond leak_spill_bcond]. simpl. repeat rewrite <- app_assoc in *.
-        apply updown. (*again, rewrite updown fails here. *)
+        { intros. rewrite stransform_stmt_trace_step. cbn [stransform_stmt_trace_body].
+          cbv [leak_prepare_bcond leak_spill_bcond]. simpl. repeat rewrite <- app_assoc in *.
+          apply updown. }
+        intros ? ? Hpredicts. eapply predicts_ext.
+        { intros. rewrite stransform_stmt_trace_step. cbn [stransform_stmt_trace_body].
+          reflexivity. }
+        constructor.
+        { intros []. }
+        clear updown. cbv [leak_prepare_bcond leak_spill_bcond]. simpl. repeat rewrite <- app_assoc.
+        eapply downup. repeat rewrite <- app_assoc. apply Hpredicts.
+        
       + eapply exec.seq_cps. eapply load_iarg_reg_correct; (blia || eassumption || idtac).
         clear mc2 H2. intros.
         eapply exec.if_true. {
@@ -2332,19 +2330,18 @@ Section Spilling.
         repeat (rewrite rev_app_distr in * || rewrite rev_involutive in * || cbn [rev List.app] in * ).
         repeat rewrite <- app_assoc in H2. simpl in H2. rewrite app_one_cons in H2.
         repeat rewrite (app_assoc _ _ (rev k2'' ++ _)) in H2.
-        specialize CT with (1 := H2). edestruct CT as [downup updown].
+        specialize CT with (1 := H2). destruct CT as [updown downup].
         split.
-        { intros Hpredicts. eapply predicts_ext.
+        { intros. rewrite stransform_stmt_trace_step. cbn [stransform_stmt_trace_body].
+          cbv [leak_prepare_bcond leak_spill_bcond]. simpl. repeat rewrite <- app_assoc in *.
+          apply updown. }
+        { intros ? ? Hpredicts. eapply predicts_ext.
           { intros. rewrite stransform_stmt_trace_step. cbn [stransform_stmt_trace_body].
             reflexivity. }
           constructor.
           { intros []. }
-          clear updown. instantiate (2 := fun _ => _) in downup. simpl in downup.
-          cbv [leak_prepare_bcond leak_spill_bcond]. simpl. repeat rewrite <- app_assoc.
-          eapply downup. repeat rewrite <- app_assoc. apply Hpredicts. }
-        rewrite stransform_stmt_trace_step. cbn [stransform_stmt_trace_body].
-        cbv [leak_prepare_bcond leak_spill_bcond]. simpl. repeat rewrite <- app_assoc in *.
-        apply updown. (*again, rewrite updown fails here. *)
+          clear updown. cbv [leak_prepare_bcond leak_spill_bcond]. simpl. repeat rewrite <- app_assoc.
+          eapply downup. repeat rewrite <- app_assoc. apply Hpredicts. }        
         
     - (* exec.if_false *)
       unfold prepare_bcond. destr cond; cbn [ForallVars_bcond eval_bcond spill_bcond] in *; fwd.
@@ -2367,19 +2364,19 @@ Section Spilling.
         repeat (rewrite rev_app_distr in * || rewrite rev_involutive in * || cbn [rev List.app] in * ).
         repeat rewrite <- app_assoc in H3. simpl in H3. rewrite app_one_cons in H3.
         repeat rewrite (app_assoc _ _ (rev k2'' ++ _)) in H3.
-        specialize CT with (1 := H3). edestruct CT as [downup updown].
+        specialize CT with (1 := H3). destruct CT as [updown downup].
         split.
-        { intros Hpredicts. eapply predicts_ext.
-          { intros. rewrite stransform_stmt_trace_step. cbn [stransform_stmt_trace_body].
-            reflexivity. }
-          constructor.
-          { intros []. }
-          clear updown. instantiate (2 := fun _ => _) in downup. simpl in downup.
-          cbv [leak_prepare_bcond leak_spill_bcond]. simpl. repeat rewrite <- app_assoc.
-          eapply downup. repeat rewrite <- app_assoc. apply Hpredicts. }
-        rewrite stransform_stmt_trace_step. cbn [stransform_stmt_trace_body].
-        cbv [leak_prepare_bcond leak_spill_bcond]. simpl. repeat rewrite <- app_assoc in *.
-        apply updown. (*again, rewrite updown fails here. *)
+        { intros. rewrite stransform_stmt_trace_step. cbn [stransform_stmt_trace_body].
+          cbv [leak_prepare_bcond leak_spill_bcond]. simpl. repeat rewrite <- app_assoc in *.
+          apply updown. }
+        intros ? ? Hpredicts. eapply predicts_ext.
+        { intros. rewrite stransform_stmt_trace_step. cbn [stransform_stmt_trace_body].
+          reflexivity. }
+        constructor.
+        { intros []. }
+        clear updown. cbv [leak_prepare_bcond leak_spill_bcond]. simpl. repeat rewrite <- app_assoc.
+        eapply downup. repeat rewrite <- app_assoc. apply Hpredicts.
+        
       + eapply exec.seq_cps. eapply load_iarg_reg_correct; (blia || eassumption || idtac).
         clear mc2 H2. intros.
         eapply exec.if_false. {
@@ -2396,20 +2393,19 @@ Section Spilling.
         repeat (rewrite rev_app_distr in * || rewrite rev_involutive in * || cbn [rev List.app] in * ).
         repeat rewrite <- app_assoc in H1. simpl in H1. rewrite app_one_cons in H1.
         repeat rewrite (app_assoc _ _ (rev k2'' ++ _)) in H1.
-        specialize CT with (1 := H1). edestruct CT as [downup updown].
+        specialize CT with (1 := H1). destruct CT as [updown downup].
         split.
-        { intros Hpredicts. eapply predicts_ext.
-          { intros. rewrite stransform_stmt_trace_step. cbn [stransform_stmt_trace_body].
-            reflexivity. }
-          constructor.
-          { intros []. }
-          clear updown. instantiate (2 := fun _ => _) in downup. simpl in downup.
-          cbv [leak_prepare_bcond leak_spill_bcond]. simpl. repeat rewrite <- app_assoc.
-          eapply downup. repeat rewrite <- app_assoc. apply Hpredicts. }
-        rewrite stransform_stmt_trace_step. cbn [stransform_stmt_trace_body].
+        { intros. rewrite stransform_stmt_trace_step. cbn [stransform_stmt_trace_body].
         cbv [leak_prepare_bcond leak_spill_bcond]. simpl. repeat rewrite <- app_assoc in *.
-        apply updown. (*again, rewrite updown fails here. *)
-        
+        apply updown. }
+        intros ? ? Hpredicts. eapply predicts_ext.
+        { intros. rewrite stransform_stmt_trace_step. cbn [stransform_stmt_trace_body].
+          reflexivity. }
+        constructor.
+        { intros []. }
+        clear updown. cbv [leak_prepare_bcond leak_spill_bcond]. simpl. repeat rewrite <- app_assoc.
+        eapply downup. repeat rewrite <- app_assoc. apply Hpredicts.
+          
     - (* exec.loop *)
       rename IHexec into IH1, H3 into IH2, H5 into IH12.
       eapply exec.loop_cps.
@@ -2437,20 +2433,23 @@ Section Spilling.
           intros.
           repeat (rewrite rev_app_distr in * || rewrite rev_involutive in * || cbn [rev List.app] in * ).
           repeat rewrite <- app_assoc in H5.
-          specialize H3p4 with (1 := H5). edestruct H3p4 as [downup1 updown1]. clear H3p4.
-        split.
-        { intros Hpredicts. eapply predicts_ext.
+          specialize H3p4 with (1 := H5). edestruct H3p4 as [updown1 downup1]. clear H3p4.
+          split.
+          { intros. rewrite stransform_stmt_trace_step. cbn [stransform_stmt_trace_body].
+            repeat rewrite <- app_assoc in *. rewrite updown1. clear updown1.
+            rewrite List.skipn_app_r by reflexivity. simpl. cbn [Let_In_pf_nd].
+            repeat rewrite <- app_assoc. reflexivity. }
+          intros ? ? Hpredicts. eapply predicts_ext.
           { intros. rewrite stransform_stmt_trace_step. cbn [stransform_stmt_trace_body].
             reflexivity. }
-          instantiate (2 := fun _ => _) in downup1. repeat rewrite <- app_assoc.
-          eapply downup1.
+          rewrite <- (app_assoc _ _ k1'''). eapply downup1.
           constructor.
           { intros []. }
           eapply predicts_ext.
           2: eapply Hpredicts.
           intros. rewrite List.skipn_app_r by reflexivity.
           cbn [Let_In_pf_nd]. cbv [leak_prepare_bcond leak_spill_bcond].
-          repeat rewrite <- app_assoc in *. reflexivity. }
+          repeat rewrite <- app_assoc in *. reflexivity.
         
         * Check exec.loop_cps. eapply exec.weaken. 1: eapply IH2.
           -- eassumption.
@@ -2460,27 +2459,42 @@ Section Spilling.
           -- cbv beta. intros. fwd. eapply exec.weaken.
              ++ eapply IH12; eauto 10.
              ++ cbv beta. intros.
-                destruct H5 as [k1' [t1'1 [m1'1 [l1'1 [mc1'1 [t1''1 [t2''1 [R [Hpost [E1 [E2 CT]]]]]]]]]]].
+                destruct H5 as [k1' [t1'1 [m1'1 [l1'1 [mc1'1 [k1''1 [k2''1 [R [Hpost [E1 [E2 CT]]]]]]]]]]].
                 subst. do 7 eexists.
                 split; [eassumption|]. split; [eassumption|]. split.
                 { rewrite app_one_cons. repeat rewrite app_assoc. reflexivity. } split. 
                 { rewrite app_one_cons. repeat rewrite app_assoc. reflexivity. }
                 intros.
                 repeat (rewrite rev_involutive in * || rewrite rev_app_distr in * || rewrite <- app_assoc in * ).
-                eapply generates_ext.
-                2: { apply abs_tr_eq_sym. apply stransform_stmt_trace_step. }
-                cbn [stransform_stmt_trace_body].
-                eapply H3p4.
-                { eassumption. }
-                apply shrink_correct in H5. inversion H5. subst. cbn [Let_In_pf_nd].
-                eapply generates_app_eq.
-                { apply generator_generates. }
-                { cbv [leak_prepare_bcond]. repeat (rewrite <- app_assoc || cbn [List.app]). reflexivity. }
-                eapply H5p4. 
-                { eassumption. }
-                eapply CT.
-                { apply shrink_correct in H10. eapply H10. }
-                assumption.
+                repeat rewrite (app_assoc _ _ (rev k2''1 ++ _)) in H5. specialize CT with (1 := H5).
+                repeat rewrite <- app_assoc in H5.
+                repeat rewrite (app_assoc _ _ (rev k2''0 ++ _)) in H5. specialize H5p4 with (1 := H5).
+                repeat rewrite <- app_assoc in H5.
+                repeat rewrite <- (app_assoc _ _ (rev k2'' ++ _)) in H5. specialize H3p4 with (1 := H5).
+                clear H5. destruct H3p4 as [updown1 downup1]. destruct H5p4 as [updown2 downup2].
+                destruct CT as [updown3 downup3].
+                split.
+                { clear downup1 downup2 downup3.
+                  intros. rewrite stransform_stmt_trace_step. cbn [stransform_stmt_trace_body].
+                  repeat rewrite <- app_assoc in *. rewrite updown1. clear updown1.
+                  rewrite List.skipn_app_r by reflexivity. simpl. cbn [Let_In_pf_nd].
+                  repeat rewrite <- app_assoc in *. rewrite updown2. clear updown2.
+                  rewrite List.skipn_app_r by reflexivity. rewrite updown3. reflexivity. }
+                clear updown1 updown2 updown3. intros ? ? Hpredicts. eapply predicts_ext.
+                { intros. rewrite stransform_stmt_trace_step. cbn [stransform_stmt_trace_body].
+                  reflexivity. }
+                rewrite <- (app_assoc _ _ k1'''). apply downup1.
+                constructor.
+                { intros []. }
+                rewrite fold_app. eapply predicts_ext.
+                { intros. rewrite List.skipn_app_r by reflexivity. reflexivity. }
+                cbn [Let_In_pf_nd]. 
+                cbv [leak_prepare_bcond leak_spill_bcond]. repeat rewrite <- app_assoc in *.
+                apply downup2. eapply predicts_ext.
+                { intros. rewrite List.skipn_app_r by reflexivity. reflexivity. }
+                apply downup3. eapply predicts_ext. 2: apply Hpredicts.
+                intros. simpl. repeat (rewrite <- app_assoc || simpl). reflexivity.
+                
       + specialize H0 with (1 := H3p1). cbn in H0. fwd.
         eapply exec.weaken. {
           eapply load_iarg_reg_correct''; (blia || eassumption || idtac).
@@ -2495,16 +2509,25 @@ Section Spilling.
           { rewrite app_one_cons. repeat rewrite app_assoc. reflexivity. }
           intros.
           repeat (rewrite rev_involutive in * || rewrite rev_app_distr in * || rewrite <- app_assoc in * ).
-          eapply generates_ext.
-          2: { apply abs_tr_eq_sym. apply stransform_stmt_trace_step. }
-          cbn [stransform_stmt_trace_body].
-          eapply H3p4.
-          { eassumption. }
-          apply shrink_correct in H5. inversion H5. subst. cbn [Let_In_pf_nd].
-          eapply generates_app_eq.
-          { apply generator_generates. }
-          { cbv [leak_prepare_bcond]. repeat (rewrite <- app_assoc || cbn [List.app List.rev]). reflexivity. }
-          assumption.
+          repeat rewrite <- app_assoc in H5.
+          specialize H3p4 with (1 := H5). edestruct H3p4 as [updown1 downup1]. clear H3p4.
+          split.
+          { intros. rewrite stransform_stmt_trace_step. cbn [stransform_stmt_trace_body].
+            repeat rewrite <- app_assoc in *. rewrite updown1. clear updown1.
+            rewrite List.skipn_app_r by reflexivity. simpl. cbn [Let_In_pf_nd].
+            repeat rewrite <- app_assoc. reflexivity. }
+          intros ? ? Hpredicts. eapply predicts_ext.
+          { intros. rewrite stransform_stmt_trace_step. cbn [stransform_stmt_trace_body].
+            reflexivity. }
+          rewrite <- (app_assoc _ _ k1'''). eapply downup1.
+          constructor.
+          { intros []. }
+          eapply predicts_ext.
+          2: eapply Hpredicts.
+          intros. rewrite List.skipn_app_r by reflexivity.
+          cbn [Let_In_pf_nd]. cbv [leak_prepare_bcond leak_spill_bcond].
+          repeat rewrite <- app_assoc in *. reflexivity.
+
         * eapply exec.weaken. 1: eapply IH2.
           -- eassumption.
           -- cbn. rewrite E. congruence.
@@ -2513,27 +2536,42 @@ Section Spilling.
           -- cbv beta. intros. fwd. eapply exec.weaken.
              ++ eapply IH12; eauto 10.
              ++ cbv beta. intros.
-                destruct H5 as [k1' [t1'1 [m1'1 [l1'1 [mc1'1 [t1''1 [t2''1 [R [Hpost [E1 [E2 CT]]]]]]]]]]].
+                destruct H5 as [k1' [t1'1 [m1'1 [l1'1 [mc1'1 [t1''1 [k2''1 [R [Hpost [E1 [E2 CT]]]]]]]]]]].
                 subst. do 7 eexists.
                 split; [eassumption|]. split; [eassumption|]. split.
                 { rewrite app_one_cons. repeat rewrite app_assoc. reflexivity. } split. 
                 { rewrite app_one_cons. repeat rewrite app_assoc. reflexivity. }
                 intros.
                 repeat (rewrite rev_involutive in * || rewrite rev_app_distr in * || rewrite <- app_assoc in * ).
-                eapply generates_ext.
-                2: { apply abs_tr_eq_sym. apply stransform_stmt_trace_step. }
-                cbn [stransform_stmt_trace_body].
-                eapply H3p4.
-                { eassumption. }
-                apply shrink_correct in H5. inversion H5. subst. cbn [Let_In_pf_nd]. eapply generates_app_eq.
-                { apply generator_generates. }
-                { cbv [leak_prepare_bcond]. repeat (rewrite <- app_assoc || cbn [List.app List.rev]).
+                repeat rewrite (app_assoc _ _ (rev k2''1 ++ _)) in H5. specialize CT with (1 := H5).
+                repeat rewrite <- app_assoc in H5.
+                repeat rewrite (app_assoc _ _ (rev k2''0 ++ _)) in H5. specialize H5p4 with (1 := H5).
+                repeat rewrite <- app_assoc in H5.
+                repeat rewrite <- (app_assoc _ _ (rev k2'' ++ _)) in H5. specialize H3p4 with (1 := H5).
+                clear H5. destruct H3p4 as [updown1 downup1]. destruct H5p4 as [updown2 downup2].
+                destruct CT as [updown3 downup3].
+                split.
+                { clear downup1 downup2 downup3.
+                  intros. rewrite stransform_stmt_trace_step. cbn [stransform_stmt_trace_body].
+                  repeat rewrite <- app_assoc in *. rewrite updown1. clear updown1.
+                  rewrite List.skipn_app_r by reflexivity. simpl. cbn [Let_In_pf_nd].
+                  repeat rewrite <- app_assoc in *. rewrite updown2. clear updown2.
+                  rewrite List.skipn_app_r by reflexivity. rewrite updown3. reflexivity. }
+                clear updown1 updown2 updown3. intros ? ? Hpredicts. eapply predicts_ext.
+                { intros. rewrite stransform_stmt_trace_step. cbn [stransform_stmt_trace_body].
                   reflexivity. }
-                eapply H5p4.
-                { eassumption. }
-                eapply CT.
-                { apply shrink_correct in H10. eassumption. }
-                assumption.
+                rewrite <- (app_assoc _ _ k1'''). apply downup1.
+                constructor.
+                { intros []. }
+                rewrite fold_app. eapply predicts_ext.
+                { intros. rewrite List.skipn_app_r by reflexivity. reflexivity. }
+                cbn [Let_In_pf_nd]. 
+                cbv [leak_prepare_bcond leak_spill_bcond]. repeat rewrite <- app_assoc in *.
+                apply downup2. eapply predicts_ext.
+                { intros. rewrite List.skipn_app_r by reflexivity. reflexivity. }
+                apply downup3. eapply predicts_ext. 2: apply Hpredicts.
+                intros. simpl. repeat (rewrite <- app_assoc || simpl). reflexivity.
+
     - (* exec.seq *)
       cbn in *. fwd.
       rename H1 into IH2, IHexec into IH1.
@@ -2541,29 +2579,36 @@ Section Spilling.
       + eapply IH1. 1: eassumption. eauto 15.
       + cbn. intros. fwd. eapply exec.weaken.
         -- eapply IH2; eauto.
-        -- cbv beta. intros. destruct H1 as [k1' [t1'1 [m1'1 [l1'1 [mc1'1 [t1''1 [t2''1 [R [Hpost [E1 [E2 CT]]]]]]]]]]]. subst.
+        -- cbv beta. intros. destruct H1 as [k1' [t1'1 [m1'1 [l1'1 [mc1'1 [t1''1 [k2''1 [R [Hpost [E1 [E2 CT]]]]]]]]]]]. subst.
            do 7 eexists. split; [eassumption|]. split; [eassumption|]. split.
            { rewrite app_assoc. reflexivity. } split.
            { rewrite app_assoc. reflexivity. }
            intros.
            repeat (rewrite rev_involutive in * || rewrite rev_app_distr in * || rewrite <- app_assoc in * ).
-           eapply generates_ext.
-           2: { apply abs_tr_eq_sym. apply stransform_stmt_trace_step. }
-           cbn [stransform_stmt_trace_body].
-           eapply H1p4.
-           { eassumption. }
-           eapply CT; try eassumption.
-           eapply shrink_correct. eassumption.
+           repeat rewrite (app_assoc _ _ (rev k2''1 ++ _)) in H1. specialize CT with (1 := H1).
+           repeat rewrite <- app_assoc in H1.
+           repeat rewrite (app_assoc _ _ (rev k1'' ++ _)) in H1. specialize H1p4 with (1 := H1).
+           destruct H1p4 as [updown1 downup1]. destruct CT as [updown2 downup2]. clear H1.
+           split.
+           { intros. rewrite stransform_stmt_trace_step. cbn [stransform_stmt_trace_body].
+             repeat rewrite <- app_assoc in *. rewrite updown1.
+             rewrite List.skipn_app_r by reflexivity. rewrite updown2. reflexivity. }
+           intros ? ? Hpredicts. eapply predicts_ext.
+           { intros. rewrite stransform_stmt_trace_step. cbn [stransform_stmt_trace_body]. reflexivity. }
+           repeat rewrite <- app_assoc in *. apply downup1. eapply predicts_ext.
+           { intros. rewrite List.skipn_app_r by reflexivity. reflexivity. }
+           apply downup2. eapply predicts_ext. 2: eapply Hpredicts.
+           intros. simpl. repeat rewrite <- app_assoc. reflexivity.
+           
     - (* exec.skip *)
       eapply exec.skip. do 7 eexists. repeat (split; [eauto|]). 1: instantiate (1 := nil).
-      2: instantiate (1 := nil). all: eauto. intros.
-      eapply generates_ext.
-      2: { apply abs_tr_eq_sym. apply stransform_stmt_trace_step. }
-      cbn [stransform_stmt_trace_body]. assumption.
+      2: instantiate (1 := nil). all: eauto.
+      { intros. rewrite stransform_stmt_trace_step. cbn [stransform_stmt_trace_body].
+        rewrite app_nil_r. reflexivity. }
+      intros. eapply predicts_ext. 2: eapply H2. intros. simpl.
+      rewrite stransform_stmt_trace_step. cbn [stransform_stmt_trace_body]. rewrite app_nil_r.
+      reflexivity.
   Qed.
-
-              Definition f : (trace -> event) -> (trace -> event).
-                 Admitted.
 
   Lemma spill_fun_correct: forall e1 e2 argnames1 retnames1 body1 argnames2 retnames2 body2,
       spill_functions e1 = Success e2 ->
@@ -2576,9 +2621,9 @@ Section Spilling.
              exists k1'' k2'',
                post (k1'' ++ k) t' m' retvals /\
                  k2' = k2'' ++ k /\
-                 ((forall x s y, k2'' = x ++ consume_word s :: y -> pick_sp x = s) ->
-                  (forall x s y, k1'' = x ++ consume_word s :: y -> (f pick_sp) x = s)) /\
-                 rev k2'' = stransform_fun_trace e1 (argnames1, retnames1, body1) (rev k1'').
+                 (predicts pick_sp (rev k2'') ->
+                  fst (stransform_fun_trace e1 pick_sp (argnames1, retnames1, body1) (rev k1'') []) = rev k2'' /\
+                    predicts (fun k => snd (stransform_fun_trace e1 pick_sp (argnames1, retnames1, body1) k [])) (rev k1''))).
   Proof.
     intros. eapply spill_fun_correct_aux; try eassumption.
     unfold spilling_correct_for.
