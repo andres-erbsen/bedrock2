@@ -525,7 +525,15 @@ Section FlatToRiscv1.
        that one needed to take sk_so_far, so that we could apply hypothesized pick_sp function
        to it.  With this one, there is no such requirement, but this style worked out pretty 
        nicely with the spilling one, so I'll write this one the same way.
-       Arguably this is a nice style, since we use the continuation anyway? *)
+       Arguably this is a nice style, since we use the continuation anyway?
+
+       Never mind that, it's irritating, and I get rid of it now.
+       
+       Agh, again never mind, I'll keep it, just because I don't want to write
+       'let (f1, f2) := f x in blah' everywhere.
+       So rk_so_far is kinda nice due to the continuation.
+       And I do suppose it's nice to have the same style as in Spilling.
+*)
 
     Definition lt_tuple (x y : bigtuple) :=
       lt_tuple' (project_tuple x) (project_tuple y).
