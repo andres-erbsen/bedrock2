@@ -398,8 +398,13 @@ Section MMIO1.
       }
       split; eauto.
       2: { eexists [_]. eexists [_]. split; [reflexivity|]. split; [reflexivity|].
-           intros. rewrite rtransform_stmt_trace_step. cbn [rtransform_stmt_trace_body].
-           inversion H3. subst. reflexivity. }
+           split.
+           { intros. rewrite rtransform_stmt_trace_step. simpl. reflexivity. }
+           intros. eapply predicts_ext.
+           { intros. rewrite rtransform_stmt_trace_step. reflexivity. }
+           simpl. constructor.
+           { intros []. }
+           cbv [leak_interact]. simpl. assumption. }
       split; eauto.
       split; eauto.
       split; eauto.
@@ -555,8 +560,13 @@ Section MMIO1.
       }
       split.
       2: { eexists [_]. eexists [_]. split; [reflexivity|]. split; [reflexivity|].
-           intros. rewrite rtransform_stmt_trace_step. cbn [rtransform_stmt_trace_body].
-           inversion H3. subst. reflexivity. }
+           split.
+           { intros. rewrite rtransform_stmt_trace_step. simpl. reflexivity. }
+           intros. eapply predicts_ext.
+           { intros. rewrite rtransform_stmt_trace_step. reflexivity. }
+           simpl. constructor.
+           { intros []. }
+           cbv [leak_interact]. simpl. assumption. }
       split. {
         eapply map.put_extends. eassumption.
       }

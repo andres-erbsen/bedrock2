@@ -266,12 +266,10 @@ Definition other_compile_ext_call(posenv: funpos_env)(mypos stackoffset: Z)(s: F
   end.
 Definition other_leak_ext_call : funpos_env -> Z -> Z -> FlatImp.stmt Z -> list LeakageEvent :=
   fun _ _ _ _ => nil.*)
-Search LeakExt.
-Check leak_ext_call.
 Print compile_ext_call.
 
 Check (@FlatToRiscvCommon.compiles_FlatToRiscv_correctly RV32I _ _ _ _ _ compile_ext_call
-         leak_ext_call _ _ _ _ _ _ _ _ _ compile_ext_call).
+         leak_ext_call _ _ _ _ _ _ _ _ compile_ext_call).
 Check @compiler_correct_wp.
 (*Check (@PrimitivesParams _ _ _ _ _ M MetricRiscvMachine).
 Check (@compiler_correct_wp _ _ Words32Naive.word mem _ ext_spec _ _ _ _ ext_spec_ok _ _ _ _ _).*)
@@ -328,7 +326,7 @@ Definition fname_swap := "swap".
 Definition f_rel_pos_swap := 0.
 Definition post : list LogItem -> mem -> list Words32Naive.word -> Prop := fun _ _ _ => True.
 Print ct_spec_of_swap.
-Check (@compiler_correct_wp _ _ Words32Naive.word mem _ ext_spec _ _ _ _ ext_spec_ok _ _ _ _ _ word_ok _ _ RV32I _ compile_ext_call leak_ext_call compile_ext_call_correct compile_ext_call_length fs_swap instrs_swap finfo_swap req_stack_size_swap fname_swap _ _ _ _).
+Check (@compiler_correct_wp _ _ Words32Naive.word mem _ ext_spec _ _ _ ext_spec_ok _ _ _ _ _ word_ok _ _ RV32I _ compile_ext_call leak_ext_call compile_ext_call_correct compile_ext_call_length fs_swap instrs_swap finfo_swap req_stack_size_swap fname_swap _ _ _ _).
 Check compiler_correct_wp.
 
 Lemma swap_ct :
@@ -359,39 +357,35 @@ Proof.
   cbv [ProgramLogic.program_logic_goal_for] in spec.
   specialize (spec nil). cbv [ct_spec_of_swap] in spec. destruct spec as [f spec].
   intros. Check @compiler_correct_wp.
-  edestruct (@compiler_correct_wp _ _ Words32Naive.word mem _ ext_spec leak_ext _ _ _ ext_spec_ok _ _ _ _ _ word_ok _ _ RV32I _ compile_ext_call leak_ext_call compile_ext_call_correct compile_ext_call_length fs_swap instrs_swap finfo_swap req_stack_size_swap fname_swap 0 p_funcs stack_hi).
+  edestruct (@compiler_correct_wp _ _ Words32Naive.word mem _ ext_spec _ _ _ ext_spec_ok _ _ _ _ _ word_ok _ _ RV32I _ compile_ext_call leak_ext_call compile_ext_call_correct compile_ext_call_length fs_swap instrs_swap finfo_swap req_stack_size_swap fname_swap 0 p_funcs stack_hi) as [f_ [pick_sp_ H] ].
   { simpl. reflexivity. }
   { vm_compute. reflexivity. }
-  exists (rev (x (f b_addr a_addr))). intros.
+  exists (rev (f_ (rev (f a_addr b_addr)))). intros.
   cbv [FlatToRiscvCommon.runsTo].
   eapply runsToNonDet.runsTo_weaken.
-  1: eapply H with (post := (fun k_ t_ m_ r_ =>
-                                 exists k'', (k_ = k'' ++ [])%list /\
-                                               generates (f b_addr a_addr) (rev k'')
-                                             /\ post t_ m_ r_)) (kH := nil).
+  1: eapply H with (post := (fun k_ t_ m_ r_ => k_ = f a_addr b_addr /\
+                                                  post t_ m_ r_)) (kH := nil).
   { simpl. repeat constructor. tauto. }
   2: { eapply map.get_of_list_In_NoDup.
        { vm_compute. repeat constructor; eauto. }
        { vm_compute. left. reflexivity. } }
   all: try eassumption.
   2,3: reflexivity.
-  2: { simpl. intros. destruct H8 as [k'' [mH' [retvals [kL'' [H9 [H10 [H11 [H12 [H13 [H14 H15] ] ] ] ] ] ] ] ] ].
-       destruct H10 as [k''0 [H16 [H17 H18] ] ].
-       apply app_inv_tail in H16. subst. split; [eexists; eexists; eauto|].
-       specialize H15 with (1 := H17). rewrite H15. rewrite H14.
-       rewrite rev_involutive. reflexivity. }
+  2: { simpl. intros. destruct H8 as [k'' [mH' [retvals [kL'' [H9 [H10 [H11 [H12 [H13 [H14 [H15 H16] ] ] ] ] ] ] ] ] ] ].
+       destruct H10 as [H10_1 H10_2]. rewrite app_nil_r in H10_1. subst.
+       split; [eexists; eexists; eauto|].
+       rewrite H15. rewrite rev_involutive. assumption. }
   { specialize (spec nil (getLog initial) m a_addr b_addr a b R H0). cbv [fs_swap fname_swap].
     eapply WeakestPreconditionProperties.Proper_call.
     2: eapply spec.
     cbv [Morphisms.pointwise_relation Basics.impl]. intros.
     destruct H8 as [ [k'' [H8 H9] ] [H10 [H11 H12] ] ]. subst.
-    rewrite app_nil_r. cbv [WeakestPrecondition.appl] in H8.
-    eexists. split.
-    { rewrite app_nil_r. reflexivity. }
-    split; [assumption|]. reflexivity. }
+    split; [|reflexivity].
+    destruct H12 as [k''_ [H12_1 H12_2] ]. subst.
+    rewrite app_nil_r. reflexivity. }
 Qed.
 
-Check (@compiler_correct_wp _ _ Words32Naive.word mem _ ext_spec _ _ _ _ ext_spec_ok _ _ _ _ _ word_ok _ _ RV32I _ compile_ext_call leak_ext_call compile_ext_call_correct compile_ext_call_length fs_swap instrs_swap finfo_swap req_stack_size_swap fname_swap _ _ _ _).
+Check (@compiler_correct_wp _ _ Words32Naive.word mem _ ext_spec _ _ _ ext_spec_ok _ _ _ _ _ word_ok _ _ RV32I _ compile_ext_call leak_ext_call compile_ext_call_correct compile_ext_call_length fs_swap instrs_swap finfo_swap req_stack_size_swap fname_swap _ _ _ _).
 
 Print Assumptions swap_ct.
 (* Prints:
@@ -404,32 +398,9 @@ mem : map.map Words32Naive.word byte
 localsL_ok : map.ok localsL
 localsL : map.map Z Words32Naive.word
 FunctionalExtensionality.functional_extensionality_dep
-  : forall (A : Type) (B : A -> Type) (f g : forall x : A, B x),
-    (forall x : A, f x = g x) -> f = g
+  : forall (A : Type) (B : A -> Type) (f g : forall x : A, B x), (forall x : A, f x = g x) -> f = g
 envH_ok : map.ok envH
 envH : map.map string (list string * list string * cmd)
-WeakestPreconditionProperties.Proper_call
-  : forall (width : Z) (BW : Bitwidth width) (word : word width) (mem : map.map word byte)
-      (locals : map.map string word) (env : map.map string (list string * list string * cmd))
-      (ext_spec : ExtSpec) (leak_ext : LeakExt),
-    word.ok word ->
-    map.ok mem ->
-    map.ok locals ->
-    map.ok env ->
-    ext_spec.ok ext_spec ->
-    Morphisms.Proper
-      (Morphisms.pointwise_relation (list (string * (list string * list string * cmd)))
-         (Morphisms.pointwise_relation string
-            (Morphisms.pointwise_relation trace
-               (Morphisms.pointwise_relation io_trace
-                  (Morphisms.pointwise_relation mem
-                     (Morphisms.pointwise_relation (list word)
-                        (Morphisms.respectful
-                           (Morphisms.pointwise_relation trace
-                              (Morphisms.pointwise_relation io_trace
-                                 (Morphisms.pointwise_relation mem
-                                    (Morphisms.pointwise_relation (list word) Basics.impl))))
-                           Basics.impl))))))) WeakestPrecondition.call
 
  *)
 
@@ -485,12 +456,12 @@ Proof.
   assert (spec := @io_function_ok Words32Naive.word mem word_ok' mem_ok).
   cbv [ProgramLogic.program_logic_goal_for] in spec.
   specialize (spec nil). cbv [ct_spec_of_io_function] in spec.
-  destruct spec as [a spec].
+  destruct spec as [fH spec].
   intros.
-  edestruct (@compiler_correct_wp _ _ Words32Naive.word mem _ ext_spec leak_ext _ _ _ ext_spec_ok _ _ _ _ _ word_ok _ _ RV32I _ compile_ext_call leak_ext_call compile_ext_call_correct compile_ext_call_length fs_io_function instrs_io_function finfo_io_function req_stack_size_io_function fname_io_function f_rel_pos_io_function p_funcs stack_hi) as [f H].
+  edestruct (@compiler_correct_wp _ _ Words32Naive.word mem _ ext_spec _ _ _ ext_spec_ok _ _ _ _ _ word_ok _ _ RV32I _ compile_ext_call leak_ext_call compile_ext_call_correct compile_ext_call_length fs_io_function instrs_io_function finfo_io_function req_stack_size_io_function fname_io_function f_rel_pos_io_function p_funcs stack_hi) as [f [pick_sp H] ].
   { simpl. reflexivity. }
   { vm_compute. reflexivity. }
-  exists (fun x => rev (f (a x))). intros.
+  exists (fun x => rev (f (rev (fH x)))). intros.
   cbv [FlatToRiscvCommon.runsTo].
   specialize (spec nil (getLog initial) m R H0 H1).
   eapply runsToNonDet.runsTo_weaken.
@@ -499,15 +470,15 @@ Proof.
               t' =
               ([(map.empty, "MMIOREAD", [word.of_Z 0], (map.empty, [x]));
                 (map.empty, "MMIOREAD", [word.of_Z 0], (map.empty, [y]))] ++ (getLog initial))%list /\
-              R m /\ (exists k'' : list event, k' = (k'' ++ [])%list /\ generates (a x) (rev k'')))).
+              R m /\ k' = fH x)).
   13: { simpl. intros.
-        destruct H9 as [kH'' [mH' [retvals [kL'' [H9 [H10 [H11 [H12 [H13 [H14 H15] ] ] ] ] ] ] ] ] ].
+        destruct H9 as [kH'' [mH' [retvals [kL'' [H9 [H10 [H11 [H12 [H13 [H14 [H15 H16] ] ] ] ] ] ] ] ] ] ].
         split.
         { exists mH', retvals; intuition eauto. cbv [post]. reflexivity. }
-        { destruct H10 as [x [y [H16 [H17 [k'' [H18 H19] ] ] ] ] ].
-          repeat rewrite app_nil_r in H18. subst. exists x, y. rewrite H16.
-          split; eauto. split; eauto. specialize H15 with (1 := H19). rewrite H15.
-          rewrite H14. rewrite rev_involutive. reflexivity. } }
+        { destruct H10 as [x [y [H17 [H18 H19] ] ] ].
+          instantiate (1 := []) in H19. rewrite app_nil_r in H19. subst.
+          exists x, y. rewrite H17.
+          split; eauto. split; eauto. rewrite H15. rewrite rev_involutive. assumption. } }
   all: try eassumption.
   4,5: reflexivity.
   { simpl. repeat constructor.
@@ -517,8 +488,8 @@ Proof.
     2: eapply spec.
     cbv [Morphisms.pointwise_relation Basics.impl]. intros.
     clear H. destruct H9 as [x [y [H9 [H10 [k'' [H11 H12] ] ] ] ] ].
-    subst. exists x, y. split; [reflexivity|]. split; [assumption|]. exists k''.
-    split; [reflexivity|assumption]. }
+    subst. exists x, y. split; [reflexivity|]. split; [assumption|]. rewrite app_nil_r.
+    reflexivity. }
   { reflexivity. }
 Qed.
 
@@ -526,36 +497,14 @@ Print Assumptions io_function_ct.
 
 (*
 Axioms:
+
 PropExtensionality.propositional_extensionality : forall P Q : Prop, P <-> Q -> P = Q
 mem_ok : map.ok mem
 mem : map.map Words32Naive.word byte
 localsL_ok : map.ok localsL
 localsL : map.map Z Words32Naive.word
 FunctionalExtensionality.functional_extensionality_dep
-  : forall (A : Type) (B : A -> Type) (f g : forall x : A, B x),
-    (forall x : A, f x = g x) -> f = g
+  : forall (A : Type) (B : A -> Type) (f g : forall x : A, B x), (forall x : A, f x = g x) -> f = g
 envH_ok : map.ok envH
 envH : map.map string (list string * list string * cmd)
-WeakestPreconditionProperties.Proper_call
-  : forall (width : Z) (BW : Bitwidth width) (word : word width) (mem : map.map word byte)
-      (locals : map.map string word) (env : map.map string (list string * list string * cmd))
-      (ext_spec : ExtSpec) (leak_ext : LeakExt),
-    word.ok word ->
-    map.ok mem ->
-    map.ok locals ->
-    map.ok env ->
-    ext_spec.ok ext_spec ->
-    Morphisms.Proper
-      (Morphisms.pointwise_relation (list (string * (list string * list string * cmd)))
-         (Morphisms.pointwise_relation string
-            (Morphisms.pointwise_relation trace
-               (Morphisms.pointwise_relation io_trace
-                  (Morphisms.pointwise_relation mem
-                     (Morphisms.pointwise_relation (list word)
-                        (Morphisms.respectful
-                           (Morphisms.pointwise_relation trace
-                              (Morphisms.pointwise_relation io_trace
-                                 (Morphisms.pointwise_relation mem
-                                    (Morphisms.pointwise_relation (list word) Basics.impl))))
-                           Basics.impl))))))) WeakestPrecondition.call
 *)

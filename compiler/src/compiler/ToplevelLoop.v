@@ -295,7 +295,7 @@ Section Pipeline1.
                                   compile_ext_call_length_ignores_positions as P.
     unfold runsTo in P.
     specialize P with (fname := "init"%string) (p_funcs := word.add loop_pos (word.of_Z 8)).
-    edestruct P as [f P']; clear P; cycle -1.
+    edestruct P as [f [pick_sp P'] ]; clear P; cycle -1.
     2: eassumption.
     2: { unfold compile. rewrite_match. reflexivity. }
     eapply runsTo_weaken.
@@ -505,7 +505,7 @@ Section Pipeline1.
         compile_ext_call_length_ignores_positions as P.
       unfold runsTo in P.
       specialize P with (fname := "loop"%string) (p_funcs := word.add loop_pos (word.of_Z 8)).
-      edestruct P as [f P']; clear P; cycle -1.
+      edestruct P as [f [pick_sp P'] ]; clear P; cycle -1.
       2,3: eassumption.
       eapply runsTo_weaken.
       + unfold runsTo in P'.
