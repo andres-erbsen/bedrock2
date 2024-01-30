@@ -256,7 +256,7 @@ Notation "'fnspec!' name a0 .. an '/' g0 .. gn '~>' r0 .. rn ',' '{' 'requires' 
 (* general form *)
 (* trying out alternate definition with function. *)
 Definition appl {A B} (x : A) (f : A -> B) := f x.
-Notation "'ctfunc!' name a0 .. an '|' b0 .. bn '/' g0 .. gn '|' h0 .. hn '~>' r0 .. rn ',' '{' 'requires' tr mem := pre ';' 'ensures' tr' mem' ':=' post '}'" :=
+(*Notation "'ctfunc!' name a0 .. an '|' b0 .. bn '/' g0 .. gn '|' h0 .. hn '~>' r0 .. rn ',' '{' 'requires' tr mem := pre ';' 'ensures' tr' mem' ':=' post '}'" :=
   (fun functions =>
      (exists f,
          (forall k tr mem,
@@ -368,7 +368,7 @@ Notation "'ctfunc!' name '|' b0 .. bn '/' '|' '~>' r0 .. rn ',' '{' 'requires' t
       r0 closed binder, rn closed binder,
       tr name, tr' name, mem name, mem' name,
       pre at level 200,
-      post at level 200).
+      post at level 200).*)
 
 Notation "'fnspec!' name a0 .. an '/' g0 .. gn ',' '{' 'requires' tr mem := pre ';' 'ensures' tr' mem' ':=' post '}'" :=
   (fun functions =>

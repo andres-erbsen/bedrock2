@@ -502,13 +502,13 @@ Section LowerPipeline.
                  | Some f_rel_pos => f_rel_pos
                  | None => 0
                  end in
-               exists kH'' (kL'': list LeakageEvent),
+               exists kH'' kL'',
+                 kL' = kL'' ++ kL /\
                  post (kH'' ++ kH) t' m' retvals /\
-                   kL' = kL'' ++ kL /\
-                   forall a,
-                     Semantics.generates a (rev kH'') ->
-                     rtransform_fun_trace iset compile_ext_call leak_ext_call finfo p_funcs p1
-                       a f_rel_pos stack_pastend retnames fbody (fun _ => []) = rev kL'').
+                   fst (rtransform_fun_trace iset compile_ext_call leak_ext_call finfo p_funcs p1
+                          (rev kH'') [] f_rel_pos stack_pastend retnames fbody (fun _ rk => (rk, Semantics.leak_unit))) = rev kL'' /\
+                   Semantics.predicts (fun k => snd (rtransform_fun_trace iset compile_ext_call leak_ext_call finfo p_funcs p1
+                                                       k [] f_rel_pos stack_pastend retnames fbody (fun _ rk => (rk, Semantics.leak_unit)))) (rev kH'')).
   Proof.
     unfold riscv_call.
     intros p1 p2. destruct p2 as ((finstrs & finfo) & req_stack_size). intros.
@@ -709,11 +709,11 @@ Section LowerPipeline.
         symmetry.
         eapply map.getmany_of_list_length.
         exact GM.
-      + eexists. eexists. split; [eassumption|]. split.
-        { Search getTrace. rewrite H10p5p1. subst kL. reflexivity. }
-        intros.
-        replace (rev k') with (rev k' ++ nil) in H10 by apply List.app_nil_r.
-        rewrite H10p5p2 with (1 := H10). rewrite app_nil_r. reflexivity.
+      + subst. eexists. eexists. split; [eassumption|]. split; [eassumption|]. split.
+        { replace (rev k1'') with (rev k1'' ++ nil) by apply List.app_nil_r.
+          rewrite H10p5p2. reflexivity. }
+        replace (rev k1'') with (rev k1'' ++ nil) by apply List.app_nil_r.
+        apply H10p5p3. constructor.
       + eapply only_differ_subset. 1: eassumption.
         rewrite ListSet.of_list_list_union.
         rewrite ?singleton_set_eq_of_list.
