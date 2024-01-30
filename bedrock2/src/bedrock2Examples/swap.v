@@ -17,7 +17,20 @@ Definition bad_swap := func! (a, b) {
 Definition swap_swap := func! (a, b) {
   swap(a, b);
   swap(a, b)
-}.
+                          }.
+
+Definition stackalloc_and_print :=
+  func! (a, b) {
+      stackalloc 4 as x;
+      MMIOWRITE($0, x)
+    }.
+
+Definition io_function :=
+  func! () {
+      io! y = MMIOREAD($0);
+      io! x = MMIOREAD($0);
+      if (x) { /*skip*/ }
+    }.
 
 Require Import bedrock2.WeakestPrecondition.
 Require Import bedrock2.Semantics bedrock2.FE310CSemantics.
@@ -33,13 +46,12 @@ Section WithParameters.
   Context {word: word.word 32} {mem: map.map word Byte.byte}.
   Context {word_ok: word.ok word} {mem_ok: map.ok mem}.
 
-  Instance ct_spec_of_swap : spec_of "swap" :=
+  (*Instance ct_spec_of_swap : spec_of "swap" :=
     ctfunc! "swap" a_addr b_addr | / | a b R,
     { requires t m := m =* scalar a_addr a * scalar b_addr b * R;
-      ensures T M :=  M =* scalar a_addr b * scalar b_addr a * R /\ T = t }.
-  Print ct_spec_of_swap.
+      ensures T M :=  M =* scalar a_addr b * scalar b_addr a * R /\ T = t }.*)
 
-  Definition new_ct_spec_of_swap : spec_of "swap" :=
+  Instance ct_spec_of_swap : spec_of "swap" :=
     fun functions =>
       forall pick_sp,
       exists f : word -> word -> trace,
@@ -47,23 +59,12 @@ Section WithParameters.
         (scalar a_addr a ⋆ scalar b_addr b ⋆ R)%sep m ->
         call functions "swap" k t m [a_addr; b_addr]
           (fun (k' : trace) (T : io_trace) (M : mem) (rets : list word) =>
+             M =* scalar a_addr b * scalar b_addr a * R /\ T = t /\
              exists k'',
-               k' = (List.rev k'') ++ k /\
-                 ((forall x s y, k'' = x ++ [consume_word s] ++ y -> pick_sp x = y) ->
+               k' = k'' ++ k /\
+                 (predicts pick_sp (List.rev k'') ->
                   k'' = f a_addr b_addr)
           ).
-
-  Definition ct_spec_of_salloc_and_print : spec_of "swap" :=
-    fun functions =>
-      forall pick_sp,
-      exists output_event,
-      forall (k : trace) (t : io_trace) (m : mem),
-        call functions "salloc_and_print" k t m []
-          (fun (k' : trace) (T : io_trace) (M : mem) (rets : list word) =>
-             exists k'',
-               k' = (List.rev k'') ++ k /\
-                 ((forall x s y, k'' = x ++ [consume_word s] ++ y -> pick_sp x = y) ->
-                  T = output_event :: t)).
 
   (* I should make this work again.
 Instance ct_bad_swap : ct_spec_of "bad_swap" :=
@@ -71,10 +72,12 @@ Instance ct_bad_swap : ct_spec_of "bad_swap" :=
     { requires t m := m =* scalar a_addr a * scalar b_addr b * R }.*)
   
   Lemma swap_ok : program_logic_goal_for_function! swap.
-  Proof. repeat straightline. split.
-         { eexists. split. 2: trace_alignment. repeat constructor. }
-         split; [reflexivity|]. split; [|reflexivity]. repeat straightline. assumption.
+  Proof. repeat straightline. intuition eauto. eexists. split.
+         { trace_alignment. }
+         intros _. reflexivity.
   Qed.
+
+
 
   (*Lemma swap_ct : program_logic_ct_goal_for_function! swap.
   Proof. repeat straightline. trace_alignment. Qed.*)
@@ -235,12 +238,15 @@ in the assembly-level trace.
     { requires t m := m =* scalar a_addr a * scalar b_addr b * R;
       ensures T M :=  M =* scalar a_addr a * scalar b_addr b * R /\ T = t }.
 
-  Lemma swap_swap_ok :
+  (*Lemma swap_swap_ok :
     let spec_of_swap := ct_spec_of_swap in program_logic_goal_for_function! swap_swap.
-  Proof. repeat (straightline || straightline_ct_call); eauto using eq_trans. Qed.
+  Proof.
+    repeat (straightline || straightline_ct_call); eauto using eq_trans.
+    straightline_call.
+  Qed.*)
 
-  Lemma link_swap_swap_swap_swap : spec_of_swap_swap &[,swap_swap; swap].
-  Proof. eauto using swap_swap_ok, swap_ok. Qed.
+  (*Lemma link_swap_swap_swap_swap : spec_of_swap_swap &[,swap_swap; swap].
+  Proof. eauto using swap_swap_ok, swap_ok. Qed.*)
 
   (* Print Assumptions link_swap_swap_swap_swap. *)
   (*
@@ -248,12 +254,7 @@ in the assembly-level trace.
   Goal True. print_string (c_module &[,swap_swap; swap]). Abort.
    *)
 
-  Definition io_function :=
-    func! () {
-        io! y = MMIOREAD($0);
-        io! x = MMIOREAD($0);
-        if (x) { /*skip*/ }
-      }.
+  
 
   Definition weird_function :=
     func! () {
@@ -282,20 +283,22 @@ in the assembly-level trace.
 
   Instance ct_spec_of_io_function : spec_of "io_function" :=
     fun functions =>
+      forall pick_sp,
       exists f,
-        forall k t m (R : _ -> Prop),
-          m =* R ->
-          isMMIOAddr (word.of_Z 0) ->
-          WeakestPrecondition.call
-            functions "io_function" k t m nil
-            (fun k' t' m' rets =>
-               exists x y,
-                 t' = [((map.empty, "MMIOREAD", [word.of_Z 0]), (map.empty, [x]));
-                       ((map.empty, "MMIOREAD", [word.of_Z 0]), (map.empty, [y]))] ++ t /\
-                   m =* R /\
-                   exists k'',
-                     k' = k'' ++ k /\
-                       generates (f x) (List.rev k'')).
+      forall k t m (R : _ -> Prop),
+        m =* R ->
+        isMMIOAddr (word.of_Z 0) ->
+        WeakestPrecondition.call
+          functions "io_function" k t m nil
+          (fun k' t' m' rets =>
+             exists x y,
+               t' = [((map.empty, "MMIOREAD", [word.of_Z 0]), (map.empty, [x]));
+                     ((map.empty, "MMIOREAD", [word.of_Z 0]), (map.empty, [y]))] ++ t /\
+                 m =* R /\
+                 exists k'',
+                   k' = k'' ++ k /\
+                     (predicts pick_sp (List.rev k'') ->
+                      f x = List.rev k'')).
   
   Lemma io_function_ok : program_logic_goal_for_function! io_function.
   Proof.
@@ -338,18 +341,18 @@ in the assembly-level trace.
       eexists. split.
       { subst k'. instantiate (1 := [_; _; _]). reflexivity. }
       Check word.eqb. Check (fun x => _ _ aleak_bool ((word.unsigned x) =? 0)).
-      simpl.
-      instantiate (1 := fun x => _). simpl.
-      constructor. constructor.
-      instantiate (1 := (aleak_bool (negb (word.unsigned x =? 0)) _)).
-      rewrite <- Z.eqb_neq in H3. rewrite H3. constructor. constructor. }
-    { eexists. eexists. split.
-      { reflexivity. }
-      repeat straightline. split; [assumption|].
-      eexists. split.
-      { subst k'0 k'. instantiate (1 := [_; _; _]). reflexivity. }
-      Check word.eqb. Check (fun x => aleak_bool ((word.unsigned x) =? 0) _).
-      simpl.
-      rewrite <- Z.eqb_eq in H3. rewrite H3. constructor. constructor. constructor. constructor. } 
+      instantiate (1 := fun val0 => match (word.unsigned val0 =? 0)%Z with
+                                    | true => _
+                                    | false => _
+                                    end).
+      simpl. apply Z.eqb_neq in H3. rewrite H3. intros. reflexivity. }
+    eexists. eexists. split.
+    { reflexivity. }
+    repeat straightline. split; [assumption|].
+    eexists. split.
+    { subst k'0 k'. instantiate (1 := [_; _; _]). reflexivity. }
+    Check word.eqb. Check (fun x => aleak_bool ((word.unsigned x) =? 0) _).
+    simpl.
+    rewrite <- Z.eqb_eq in H3. rewrite H3. intros. reflexivity. 
   Qed.
 End WithParameters.
