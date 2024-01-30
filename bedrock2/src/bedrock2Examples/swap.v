@@ -20,9 +20,9 @@ Definition swap_swap := func! (a, b) {
                           }.
 
 Definition stackalloc_and_print :=
-  func! (a, b) {
+  func! () {
       stackalloc 4 as x;
-      MMIOWRITE($0, x)
+      output! MMIOWRITE($0, x)
     }.
 
 Definition io_function :=
@@ -36,7 +36,7 @@ Require Import bedrock2.WeakestPrecondition.
 Require Import bedrock2.Semantics bedrock2.FE310CSemantics.
 Require Import coqutil.Map.Interface bedrock2.Map.Separation bedrock2.Map.SeparationLogic.
 
-Require bedrock2.WeakestPreconditionProperties.
+Require Import bedrock2.WeakestPreconditionProperties.
 From coqutil.Tactics Require Import Tactics letexists eabstract.
 Require Import bedrock2.ProgramLogic bedrock2.Scalars.
 Require Import coqutil.Word.Interface.
@@ -53,18 +53,45 @@ Section WithParameters.
 
   Instance ct_spec_of_swap : spec_of "swap" :=
     fun functions =>
-      forall pick_sp,
       exists f : word -> word -> trace,
       forall (k : trace) (t : io_trace) (m : mem) (a_addr b_addr a b : word) (R : mem -> Prop),
         (scalar a_addr a ⋆ scalar b_addr b ⋆ R)%sep m ->
         call functions "swap" k t m [a_addr; b_addr]
           (fun (k' : trace) (T : io_trace) (M : mem) (rets : list word) =>
-             M =* scalar a_addr b * scalar b_addr a * R /\ T = t /\
+             M =* scalar a_addr b * scalar b_addr a * R /\ T = t /\ rets = [] /\
+             exists k'',
+               k' = k'' ++ k /\ k'' = f a_addr b_addr
+          ).
+
+  Instance ct_spec_of_io_function : spec_of "io_function" :=
+    fun functions =>
+      exists f,
+      forall k t m (R : _ -> Prop),
+        m =* R ->
+        isMMIOAddr (word.of_Z 0) ->
+        WeakestPrecondition.call
+          functions "io_function" k t m nil
+          (fun k' t' m' rets =>
+             exists x y,
+               t' = [((map.empty, "MMIOREAD", [word.of_Z 0]), (map.empty, [x]));
+                     ((map.empty, "MMIOREAD", [word.of_Z 0]), (map.empty, [y]))] ++ t /\
+                 m =* R /\
+                 exists k'',
+                   k' = k'' ++ k /\
+                     k'' = f x).
+
+  Instance ct_spec_of_stackalloc_and_print : spec_of "stackalloc_and_print" :=
+    fun functions =>
+      forall pick_sp,
+      exists output_event,
+      forall (k : trace) (t : io_trace) (m : mem),
+        isMMIOAddr (word.of_Z 0) ->
+        call functions "stackalloc_and_print" k t m []
+          (fun (k' : trace) (T : io_trace) (M : mem) (rets : list word) =>
              exists k'',
                k' = k'' ++ k /\
                  (predicts pick_sp (List.rev k'') ->
-                  k'' = f a_addr b_addr)
-          ).
+                  T = output_event :: t)). 
 
   (* I should make this work again.
 Instance ct_bad_swap : ct_spec_of "bad_swap" :=
@@ -74,9 +101,86 @@ Instance ct_bad_swap : ct_spec_of "bad_swap" :=
   Lemma swap_ok : program_logic_goal_for_function! swap.
   Proof. repeat straightline. intuition eauto. eexists. split.
          { trace_alignment. }
-         intros _. reflexivity.
+         reflexivity.
   Qed.
 
+  Lemma io_function_ok : program_logic_goal_for_function! io_function.
+  Proof.
+    repeat straightline.
+    econstructor.
+    repeat straightline.
+    exists m, map.empty.
+    split.
+    { apply Properties.map.split_empty_r. reflexivity. }
+    cbv [ext_spec]. replace (String.eqb _ _) with false by reflexivity.
+    replace (String.eqb _ _) with true by reflexivity.
+    repeat straightline.
+    split; [repeat straightline|].
+    { split; [assumption|]. Search (word.unsigned (word.of_Z 0)).
+      rewrite Properties.word.unsigned_of_Z_0. reflexivity. }
+    intros.
+    econstructor.
+    repeat straightline.
+    split. { subst l. reflexivity. }
+    repeat straightline.
+    econstructor.
+    repeat straightline.
+    exists m, map.empty.
+    split.
+    { assumption. }
+    cbv [ext_spec]. replace (String.eqb _ _) with false by reflexivity.
+    replace (String.eqb _ _) with true by reflexivity.
+    eexists.
+    split; [reflexivity|].
+    split.
+    { split; [reflexivity|]. split; [assumption|]. Search (word.unsigned (word.of_Z 0)).
+      rewrite Properties.word.unsigned_of_Z_0. reflexivity. }
+    repeat straightline.
+    econstructor.
+    repeat straightline.
+    split; repeat straightline.
+    { eexists. eexists. split.
+      { reflexivity. }
+      repeat straightline. split; [assumption|].
+      eexists. split.
+      { subst k'. instantiate (1 := [_; _; _]). reflexivity. }
+      Check word.eqb. Check (fun x => _ _ aleak_bool ((word.unsigned x) =? 0)).
+      instantiate (1 := fun val0 => match (word.unsigned val0 =? 0)%Z with
+                                    | true => _
+                                    | false => _
+                                    end).
+      simpl. apply Z.eqb_neq in H3. rewrite H3. intros. reflexivity. }
+    eexists. eexists. split.
+    { reflexivity. }
+    repeat straightline. split; [assumption|].
+    eexists. split.
+    { subst k'0 k'. instantiate (1 := [_; _; _]). reflexivity. }
+    Check word.eqb. Check (fun x => aleak_bool ((word.unsigned x) =? 0) _).
+    simpl.
+    rewrite <- Z.eqb_eq in H3. rewrite H3. intros. reflexivity. 
+  Qed.
+
+  Lemma stackalloc_and_print_ok : program_logic_goal_for_function! stackalloc_and_print.
+  Proof.
+    repeat straightline.
+    eapply interact_nomem.
+    { repeat straightline. }
+    cbv [ext_spec]. simpl.
+    repeat straightline. intuition.
+    { rewrite Properties.word.unsigned_of_Z_0. reflexivity. }
+    repeat straightline. eexists. eexists. split; [eassumption|]. split; [eassumption|].
+    eexists. split.
+    { instantiate (1 := [_; _]). reflexivity. }
+    intros Hpredicts. simpl in Hpredicts.
+    inversion Hpredicts. subst. specialize (H5 I).
+    instantiate (1 := match pick_sp [] with
+                      | consume_word a => _
+                      | _ => _
+                      end).
+    rewrite H5. reflexivity.
+    Unshelve. Print io_event.
+    all: exact (map.empty, "", [], (map.empty, [])).
+  Qed.
 
 
   (*Lemma swap_ct : program_logic_ct_goal_for_function! swap.
@@ -281,78 +385,7 @@ in the assembly-level trace.
 
   Print io_event.
 
-  Instance ct_spec_of_io_function : spec_of "io_function" :=
-    fun functions =>
-      forall pick_sp,
-      exists f,
-      forall k t m (R : _ -> Prop),
-        m =* R ->
-        isMMIOAddr (word.of_Z 0) ->
-        WeakestPrecondition.call
-          functions "io_function" k t m nil
-          (fun k' t' m' rets =>
-             exists x y,
-               t' = [((map.empty, "MMIOREAD", [word.of_Z 0]), (map.empty, [x]));
-                     ((map.empty, "MMIOREAD", [word.of_Z 0]), (map.empty, [y]))] ++ t /\
-                 m =* R /\
-                 exists k'',
-                   k' = k'' ++ k /\
-                     (predicts pick_sp (List.rev k'') ->
-                      f x = List.rev k'')).
   
-  Lemma io_function_ok : program_logic_goal_for_function! io_function.
-  Proof.
-    repeat straightline.
-    econstructor.
-    repeat straightline.
-    exists m, map.empty.
-    split.
-    { apply Properties.map.split_empty_r. reflexivity. }
-    cbv [ext_spec]. replace (String.eqb _ _) with false by reflexivity.
-    replace (String.eqb _ _) with true by reflexivity.
-    repeat straightline.
-    split; [repeat straightline|].
-    { split; [assumption|]. Search (word.unsigned (word.of_Z 0)).
-      rewrite Properties.word.unsigned_of_Z_0. reflexivity. }
-    intros.
-    econstructor.
-    repeat straightline.
-    split. { subst l. reflexivity. }
-    repeat straightline.
-    econstructor.
-    repeat straightline.
-    exists m, map.empty.
-    split.
-    { assumption. }
-    cbv [ext_spec]. replace (String.eqb _ _) with false by reflexivity.
-    replace (String.eqb _ _) with true by reflexivity.
-    eexists.
-    split; [reflexivity|].
-    split.
-    { split; [reflexivity|]. split; [assumption|]. Search (word.unsigned (word.of_Z 0)).
-      rewrite Properties.word.unsigned_of_Z_0. reflexivity. }
-    repeat straightline.
-    econstructor.
-    repeat straightline.
-    split; repeat straightline.
-    { eexists. eexists. split.
-      { reflexivity. }
-      repeat straightline. split; [assumption|].
-      eexists. split.
-      { subst k'. instantiate (1 := [_; _; _]). reflexivity. }
-      Check word.eqb. Check (fun x => _ _ aleak_bool ((word.unsigned x) =? 0)).
-      instantiate (1 := fun val0 => match (word.unsigned val0 =? 0)%Z with
-                                    | true => _
-                                    | false => _
-                                    end).
-      simpl. apply Z.eqb_neq in H3. rewrite H3. intros. reflexivity. }
-    eexists. eexists. split.
-    { reflexivity. }
-    repeat straightline. split; [assumption|].
-    eexists. split.
-    { subst k'0 k'. instantiate (1 := [_; _; _]). reflexivity. }
-    Check word.eqb. Check (fun x => aleak_bool ((word.unsigned x) =? 0) _).
-    simpl.
-    rewrite <- Z.eqb_eq in H3. rewrite H3. intros. reflexivity. 
-  Qed.
+  
+  
 End WithParameters.

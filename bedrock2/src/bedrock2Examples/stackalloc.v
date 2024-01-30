@@ -96,22 +96,33 @@ Section WithParameters.
   Qed.
 
   Instance ct_spec_of_stackswap : spec_of "stackswap" :=
-    ctfunc! "stackswap" | a b / | ~> B A,
-      { requires tr mem := True ; ensures tr' mem' := B = a /\ A = b }.
+    fun functions =>
+      forall pick_sp,
+      exists f,
+      forall k t m a b,
+        WeakestPrecondition.call functions "stackswap" k t m [a; b]
+          (fun k' t' m' rets =>
+             rets = [a; b] /\
+               exists k'',
+                 (k' = k'' ++ k /\
+                    (predicts pick_sp (List.rev k'') ->
+                     k'' = f))).
+    (*ctfunc! "stackswap" | a b / | ~> B A,
+      { requires tr mem := True ; ensures tr' mem' := B = a /\ A = b }.*)
   Lemma stackswap_ct :
     let swapspec := ct_spec_of_swap in
     program_logic_goal_for_function! stackswap.
   Proof.
     repeat straightline.
-    set (R := eq mem0).
-    pose proof (eq_refl : R mem0) as Hmem0.
+    set (R := eq m).
+    pose proof (eq_refl : R m) as Hm.
     repeat straightline.
-    repeat (destruct stack as [|?b stack]; try solve [cbn in H3; Lia.lia]; []).
-    clear H3. clear length_stack. clear H1.
-    seprewrite_in_by @scalar_of_bytes Hmem0 reflexivity.
+    repeat (destruct stack as [|?b stack]; try solve [cbn in H2; Lia.lia]; []).
+    clear H2. clear length_stack. clear H1.
+    seprewrite_in_by @scalar_of_bytes Hm reflexivity.
     repeat straightline.
     repeat (destruct stack as [|?b stack]; try solve [cbn in length_stack; Lia.lia]; []).
-    clear H6 length_stack H3.
+    clear H5 length_stack H3.
     seprewrite_in_by @scalar_of_bytes H1 reflexivity.
     repeat straightline.
     assert (HToBytesa := word_to_bytes' a).
@@ -125,14 +136,28 @@ Section WithParameters.
     { apply sep_assoc. eassumption. }
     repeat straightline.
     Import symmetry.
-    seprewrite_in_by (symmetry! @scalar_of_bytes) H8 reflexivity.
+    seprewrite_in_by (symmetry! @scalar_of_bytes) H5 reflexivity.
     straightline_stackdealloc.
-    seprewrite_in_by (symmetry! @scalar_of_bytes) H8 reflexivity.
+    seprewrite_in_by (symmetry! @scalar_of_bytes) H5 reflexivity.
     straightline_stackdealloc.
-    repeat straightline. split.
-    - eexists. split. 2: trace_alignment. simpl. rewrite List.rev_app_distr. simpl. repeat constructor. Search generates. rewrite <- List.app_assoc. apply generates_app.
-      1: apply H6. simpl. repeat constructor.
-    - repeat straightline.
+    repeat straightline. eexists. split.
+    - trace_alignment.
+    - intros Hpredicts.
+      simpl in Hpredicts. rewrite List.rev_app_distr in Hpredicts. simpl in Hpredicts.
+      inversion Hpredicts. subst. inversion H12. subst. inversion H14. subst.
+      clear Hpredicts H12 H13 H14 H16. specialize (H11 I). specialize (H15 I).
+      instantiate (1 := 
+                     match pick_sp [] with
+                     | consume_word a =>
+                         match pick_sp [consume_word a; leak_word a] with
+                         | consume_word b => _
+                         | _ => @nil event
+                         end
+                     | _ => _
+                     end).
+      rewrite H11. rewrite H15. reflexivity.
+      Unshelve.
+      all: apply nil.
   Qed.
   
   Instance spec_of_stacknondet : spec_of "stacknondet" := fun functions => forall m t k,

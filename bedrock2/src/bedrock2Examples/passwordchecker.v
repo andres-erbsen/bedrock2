@@ -7,6 +7,6 @@ Local Open Scope string_scope. Local Open Scope Z_scope. Local Open Scope list_s
 Definition check_password :=
   func! (password, passwordlen)
     {
-      io! attempt = MMIOREAD($0);
+      io! attempt = MMIOREAD($0)
 
     }.

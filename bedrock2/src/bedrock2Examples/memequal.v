@@ -31,11 +31,21 @@ Section WithParameters.
   Import ProgramLogic.Coercions.
 
   Global Instance spec_of_memequal : spec_of "memequal" :=
-    ctfunc! "memequal" (x y n : word) | / | (xs ys : list byte) (Rx Ry : mem -> Prop) ~> r,
-    { requires t m := m =* xs$@x * Rx /\ m =* ys$@y * Ry /\
-                      length xs = n :>Z /\ length ys = n :>Z;
+    fun functions =>
+      exists f,
+      forall (x y n : word) xs ys Rx Ry,
+      forall k t m,
+        m =* xs$@x * Rx /\ m =* ys$@y * Ry /\ length xs = n :>Z /\ length ys = n :>Z ->
+        WeakestPrecondition.call functions "memequal" k t m [x; y; n]
+          (fun k' t' m' rets =>
+             exists r,
+               rets = [r] /\
+                 f x y n ++ k = k' /\ m=m' /\ t=t' /\ (r = 0 :>Z \/ r = 1 :>Z) /\
+                 (r  = 1 :>Z <-> xs  = ys)).
+  (*ctfunc! "memequal" (x y n : word) | / | (xs ys : list byte) (Rx Ry : mem -> Prop) ~> r,
+    { requires t m := ;
       ensures t' m' := m=m' /\ t=t' /\ (r = 0 :>Z \/ r = 1 :>Z) /\
-                       (r  = 1 :>Z <-> xs  = ys) }.
+                       (r  = 1 :>Z <-> xs  = ys) }.*)
 
   Context {word_ok: word.ok word} {mem_ok: map.ok mem} {locals_ok : map.ok locals}
     {env : map.map string (list string * list string * Syntax.cmd)} {env_ok : map.ok env}
@@ -179,10 +189,11 @@ Section WithParameters.
 
       rewrite word.unsigned_of_Z_0, Z.lor_0_l in H6; subst x4 v.
       setoid_rewrite word.unsigned_eqb; setoid_rewrite word.unsigned_of_Z_0.
-      split.
-      { eexists. split; trace_alignment. eapply generator_generates. }
-      eexists; ssplit; eauto; try (destr Z.eqb; autoforward with typeclass_instances in E;
-        rewrite ?word.unsigned_of_Z_1, ?word.unsigned_of_Z_0; eauto).
+      repeat straightline. split.
+      { instantiate (1 := fun _ _ _ => _ :: _). simpl. reflexivity. }
+      repeat straightline. split.
+      all: destr Z.eqb; autoforward with typeclass_instances in E;
+        rewrite ?word.unsigned_of_Z_1, ?word.unsigned_of_Z_0; eauto.
       all : intuition eauto; discriminate.
   Qed.
 End WithParameters.
