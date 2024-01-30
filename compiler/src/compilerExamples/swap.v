@@ -507,4 +507,96 @@ FunctionalExtensionality.functional_extensionality_dep
   : forall (A : Type) (B : A -> Type) (f g : forall x : A, B x), (forall x : A, f x = g x) -> f = g
 envH_ok : map.ok envH
 envH : map.map string (list string * list string * cmd)
-*)
+ *)
+
+Definition fs_stackalloc_and_print := &[,stackalloc_and_print;io_function;swap].
+Definition instrs_stackalloc_and_print :=
+  match (compile compile_ext_call fs_stackalloc_and_print) with
+  | Success (instrs, _, _) => instrs
+  | _ => nil
+  end.
+
+Definition finfo_stackalloc_and_print :=
+  match (compile compile_ext_call fs_stackalloc_and_print) with
+  | Success (_, finfo, _) => finfo
+  | _ => nil
+  end.
+Definition req_stack_size_stackalloc_and_print :=
+  match (compile compile_ext_call fs_stackalloc_and_print) with
+  | Success (_, _, req_stack_size) => req_stack_size
+  | _ => 0
+  end.
+Compute (req_stack_size_stackalloc_and_print).
+Definition fname_stackalloc_and_print := "stackalloc_and_print".
+Definition f_rel_pos_stackalloc_and_print := 88.
+
+Lemma stackalloc_and_print_ct :
+  forall p_funcs stack_hi,
+  exists output_event : io_event,
+  forall (R : _ -> Prop) m stack_lo ret_addr
+                       Rdata Rexec (initial : RiscvMachine),
+    R m ->
+    isMMIOAddr (word.of_Z 0) ->
+    req_stack_size_stackalloc_and_print <= word.unsigned (word.sub stack_hi stack_lo) / SeparationLogic.bytes_per_word ->
+    word.unsigned (word.sub stack_hi stack_lo) mod SeparationLogic.bytes_per_word = 0 ->
+    getPc initial = word.add p_funcs (word.of_Z f_rel_pos_stackalloc_and_print) ->
+    map.get (getRegs initial) RegisterNames.ra = Some ret_addr ->
+    word.unsigned ret_addr mod 4 = 0 ->
+    LowerPipeline.arg_regs_contain (getRegs initial) [] ->
+    LowerPipeline.machine_ok p_funcs stack_lo stack_hi instrs_stackalloc_and_print m Rdata Rexec initial ->
+    FlatToRiscvCommon.runsTo initial
+      (fun final : RiscvMachine =>
+         (exists (mH' : mem) (retvals : list Words32Naive.word),
+           LowerPipeline.arg_regs_contain (getRegs final) retvals /\
+             post (getLog final) mH' retvals /\
+             map.only_differ (getRegs initial) reg_class.caller_saved (getRegs final) /\
+             getPc final = ret_addr /\
+             LowerPipeline.machine_ok p_funcs stack_lo stack_hi instrs_stackalloc_and_print mH' 
+               Rdata Rexec final) /\
+           final.(getLog) = output_event :: initial.(getLog)).
+Proof.
+  assert (spec := @stackalloc_and_print_ok Words32Naive.word mem word_ok' mem_ok).
+  cbv [ProgramLogic.program_logic_goal_for] in spec.
+  specialize (spec nil). cbv [ct_spec_of_stackalloc_and_print] in spec.
+  intros.
+  destruct (@compiler_correct_wp _ _ Words32Naive.word mem _ ext_spec _ _ _ ext_spec_ok _ _ _ _ _ word_ok _ _ RV32I _ compile_ext_call leak_ext_call compile_ext_call_correct compile_ext_call_length fs_stackalloc_and_print instrs_stackalloc_and_print finfo_stackalloc_and_print req_stack_size_stackalloc_and_print fname_stackalloc_and_print f_rel_pos_stackalloc_and_print p_funcs stack_hi) as [f [pick_sp H] ].
+  { simpl. reflexivity. }
+  { vm_compute. reflexivity. }
+  specialize (spec pick_sp). destruct spec as [output_event spec].
+  exists output_event. intros.
+  cbv [FlatToRiscvCommon.runsTo].
+  specialize (spec nil (getLog initial) m ltac:(assumption)).
+  eapply runsToNonDet.runsTo_weaken.
+  1: eapply H with (*this is just the post of spec*)
+    (post := (fun (k' : trace) (T : io_trace) (_ : mem) (_ : list Words32Naive.word) =>
+                predicts pick_sp (rev k') -> T = output_event :: getLog initial)).
+  13: { simpl. intros.
+        destruct H9 as [kH'' [mH' [retvals [kL'' [H9 [H10 [H11 [H12 [H13 [H14 [H15 H16] ] ] ] ] ] ] ] ] ] ].
+        split.
+        { exists mH', retvals; intuition eauto. cbv [post]. reflexivity. }
+        { apply H10. instantiate (1 := []). rewrite app_nil_r. assumption. } }
+  all: try eassumption.
+  4,5: reflexivity.
+  { simpl. repeat constructor.
+    all: intros H'; repeat (destruct H' as [H'|H']; try congruence); auto. }
+  { eapply WeakestPreconditionProperties.Proper_call.
+    2: eapply spec.
+    cbv [Morphisms.pointwise_relation Basics.impl]. intros.
+    clear H. destruct H9 as [k'' [H11 H12] ]. apply H12. subst. rewrite app_nil_r in H10.
+    assumption. }
+  { reflexivity. }
+Qed.
+
+Print Assumptions stackalloc_and_print_ct.
+
+(*
+PropExtensionality.propositional_extensionality : forall P Q : Prop, P <-> Q -> P = Q
+mem_ok : map.ok mem
+mem : map.map Words32Naive.word byte
+localsL_ok : map.ok localsL
+localsL : map.map Z Words32Naive.word
+FunctionalExtensionality.functional_extensionality_dep
+  : forall (A : Type) (B : A -> Type) (f g : forall x : A, B x), (forall x : A, f x = g x) -> f = g
+envH_ok : map.ok envH
+envH : map.map string (list string * list string * cmd)
+ *)
