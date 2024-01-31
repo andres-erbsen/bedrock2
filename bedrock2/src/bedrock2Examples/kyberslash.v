@@ -176,7 +176,8 @@ Section WithWord.
           2: { rewrite word.unsigned_of_Z_0 in H6. exfalso. auto. }
           rewrite word.unsigned_ltu in E. apply Z.ltb_lt in E.
           Check @array_index_nat_inbounds.
-           seprewrite_in (@array_index_nat_inbounds _ _ _ _ _ _ _ ptsto (word.of_Z 1) Byte.x00 x x3 (Z.to_nat (word.unsigned x1))) H5. Search x.
+          eassert (H5' := H5).
+          seprewrite_in (@array_index_nat_inbounds _ _ _ _ _ _ _ ptsto (word.of_Z 1) Byte.x00 x x3 (Z.to_nat (word.unsigned x1))) H5. Search x.
           { ZnWords. }
           replace (@word.of_Z _ word (@word.unsigned _ word (word.of_Z 1) * Z.of_nat (Z.to_nat (word.unsigned x1)))) with x1 in *.
           2: { Search (Z.of_nat (Z.to_nat _)). rewrite Z2Nat.id.
@@ -191,9 +192,35 @@ Section WithWord.
                Search (?a mod ?b = ?a). rewrite Z.mod_small; blia. }
           ecancel_assumption. }
         repeat straightline. (* neat, why did that work now? *)
-        
-          
-          
+        refine ((Loops.tailrec
+                 (* types of ghost variables*) (let c := HList.polymorphic_list.cons in c _ (c _ HList.polymorphic_list.nil))
+                   (* program variables *) ("j" :: "i" :: "a_coeffs" :: "msg" :: nil))%string
+                (fun vj msg_vals a_coeffs_vals k t m j i a_coeffs msg =>
+                   PrimitivePair.pair.mk
+                     (List.length a_coeffs_vals = Z.to_nat KYBER_N /\
+                      List.length msg_vals = Z.to_nat KYBER_INDCPA_MSGBYTES /\
+                        ((array scalar8 (word.of_Z 1) msg msg_vals) * (array scalar16 (word.of_Z 2) a_coeffs a_coeffs_vals) * R)%sep m 
+                       /\ vj = word.wrap 8 - word.unsigned j) (* precondition *)
+                     (fun K T M J I A_COEFFS MSG => (*postcondition*) 
+                        T = t /\ A_COEFFS = a_coeffs /\ MSG = msg)) 
+                (fun n m => 0 <= n < m) (* well_founded relation *)
+                _ _ _ _ _ _ _);
+        cbn [HList.hlist.foralls HList.tuple.foralls
+               HList.hlist.existss HList.tuple.existss
+               HList.hlist.apply  HList.tuple.apply
+               HList.hlist
+               List.repeat Datatypes.length
+               HList.polymorphic_list.repeat HList.polymorphic_list.length
+               PrimitivePair.pair._1 PrimitivePair.pair._2] in *.
+        { cbv [Loops.enforce]; cbn.
+          subst l.
+          repeat (rewrite ?map.get_put_dec, ?map.get_remove_dec; cbn). split.
+          { exact eq_refl. }
+          { eapply map.map_ext; intros k0.
+            repeat (rewrite ?map.get_put_dec, ?map.get_remove_dec, ?map.get_empty; cbn -[String.eqb]).
+            repeat (destruct String.eqb; trivial). } }
+        { exact (Z.lt_wf _). }
+        { (*have to do something nontrivial here; seprewrite the other way.*) repeat (straightline || intuition eauto). straightline. }
                { blia. }
                { blia.
                  { 
