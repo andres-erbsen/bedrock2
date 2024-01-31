@@ -110,6 +110,7 @@ Section WithWord.
                    k' = app k'' k /\ k'' = f msg a_coeffs KYBER_N).
 
     Require Import bedrock2.ZnWords.
+    From coqutil.Macros Require Import symmetry.
 
     
     Lemma poly_tomsg_ok : program_logic_goal_for_function! poly_tomsg.
@@ -170,26 +171,29 @@ Section WithWord.
           eauto. }
         repeat straightline.
         (*finally we do something interesting*)
+        destruct (word.ltu x1 _) eqn:E.
+        2: { rewrite word.unsigned_of_Z_0 in H6. exfalso. auto. }
+        rewrite word.unsigned_ltu in E. apply Z.ltb_lt in E.
+        assert (nsmall: (Z.to_nat (word.unsigned x1) < Datatypes.length x)%nat) by ZnWords.
+        assert (Ex1: x1 = @word.of_Z _ word (@word.unsigned _ word (word.of_Z 1) * Z.of_nat (Z.to_nat (word.unsigned x1)))).
+          { Search (Z.of_nat (Z.to_nat _)). rewrite Z2Nat.id.
+            2: { assert (Hnonneg := word.unsigned_range x1 ). blia. }
+            Search (word.unsigned _ * word.unsigned _). Search word.unsigned.
+            apply word.unsigned_inj. Search (word.unsigned (word.of_Z _)).
+            repeat rewrite word.unsigned_of_Z. cbv [word.wrap].
+            Search ((_ mod _ * _) mod _).
+            rewrite Z.mul_mod_idemp_l.
+            2: { Search (_ ^ _ <> 0). apply word.modulus_nonzero. }
+            assert (Hx1 := word.unsigned_range x1).
+            Search (?a mod ?b = ?a). rewrite Z.mod_small; blia. }
         eapply Scalars.store_one_of_sep.
         { Check (array_address_inbounds ptsto (word.of_Z 1) x x3 (word.add x3 x1)). Search Init.Byte.byte.
-          destruct (word.ltu x1 _) eqn:E.
-          2: { rewrite word.unsigned_of_Z_0 in H6. exfalso. auto. }
-          rewrite word.unsigned_ltu in E. apply Z.ltb_lt in E.
           Check @array_index_nat_inbounds.
           eassert (H5' := H5).
           seprewrite_in (@array_index_nat_inbounds _ _ _ _ _ _ _ ptsto (word.of_Z 1) Byte.x00 x x3 (Z.to_nat (word.unsigned x1))) H5. Search x.
           { ZnWords. }
-          replace (@word.of_Z _ word (@word.unsigned _ word (word.of_Z 1) * Z.of_nat (Z.to_nat (word.unsigned x1)))) with x1 in *.
-          2: { Search (Z.of_nat (Z.to_nat _)). rewrite Z2Nat.id.
-               2: { assert (Hnonneg := word.unsigned_range x1 ). blia. }
-               Search (word.unsigned _ * word.unsigned _). Search word.unsigned.
-               apply word.unsigned_inj. Search (word.unsigned (word.of_Z _)).
-               repeat rewrite word.unsigned_of_Z. cbv [word.wrap].
-               Search ((_ mod _ * _) mod _).
-               rewrite Z.mul_mod_idemp_l.
-               2: { Search (_ ^ _ <> 0). apply word.modulus_nonzero. }
-               assert (Hx1 := word.unsigned_range x1).
-               Search (?a mod ?b = ?a). rewrite Z.mod_small; blia. }
+          
+          rewrite <- Ex1 in H5.
           ecancel_assumption. }
         repeat straightline. (* neat, why did that work now? *)
         refine ((Loops.tailrec
@@ -220,7 +224,82 @@ Section WithWord.
             repeat (rewrite ?map.get_put_dec, ?map.get_remove_dec, ?map.get_empty; cbn -[String.eqb]).
             repeat (destruct String.eqb; trivial). } }
         { exact (Z.lt_wf _). }
-        { (*have to do something nontrivial here; seprewrite the other way.*) repeat (straightline || intuition eauto). straightline. }
+        { Check array_index_nat_inbounds. Search (Lift1Prop.iff1 (sep _ _) (sep _ _)).
+          seprewrite_in (symmetry! @array_cons) H7.
+          seprewrite_in @sep_comm H7.
+          remember (Z.to_nat (word.unsigned x1)) as n eqn:En.
+          Check array_append.
+          rewrite Ex1 in H7.
+          replace (Z.of_nat n) with (Z.of_nat (List.length (List.firstn n x))) in H7.
+          2: { rewrite List.firstn_length. blia. }
+          seprewrite_in (symmetry! @array_append) H7. subst.
+          repeat split. 3: ecancel_assumption.
+          { ZnWords. }
+          { repeat rewrite List.app_length. cbn [Datatypes.length]. rewrite List.firstn_length.
+            rewrite List.skipn_length. blia. } }
+        { repeat straightline. eexists. eexists. split.
+          { repeat straightline. eexists. split.
+            { subst localsmap. cbv [reconstruct].
+            cbn [HList.tuple.of_list]. cbv [map.putmany_of_tuple]. simpl.
+            Search (map.get (map.put _)). Search map.get. rewrite map.get_put_same.
+            reflexivity. }
+            repeat straightline. }
+          split.
+          2: { repeat straightline. }
+          repeat straightline. eexists. eexists. split.
+          { repeat straightline. eexists. split.
+            { subst localsmap. cbv [reconstruct].
+            cbn [HList.tuple.of_list]. cbv [map.putmany_of_tuple]. simpl.
+            Search (map.get (map.put _)). Search map.get. rewrite map.get_put_diff by congruence.
+            rewrite map.get_put_diff by congruence. rewrite map.get_put_same. reflexivity. }
+            repeat straightline. eexists. split.
+            { subst localsmap. cbv [reconstruct].
+            cbn [HList.tuple.of_list]. cbv [map.putmany_of_tuple]. simpl.
+            Search (map.get (map.put _)). Search map.get. rewrite map.get_put_diff by congruence.
+            rewrite map.get_put_same. reflexivity. }
+            repeat straightline. eexists. split.
+            { subst localsmap. cbv [reconstruct].
+            cbn [HList.tuple.of_list]. cbv [map.putmany_of_tuple]. simpl.
+            rewrite map.get_put_same. reflexivity. }
+            repeat straightline.
+            destruct (word.ltu _ _) eqn:Ex6.
+            2: { rewrite word.unsigned_of_Z_0 in H11. exfalso. auto. }
+            rewrite word.unsigned_ltu in Ex6. apply Z.ltb_lt in Ex6.
+            rewrite 
+            eexists. split.
+            { eapply load_two_of_sep. Search load. repeat straightline.
+            intros.
+          split; [|split; [|split] ].
+          3: { subst. Unshelve. 4: { exact ((List.firstn n x ++ Byte.byte.of_Z (word.unsigned v1) :: List.skipn (S n) x)%list). seprewrite @sep_assoc. H7. eapply H7. ecancel_assumption.
+          replace x1 with (@word.of_Z _ word (@word.unsigned _ word (word.of_Z 1) * Z.of_nat (Datatypes.length (List.firstn n x)))) in H7.
+          2: { rewrite List.firstn_length. replace (Init.Nat.min n (Datatypes.length x)) with n by blia.
+               subst. ZnWords.
+          { 
+          forget 4 as x.
+          replace x1 with (word.of_Z (word.unsigned size * Z.of_nat (Datatypes.length xs)))
+          seprewrite_in @sep_assoc H7.
+          seprewrite_in (symmetry! @array_append) H7.
+          Check array_index_nat_inbounds.
+          seprewrite_in @sep_assoc H7.
+          seprewrite_in @sep_assoc H7. seprewrite_in @sep_assoc H7.
+          remember (Z.to_nat (word.unsigned x1)) as n eqn:En.
+          remember (List.firstn n x ++ (Byte.byte.of_Z (word.unsigned v1)) :: List.skipn (S n) x)%list as x' eqn:Ex'.
+          Check array_index_nat_inbounds.
+          replace (Byte.byte.of_Z (word.unsigned v1)) with (List.hd Byte.x00 (List.skipn n x')) in H7.
+          2: { subst. rewrite List.skipn_app_r.
+               { reflexivity. }
+               Search (Datatypes.length (List.firstn _ _)).
+               rewrite List.firstn_length. blia. }
+          seprewrite_in (symmetry! @array_cons) H7. Search array.
+          seprewrite_in (symmetry! @array_append) H7.
+          replace (List.firstn n x) with (List.firstn n x') in H7.
+          
+          2: { 
+               Search (length x).
+               Search x. Search KYBER_INDCPA_MSGBYTES.
+          Check sep_assoc.
+          Search (list _ -> list _).
+          seprewrite_in (symmetry! @array_index_nat_inbounds) H7.  _ _ _ _ _ _ _ ptsto (word.of_Z 1) Byte.x00 x x3 (Z.to_nat (word.unsigned x1))) H7. (*have to do something nontrivial here; seprewrite the other way.*) repeat (straightline || intuition eauto). straightline. }
                { blia. }
                { blia.
                  { 
