@@ -218,6 +218,7 @@ Section WithWord.
                               exists MSG_VALS A_COEFFS_VALS,
                                 KYBER_N = Z.of_nat (List.length A_COEFFS_VALS) /\
                                   KYBER_INDCPA_MSGBYTES = Z.of_nat (List.length MSG_VALS) /\
+                                  I = x1 /\
                             ((array scalar8 (word.of_Z 1) msg MSG_VALS) * (array scalar16 (word.of_Z 2) a_coeffs A_COEFFS_VALS) * R)%sep M
                     )) 
                     (fun n m => 0 <= n < m) (* well_founded relation *)
@@ -325,7 +326,7 @@ Section WithWord.
                   enough (word.wrap 8 * (word.unsigned x1 + 1) <= KYBER_N).
                   { blia. }
                   assert (word.unsigned x1 + 1 <= KYBER_N / word.wrap 8) by blia.
-                  Search (_ * _ <= _ * _). apply Zmult_le_compat_l with (p := word.wrap 8) in H15; try blia.
+                  Search (_ * _ <= _ * _). apply Zmult_le_compat_l with (p := word.wrap 8) in H16; try blia.
                   eapply Z.le_trans. 1: eassumption. Search (_ * (_ / _) <= _).
                   apply Z.mul_div_le. blia. }
                 eauto. }
@@ -436,28 +437,25 @@ Section WithWord.
                 blia. }
               rewrite word.unsigned_of_Z in Ex6. cbv [word.wrap] in *.
               rewrite Z.mod_small in * by blia.
-              eexists. eexists. eexists. repeat split.
-              3: ecancel_assumption.
-              all: intuition eauto.
-              { repeat rewrite List.app_length. cbn [Datatypes.length].
+              eexists. eexists. eexists. split.
+              { split; [|split; [|split; [|split] ] ]. 4: ecancel_assumption.
+                all: intuition eauto.
+                repeat rewrite List.app_length. cbn [List.length].
                 rewrite List.firstn_length. rewrite List.skipn_length. blia. }
+              split.
               { subst l6 l5 l4 l3 l2 l1 l0 l localsmap. rewrite word.unsigned_add.
                 clear H12. cbv [word.wrap]. rewrite word.unsigned_of_Z. cbv [word.wrap].
-                rewrite (Z.mod_small 1) by blia.
-                enough ((word.unsigned x6 + 1) mod 2 ^ width <= word.unsigned x6 + 1).
+                rewrite (Z.mod_small 1) by blia. subst v0.
+                rewrite (Z.mod_small 8) by blia. rewrite Z.mod_small.
                 { blia. }
-                apply Z.mod_le; try blia. assert (sth:= word.unsigned_range x6). blia. }
-              { subst l6 l5 l4 l3 l2 l1 l0 l localsmap. rewrite word.unsigned_add.
-                clear H12. subst v0. rewrite word.unsigned_of_Z.
-                cbv [word.wrap]. rewrite (Z.mod_small 1) by blia. rewrite (Z.mod_small 8) by blia.
-                rewrite Z.mod_small.
-                { blia. }
-                pose proof (word.unsigned_range x6). blia. } }
+                pose proof (word.unsigned_range x6). blia. }
             (*postcondition?*)
-            { intros. intuition. eexists. eexists. split; [|split]. 3: ecancel_assumption.
-              all: auto.
-          } }
-          repeat straightline. eexists. eexists. split.
+              intros. assumption. }
+            intros. intuition. eexists. eexists. split; [|split; [|split] ].
+            4: ecancel_assumption.
+            all: auto.
+        }
+        repeat straightline. eexists. eexists. split.
           { repeat straightline. eexists. split.
             { cbv [reconstruct].
               cbn [HList.tuple.of_list]. cbv [map.putmany_of_tuple]. simpl.
@@ -477,7 +475,46 @@ Section WithWord.
           eexists. eexists. eexists. split.
           { split; [|split; [|split] ].
             3: ecancel_assumption.
-            all: eauto.
+            all: eauto. }
+          split.
+          { subst v0.
+            assert (8 < 2 ^ width).
+            { assert (X := Z.pow_le_mono_r 2 4 width). specialize (X ltac:(blia) ltac:(blia)).
+              blia. }
+            assert (0 < word.unsigned (word:=word) (word.of_Z 8)).
+            { rewrite word.unsigned_of_Z. cbv [word.wrap].
+              rewrite Z.mod_small by blia. blia. }
+            remember (word.divu _ _) as cow.
+            rewrite word.unsigned_add. rewrite word.unsigned_of_Z.
+            cbv [word.wrap]. rewrite (Z.mod_small 1) by blia.
+            rewrite (Z.mod_small (word.unsigned x1 + 1)).
+            { blia. }
+            pose proof (word.unsigned_range x1). split; try blia.
+            pose proof (word.unsigned_range cow). blia. }
+          repeat straightline. eexists. eexists. split; [|split].
+          3: ecancel_assumption. all: assumption. }
+        intros. intuition. eexists. eexists. split; [|split].
+        3: ecancel_assumption. all: assumption. }
+      repeat straightline. admit.
+            split.
+            { 
+              enough ((word.unsigned x1 + word.wrap 1) mod 2 ^ width <= word.unsigned x1 + 1).
+              { blia. }
+              cbv [word.wrap]. rewrite (Z.mod_small 1) by blia. apply Z.mod_le; try blia.
+              pose proof (word.unsigned_range x1). blia. }
+            destruct (
+              
+              ZnWords. blia.
+            Search x1.
+            
+            admit. }
+          admit. }
+        admit. }
+      admit.
+            { split.
+            { 
+            clear -
+            split; try blia.
             3: { repeat straightline. Unshelve.
                  4: { exact ((List.firstn (Z.to_nat (word.unsigned x1)) x ++
                                 Byte.byte.of_Z (word.unsigned (word.of_Z (word:=word)0))
