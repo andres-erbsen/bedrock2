@@ -72,6 +72,22 @@ Section WithWord.
             coq:(cmd.unset "j")
           }
       }.
+
+  (* fi and fj will end up just being the identity and increment functions, respectively.
+     really no reason to take them as inputs here, except to illustrate how this would work 
+     with a loop whose state evolves in a more complicated way. *)
+  Fixpoint get_inner_trace f fi fj (i j : word) (vj : nat) : trace :=
+    match vj with
+    | S vj' => get_inner_trace f fi fj (fi i j) (fj i j) vj' ++ f i j
+    | O => nil
+    end%list.
+
+  Fixpoint get_outer_trace f fi (i : word) (vi : nat) : trace :=
+    match vi with
+    | S vi' => get_outer_trace f fi (fi i) vi' ++ f i
+    | O => nil
+    end%list.
+    
   
   (*Definition bad_poly_tomsg :=
     func! (msg, a_coeffs) {
@@ -128,12 +144,13 @@ Section WithWord.
                         KYBER_INDCPA_MSGBYTES = Z.of_nat (List.length msg_vals) /\
                         ((array scalar8 (word.of_Z 1) msg msg_vals) * (array scalar16 (word.of_Z 2) a_coeffs a_coeffs_vals) * R)%sep m 
                        /\ vi = @word.unsigned _ word (word.divu (word.of_Z KYBER_N) (word.of_Z 8)) - word.unsigned i) (* precondition *)
-                     (fun K T M I A_COEFFS MSG => (*postcondition*) 
+                     (fun K T M I A_COEFFS MSG => (*postcondition*)
                         T = t /\ A_COEFFS = a_coeffs /\ MSG = msg /\
                           exists MSG_VALS A_COEFFS_VALS,
                             KYBER_N = Z.of_nat (List.length A_COEFFS_VALS) /\
                               KYBER_INDCPA_MSGBYTES = Z.of_nat (List.length MSG_VALS) /\
-                            ((array scalar8 (word.of_Z 1) msg MSG_VALS) * (array scalar16 (word.of_Z 2) a_coeffs A_COEFFS_VALS) * R)%sep M
+                              ((array scalar8 (word.of_Z 1) msg MSG_VALS) * (array scalar16 (word.of_Z 2) a_coeffs A_COEFFS_VALS) * R)%sep M /\
+                              K = (get_outer_trace _ _ i (Z.to_nat vi) ++ k)%list
                 )) 
                 (fun n m => 0 <= n < m) (* well_founded relation *)
                 _ _ _ _ _ _ _);
@@ -219,7 +236,8 @@ Section WithWord.
                                 KYBER_N = Z.of_nat (List.length A_COEFFS_VALS) /\
                                   KYBER_INDCPA_MSGBYTES = Z.of_nat (List.length MSG_VALS) /\
                                   I = x1 /\
-                            ((array scalar8 (word.of_Z 1) msg MSG_VALS) * (array scalar16 (word.of_Z 2) a_coeffs A_COEFFS_VALS) * R)%sep M
+                                  ((array scalar8 (word.of_Z 1) msg MSG_VALS) * (array scalar16 (word.of_Z 2) a_coeffs A_COEFFS_VALS) * R)%sep M /\
+                                  K = (get_inner_trace _ _ _ i j (Z.to_nat vj) ++ k)%list
                     )) 
                     (fun n m => 0 <= n < m) (* well_founded relation *)
                     _ _ _ _ _ _ _);
@@ -450,7 +468,15 @@ Section WithWord.
                 { blia. }
                 pose proof (word.unsigned_range x6). blia. }
             (*postcondition?*)
-              intros. assumption. }
+              intros. intuition.
+              destruct H18 as [MSG_VALS [A_COEFFS_VALS [H18 [H19 [H20 [H21 H22] ] ] ] ] ].
+              eexists. eexists. split; [|split; [|split; [|split] ] ].
+              4: ecancel_assumption.
+              1,2,3: auto.
+              
+              subst.
+              eexists. eexists.
+              fwd. intuition. fwd. assumption. }
             intros. intuition. eexists. eexists. split; [|split; [|split] ].
             4: ecancel_assumption.
             all: auto.
@@ -467,7 +493,7 @@ Section WithWord.
             subst l l0.
             repeat (rewrite ?map.get_put_dec, ?map.get_remove_dec; cbn). split.
             { exact eq_refl. }
-            { eapply map.map_ext; intros k0.
+            { eapply map.map_ext; intros K0.
               repeat (rewrite ?map.get_put_dec, ?map.get_remove_dec, ?map.get_empty; cbn -[String.eqb]).
               repeat (destruct String.eqb; trivial). } }
           (*postcondition*)
