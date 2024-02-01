@@ -47,6 +47,7 @@ Section WithWord.
   Context {env : map.map string (list string * list string * cmd)}.
   Context {word_ok: word.ok word} {mem_ok: map.ok mem} {locals_ok: map.ok locals} {env_ok : map.ok env}.
   Context {ext_spec: ExtSpec} {ext_spec_ok : ext_spec.ok ext_spec}.
+  Context (width_big: 4 <= width). (*to avoid division by zero*)
   Context (KYBER_N KYBER_Q KYBER_INDCPA_MSGBYTES : Z).
   (* ^is this how to do global constants in bedrock2? *) Print expr.expr.
   
@@ -122,7 +123,7 @@ Section WithWord.
                 (fun vi msg_vals a_coeffs_vals k t m i a_coeffs msg =>
                    PrimitivePair.pair.mk
                      (List.length a_coeffs_vals = Z.to_nat KYBER_N /\
-                      List.length msg_vals = Z.to_nat KYBER_INDCPA_MSGBYTES /\
+                        List.length msg_vals = Z.to_nat KYBER_INDCPA_MSGBYTES /\
                         ((array scalar8 (word.of_Z 1) msg msg_vals) * (array scalar16 (word.of_Z 2) a_coeffs a_coeffs_vals) * R)%sep m 
                        /\ vi = @word.unsigned _ word (word.divu (word.of_Z KYBER_N) (word.of_Z 8)) - word.unsigned i) (* precondition *)
                      (fun K T M I A_COEFFS MSG => (*postcondition*) 
@@ -174,7 +175,7 @@ Section WithWord.
         destruct (word.ltu x1 _) eqn:E.
         2: { rewrite word.unsigned_of_Z_0 in H6. exfalso. auto. }
         rewrite word.unsigned_ltu in E. apply Z.ltb_lt in E.
-        assert (nsmall: (Z.to_nat (word.unsigned x1) < Datatypes.length x)%nat) by ZnWords.
+        assert (nsmall: (0 <= Z.to_nat (word.unsigned x1) < Datatypes.length x)%nat) by ZnWords.
         assert (Ex1: x1 = @word.of_Z _ word (@word.unsigned _ word (word.of_Z 1) * Z.of_nat (Z.to_nat (word.unsigned x1)))).
           { Search (Z.of_nat (Z.to_nat _)). rewrite Z2Nat.id.
             2: { assert (Hnonneg := word.unsigned_range x1 ). blia. }
@@ -189,7 +190,6 @@ Section WithWord.
         eapply Scalars.store_one_of_sep.
         { Check (array_address_inbounds ptsto (word.of_Z 1) x x3 (word.add x3 x1)). Search Init.Byte.byte.
           Check @array_index_nat_inbounds.
-          eassert (H5' := H5).
           seprewrite_in (@array_index_nat_inbounds _ _ _ _ _ _ _ ptsto (word.of_Z 1) Byte.x00 x x3 (Z.to_nat (word.unsigned x1))) H5. Search x.
           { ZnWords. }
           
@@ -202,7 +202,8 @@ Section WithWord.
                 (fun vj msg_vals a_coeffs_vals k t m j i a_coeffs msg =>
                    PrimitivePair.pair.mk
                      (List.length a_coeffs_vals = Z.to_nat KYBER_N /\
-                      List.length msg_vals = Z.to_nat KYBER_INDCPA_MSGBYTES /\
+                        List.length msg_vals = Z.to_nat KYBER_INDCPA_MSGBYTES /\
+                        i = x1(*value of i before we enter loop*) /\
                         ((array scalar8 (word.of_Z 1) msg msg_vals) * (array scalar16 (word.of_Z 2) a_coeffs a_coeffs_vals) * R)%sep m 
                        /\ vj = word.wrap 8 - word.unsigned j) (* precondition *)
                      (fun K T M J I A_COEFFS MSG => (*postcondition*) 
@@ -263,11 +264,65 @@ Section WithWord.
             rewrite map.get_put_same. reflexivity. }
             repeat straightline.
             destruct (word.ltu _ _) eqn:Ex6.
-            2: { rewrite word.unsigned_of_Z_0 in H11. exfalso. auto. }
+            2: { rewrite word.unsigned_of_Z_0 in H12. exfalso. auto. }
             rewrite word.unsigned_ltu in Ex6. apply Z.ltb_lt in Ex6.
-            rewrite 
             eexists. split.
             { eapply load_two_of_sep. Search load. repeat straightline.
+              remember (word.add (word.mul v3 x1) x6) as n eqn:En.
+              seprewrite_in (@array_index_nat_inbounds _ _ _ _ _ _ _ scalar16 (word.of_Z 2) (word.of_Z 0) x5 x8 (Z.to_nat (word.unsigned n))) H13.
+              2: { repeat straightline. use_sep_assumption. cancel.
+                   cancel_seps_at_indices 1%nat 0%nat.
+                   { f_equal. f_equal. subst v0 n. Search (Z.of_nat (Z.to_nat _)).
+                     rewrite Z2Nat.id.
+                     2: { Search word.unsigned.
+                          assert (Hnonneg:= word.unsigned_range (word.add (word.mul v3 x1) x6)).
+                          blia. }
+                     ZnWords. (*interesting, why did this not work before Z2Nat.id?*) }
+                   ecancel_done. }
+              (*ZnWords hangs here.*)
+              subst. subst v3. subst v0. rewrite H10 in *. clear H10. Search (Z.to_nat _ < Z.to_nat _)%nat.
+              assert (Hnonneg := word.unsigned_range (word.add (word.mul (word.of_Z 8) x1) x6)).
+              enough ((word.unsigned (word.add (word.mul (word.of_Z 8) x1) x6)) < KYBER_N).
+              { blia. }
+              clear -E Ex6 word_ok width_big H8 H9. Search word.divu. Search word.unsigned (word.add _ _).
+              assert (0 < word.unsigned (word:=word) (word.of_Z 8)).
+              { rewrite word.unsigned_of_Z. cbv [word.wrap]. Search (_ mod _).
+                rewrite Z.mod_small; try split; try blia. Search (_ ^ _ <= _ ^ _).
+                assert (H := Z.pow_le_mono_r 2 4 width). specialize (H ltac:(blia) ltac:(blia)).
+                blia. } Search word.divu.
+              assert (0 < 2 ^ width).
+              { Search (0 < _ ^ _). apply Z.pow_pos_nonneg; blia. }
+              rewrite word.unsigned_add, word.unsigned_mul, word.unsigned_divu in * by blia.
+              rewrite word.unsigned_of_Z in E. cbv [word.wrap] in *.
+              Search ((_ mod _ / _) mod _). Search ((_ mod _ + _) mod _).
+              rewrite Z.add_mod_idemp_l by blia. rewrite word.unsigned_of_Z in *. Search word.divu.
+              assert (word.unsigned x1 < KYBER_N mod 2 ^ width / word.wrap 8).
+              { eapply Z.lt_le_trans. 1: eassumption.
+                Search (_ mod _ <= _). apply Z.mod_le; try blia. Search word.divu.
+                (*Now we are stuck, since we require 0 <= KYBER_N.
+                  Note that a negative KYBER_N meets our preconditions :(
+                  Need to fix that.
+                  Maybe the most natural way to fix it is just to have KYBER_N be a word instead of Z.
+                 *)
+                
+                2: { blia.
+                { 
+              Z.div_mod_to_equations. blia. blia. ZnWords. enough (0 < 2 ^ width).
+              { Z.div_mod_to_equations. ZnWords. blia. clear H1 H2 H3.
+              blia.
+              ZnWords.
+              word.unsigned_mul. ZnWords.
+              ZnWords.
+              apply Z2Nat.inj_lt. blia.
+              Check Z2Nat.inj_lt.
+              { assert .
+                blia. }
+              { ZnWords. blia.
+              ZnWords.
+              ZnWords.
+                     . subst v3. subst. subst v1. subst v2.
+                                            Search word.unsigned.  ZnWords. subst v0 n. remember (word.mul _ _) as X. ZnWords. f_equal. 
+                   cancel_seps_at_indices 0%nat 0%nat. cancel. cancel. cancel. cancel. ecancel_assumption.
             intros.
           split; [|split; [|split] ].
           3: { subst. Unshelve. 4: { exact ((List.firstn n x ++ Byte.byte.of_Z (word.unsigned v1) :: List.skipn (S n) x)%list). seprewrite @sep_assoc. H7. eapply H7. ecancel_assumption.
