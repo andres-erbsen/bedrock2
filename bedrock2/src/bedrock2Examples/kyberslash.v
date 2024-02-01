@@ -102,7 +102,7 @@ Section WithWord.
                    apparently uint -> int casts are implementation-defined when not in range.
                    how confusing.
                    so we should assume that t is in int16_t range.
-                   But then ((int16_t) >> 15) = 0, and the whole thing is a no-op.
+                   But then ((int16_t)t >> 15) = 0, and the whole thing is a no-op.
                    So what?
                    I suppose we just assume the cast just does nothing (aside from changing the type),
                    regardless of the value of t.  That's the only thing that makes that line of code 
@@ -473,15 +473,41 @@ Section WithWord.
               eexists. eexists. split; [|split; [|split; [|split] ] ].
               4: ecancel_assumption.
               1,2,3: auto.
-              
-              subst.
-              eexists. eexists.
-              fwd. intuition. fwd. assumption. }
-            intros. intuition. eexists. eexists. split; [|split; [|split] ].
+              subst v0. replace (Z.to_nat (8 mod 2 ^ width - word.unsigned x6)) with
+                (S (Z.to_nat (8 - word.unsigned (word.add x6 (word.of_Z 1))))).
+              { cbn [get_inner_trace]. 
+                rewrite H22. repeat rewrite app_assoc. Search (_ :: _ ++ _)%list.
+                assert (app_one_cons : forall A (a : A) l, (a :: l = (cons a nil) ++ l)%list).
+                { reflexivity. }
+                clear H22.
+                repeat rewrite <- List.app_assoc. f_equal.
+                { f_equal.
+                  { instantiate (1 := fun _ _ => _). simpl. reflexivity. }
+                  { instantiate (1 := fun _ _ => _). simpl. reflexivity. } }
+                repeat (rewrite List.app_assoc || rewrite (app_one_cons _ _ (_ ++ k)%list)).
+                f_equal.
+                repeat rewrite <- List.app_assoc.
+                instantiate (1 := fun _ _ => _). simpl. reflexivity. }
+              clear H22. rewrite word.unsigned_add. clear H12. cbv [word.wrap].
+              rewrite word.unsigned_of_Z. cbv [word.wrap]. rewrite (Z.mod_small 1) by blia.
+              rewrite (Z.mod_small 8) by blia. rewrite Z.mod_small.
+              { blia. }
+              pose proof (word.unsigned_range x6). blia. }
+            intros. intuition. eexists. eexists. split; [|split; [|split; [|split] ] ].
             4: ecancel_assumption.
             all: auto.
-        }
-        repeat straightline. eexists. eexists. split.
+            f_equal.
+            replace (Z.to_nat v0) with O.
+            { simpl. reflexivity. }
+            subst v0. destruct (word.ltu _ _) eqn:Ex6; try congruence.
+            rewrite word.unsigned_ltu in Ex6. apply Z.ltb_nlt in Ex6.
+            rewrite word.unsigned_of_Z in Ex6. cbv [word.wrap] in *.
+            assert (8 < 2 ^ width).
+              { assert (X := Z.pow_le_mono_r 2 4 width). specialize (X ltac:(blia) ltac:(blia)).
+                blia. }
+              rewrite (Z.mod_small 8) in * by blia.
+              blia. }
+          repeat straightline. eexists. eexists. split.
           { repeat straightline. eexists. split.
             { cbv [reconstruct].
               cbn [HList.tuple.of_list]. cbv [map.putmany_of_tuple]. simpl.
@@ -517,8 +543,18 @@ Section WithWord.
             { blia. }
             pose proof (word.unsigned_range x1). split; try blia.
             pose proof (word.unsigned_range cow). blia. }
-          repeat straightline. eexists. eexists. split; [|split].
-          3: ecancel_assumption. all: assumption. }
+          repeat straightline. eexists. eexists. split; [|split; [|split] ].
+          3: ecancel_assumption.
+          1,2: assumption.
+          subst k0. subst k'. subst k''.
+          replace (Z.to_nat v0) with (S (Z.to_nat
+              (word.unsigned (word:=word) (word.divu (word.of_Z KYBER_N) (word.of_Z 8)) -
+                 word.unsigned (word.add x1 (word.of_Z 1))))).
+          { cbn [get_outer_trace].
+            rewrite H17.
+            repeat rewrite <- List.app_assoc. f_equal.
+          simpl in H17.
+        }
         intros. intuition. eexists. eexists. split; [|split].
         3: ecancel_assumption. all: assumption. }
       repeat straightline. admit.
