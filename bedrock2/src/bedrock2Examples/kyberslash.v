@@ -493,7 +493,7 @@ Section WithWord.
             all: auto.
             f_equal.
             replace (Z.to_nat v0) with O.
-            { simpl. reflexivity. }
+            { simpl. instantiate (1 := (_ :: nil)%list). reflexivity. }
             subst v0. destruct (word.ltu _ _) eqn:Ex6; try congruence.
             rewrite word.unsigned_ltu in Ex6. apply Z.ltb_nlt in Ex6.
             rewrite word.unsigned_of_Z in Ex6. cbv [word.wrap] in *.
@@ -574,7 +574,7 @@ Section WithWord.
         3: ecancel_assumption.
         1,2: assumption.
         simpl. replace (Z.to_nat v0) with 0%nat.
-        { cbn [get_outer_trace]. instantiate (1 := (_ :: _ :: nil)%list). reflexivity. }
+        { cbn [get_outer_trace]. instantiate (1 := (_ :: _ :: _ :: nil)%list). reflexivity. }
         destruct (word.ltu x1 _) eqn:E.
         { rewrite word.unsigned_of_Z_1 in H4. congruence. }
         rewrite word.unsigned_ltu in E. apply Z.ltb_nlt in E.
@@ -586,3 +586,4 @@ Section WithWord.
       repeat (rewrite List.app_assoc || rewrite (app_one_cons _ _ (_ ++ k)%list)).
       instantiate (1 := fun _ _ _ => _). reflexivity.
     Qed.
+End WithWord.
