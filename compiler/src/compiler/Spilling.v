@@ -1706,7 +1706,7 @@ Section Spilling.
                        (predicts pick_sp (k20 ++ rev k2'' ++ k2''') ->
                         (forall k1''' f,
                             fst (stransform_stmt_trace e1 pick_sp (s1, rev k1'' ++ k1''', k20, fpval, f)) =
-                              fst (f (rev k1'') (k20 ++ rev k2''))) /\
+                              fst (f (rev k1'') (k20 ++ rev k2''))) /\ (*this is really dumb. wrap it up into one equality.*)
                           (forall k1''' f,
                               predicts (fun k => snd (f (rev k1'' ++ k) (rev k1'') (k20 ++ rev k2''))) k1''' ->
                               predicts (fun k => snd (stransform_stmt_trace e1 pick_sp (s1, k, k20, fpval, (f k)))) (rev k1'' ++ k1''')))).
