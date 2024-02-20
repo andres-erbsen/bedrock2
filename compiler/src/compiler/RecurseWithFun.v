@@ -1,3 +1,5 @@
+(*did jason do this already?  should explore
+  https://github.com/mit-plv/fiat/blob/master/src/Common/Wf1.v*)
 (*almost copied verbatim from the standard library*)
 (*allows for general recursion where one argument to recursive function is a function, without using funext axiom *)
 Section FixPoint.
